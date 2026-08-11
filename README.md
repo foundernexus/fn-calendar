@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# fn-calendar
 
-## Getting Started
+Internal scheduling tool for FounderNexus expert sessions. Members connect their calendar once (Google, Microsoft/Outlook, or iCloud); an admin picks a group, sees when everyone's free, and clicks a slot to send real calendar invites. Replaces the old Mailchimp poll-based scheduling.
 
-First, run the development server:
+This is a **lean V1 / internal prototype** — see the plan doc for full scope and what's deferred.
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Create a Neon Postgres database
+
+1. Go to [neon.tech](https://neon.tech) and create a new project.
+2. Region: **US West**.
+3. Copy the **pooled** connection string (not the direct one) from the project dashboard.
+4. Paste it into `.env.local` as `DATABASE_URL`.
+
+### 3. Create a Nylas sandbox app
+
+1. Go to [dashboard.nylas.com](https://dashboard.nylas.com) and sign up.
+2. Create a new application in the **US region**, **sandbox** tier.
+3. Sandbox apps come with **Google and Microsoft connectors pre-configured** — no separate Google Cloud or Azure OAuth app needed for this POC. iCloud needs no connector setup either; each person connecting an iCloud calendar just needs their own Apple app-specific password, which Nylas's hosted login screen prompts for directly.
+4. Copy the **API key** and **Client ID** into `.env.local` as `NYLAS_API_KEY` and `NYLAS_CLIENT_ID`.
+5. Register `http://localhost:3000/api/nylas/callback` as a callback URI in the Nylas dashboard. After the first Vercel deploy, add the production callback URL there too.
+
+### 4. Fill in `.env.local`
+
+If you don't already have a `.env.local`, copy `.env.example` to `.env.local` and fill in the values from steps 2-3. `ADMIN_EMAILS` is a comma-separated allowlist of emails allowed into `/admin` (e.g. `karin@foundernexus.com,you@foundernexus.com`).
+
+Generate `SESSION_SECRET` (used to sign the admin session cookie) with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### 5. Set up the database
+
+```bash
+npm run db:generate   # generate SQL migration from schema.ts
+npm run db:migrate    # apply it to your Neon database
+npm run db:seed       # insert 4 editable test members (see src/db/seed.ts)
+```
+
+### 6. Run it
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Visit `/connect` to link a test calendar, and `/admin` (with an email from `ADMIN_EMAILS`) to find a time and create a session.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## What this doesn't do (yet)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Member availability-window preferences, a visual free/busy week grid, session-cap enforcement, real auth, Nylas webhooks/RSVP sync, Zoom API integration, or email sending beyond the native calendar invites Nylas triggers. See the plan doc for the full deferred list.
