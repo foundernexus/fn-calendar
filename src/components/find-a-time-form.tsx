@@ -14,7 +14,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ResultsList, type AvailabilityResult, type Slot } from "@/components/results-list";
+import {
+  ResultsList,
+  type AvailabilityResult,
+  type Slot,
+  type SearchedParams,
+} from "@/components/results-list";
 import { CreateEventDialog } from "@/components/create-event-dialog";
 import type { MemberWithConnection } from "@/db/queries";
 import { TIMEZONES } from "@/lib/time";
@@ -46,14 +51,14 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AvailabilityResult | null>(null);
   const [dialogSlot, setDialogSlot] = useState<Slot | null>(null);
-  // Snapshotted at search time, NOT read live from the form below — the
-  // member selection or timezone can change after a search completes (e.g.
-  // the admin unchecks someone, or flips the timezone dropdown) while the
-  // results table is still showing the old search's slots. Without this, the
-  // dialog would create an event for a group/timezone that was never actually
-  // checked for that slot.
-  const [searchedMemberIds, setSearchedMemberIds] = useState<number[]>([]);
-  const [searchedTimezone, setSearchedTimezone] = useState<string>(timezone);
+  // Snapshotted at search time, NOT read live from the form above — every
+  // field here can change after a search completes while the grid is still
+  // showing the old search's results. Without this, the grid could render
+  // against a range/timezone it was never actually searched for, and the
+  // dialog could create an event for a group that was never checked.
+  const [searchedParams, setSearchedParams] = useState<
+    (SearchedParams & { memberIds: number[] }) | null
+  >(null);
 
   function toggleMember(id: number) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -88,8 +93,15 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
         return;
       }
       setResult(data);
-      setSearchedMemberIds(selectedIds);
-      setSearchedTimezone(timezone);
+      setSearchedParams({
+        memberIds: selectedIds,
+        startDate,
+        endDate,
+        workingHoursStart,
+        workingHoursEnd,
+        excludeWeekends,
+        timezone,
+      });
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
@@ -155,6 +167,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
           <div className="space-y-2">
             <Label>Duration</Label>
             <Select
+              items={Object.fromEntries(DURATIONS.map((d) => [String(d), `${d} min`]))}
               value={String(durationMinutes)}
               onValueChange={(v) => v && setDurationMinutes(Number(v))}
             >
@@ -172,7 +185,11 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
           </div>
           <div className="space-y-2">
             <Label>Timezone</Label>
-            <Select value={timezone} onValueChange={(v) => v && setTimezone(v)}>
+            <Select
+              items={Object.fromEntries(TIMEZONES.map((tz) => [tz.value, tz.label]))}
+              value={timezone}
+              onValueChange={(v) => v && setTimezone(v)}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -190,6 +207,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
             <Input
               id="hours-start"
               type="time"
+              step={1800}
               value={workingHoursStart}
               onChange={(e) => setWorkingHoursStart(e.target.value)}
             />
@@ -199,6 +217,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
             <Input
               id="hours-end"
               type="time"
+              step={1800}
               value={workingHoursEnd}
               onChange={(e) => setWorkingHoursEnd(e.target.value)}
             />
@@ -218,14 +237,16 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
         </Button>
       </form>
 
-      {result && <ResultsList result={result} onSelectSlot={setDialogSlot} />}
+      {result && searchedParams && (
+        <ResultsList result={result} searchedParams={searchedParams} onSelectSlot={setDialogSlot} />
+      )}
 
-      {dialogSlot && (
+      {dialogSlot && searchedParams && (
         <CreateEventDialog
           slot={dialogSlot}
-          memberIds={searchedMemberIds}
+          memberIds={searchedParams.memberIds}
           members={members}
-          timezone={searchedTimezone}
+          timezone={searchedParams.timezone}
           onOpenChange={(open) => {
             if (!open) setDialogSlot(null);
           }}

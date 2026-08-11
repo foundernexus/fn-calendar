@@ -8,7 +8,9 @@ import {
   formatSlotRange,
   isValidDateString,
   isValidTimeString,
+  isOnIntervalBoundary,
   TIMEZONES,
+  AVAILABILITY_INTERVAL_MINUTES,
 } from "@/lib/time";
 import { requireAdminSession } from "@/lib/auth/admin";
 
@@ -24,8 +26,14 @@ const bodySchema = z
     startDate: z.string().refine(isValidDateString, "Invalid start date."),
     endDate: z.string().refine(isValidDateString, "Invalid end date."),
     durationMinutes: z.union([z.literal(30), z.literal(45), z.literal(60)]),
-    workingHoursStart: z.string().refine(isValidTimeString, "Invalid start time."),
-    workingHoursEnd: z.string().refine(isValidTimeString, "Invalid end time."),
+    workingHoursStart: z
+      .string()
+      .refine(isValidTimeString, "Invalid start time.")
+      .refine(isOnIntervalBoundary, "Working hours start must be on a 30-minute mark (e.g. 9:00 or 9:30)."),
+    workingHoursEnd: z
+      .string()
+      .refine(isValidTimeString, "Invalid end time.")
+      .refine(isOnIntervalBoundary, "Working hours end must be on a 30-minute mark (e.g. 5:00 or 5:30)."),
     timezone: z.enum(TIMEZONE_VALUES),
     excludeWeekends: z.boolean(),
   })
@@ -36,6 +44,10 @@ const bodySchema = z
   .refine((b) => b.workingHoursEnd > b.workingHoursStart, {
     message: "Working hours end must be after start.",
     path: ["workingHoursEnd"],
+  })
+  .refine((b) => (Date.parse(b.endDate) - Date.parse(b.startDate)) / 86_400_000 <= 60, {
+    message: "Date range can't span more than 60 days.",
+    path: ["endDate"],
   });
 
 export async function POST(request: Request) {
@@ -102,6 +114,10 @@ export async function POST(request: Request) {
       startTime,
       endTime,
       durationMinutes: body.durationMinutes,
+      // Explicit rather than relying on the Nylas wrapper's own default —
+      // the grid's row spacing (AVAILABILITY_INTERVAL_MINUTES) must match
+      // this exactly or slots won't land on the rows the grid generates.
+      intervalMinutes: AVAILABILITY_INTERVAL_MINUTES,
       timezone: body.timezone,
       workingHoursStart: body.workingHoursStart,
       workingHoursEnd: body.workingHoursEnd,

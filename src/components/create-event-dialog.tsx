@@ -129,7 +129,11 @@ export function CreateEventDialog({
           </div>
           <div className="space-y-2">
             <Label>Organizer</Label>
-            <Select value={organizerMemberId} onValueChange={(v) => v && setOrganizerMemberId(v)}>
+            <Select
+              items={Object.fromEntries(connectedMembers.map((m) => [String(m.id), m.fullName]))}
+              value={organizerMemberId}
+              onValueChange={(v) => v && setOrganizerMemberId(v)}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Whose calendar hosts this?" />
               </SelectTrigger>

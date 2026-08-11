@@ -84,7 +84,12 @@ export async function getCollectiveAvailability(params: {
       endTime: params.endTime,
       durationMinutes: params.durationMinutes,
       intervalMinutes: params.intervalMinutes ?? 30,
-      roundTo: 15,
+      // Must match intervalMinutes, not a finer-grained value — the grid
+      // (src/components/availability-grid.tsx) generates its rows by
+      // stepping from workingHoursStart in intervalMinutes increments, so a
+      // returned slot rounded to a finer boundary (e.g. 15 min against a
+      // 30-min grid) can land between rows and silently fail to render.
+      roundTo: params.intervalMinutes ?? 30,
       availabilityRules: {
         availabilityMethod: AvailabilityMethod.Collective,
         buffer: { before: 0, after: 0 },
