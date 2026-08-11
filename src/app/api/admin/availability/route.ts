@@ -4,6 +4,7 @@ import { getActiveConnections, getMembersByIds } from "@/db/queries";
 import { getCollectiveAvailability } from "@/lib/nylas";
 import {
   zonedDateTimeToUnix,
+  nextDayString,
   formatSlotRange,
   isValidDateString,
   isValidTimeString,
@@ -84,8 +85,12 @@ export async function POST(request: Request) {
     });
   }
 
+  // Nylas requires start_time/end_time to be exact multiples of 5 minutes.
+  // Midnight always qualifies (every supported timezone's UTC offset is a
+  // whole number of hours); "23:59" never does — so the end boundary is
+  // built as the NEXT day's midnight, not the last minute of endDate.
   const startTime = zonedDateTimeToUnix(body.startDate, "00:00", body.timezone);
-  const endTime = zonedDateTimeToUnix(body.endDate, "23:59", body.timezone);
+  const endTime = zonedDateTimeToUnix(nextDayString(body.endDate), "00:00", body.timezone);
   if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) {
     return NextResponse.json({ error: "Invalid date range." }, { status: 400 });
   }
@@ -102,7 +107,13 @@ export async function POST(request: Request) {
       workingHoursEnd: body.workingHoursEnd,
       excludeWeekends: body.excludeWeekends,
     });
-  } catch {
+  } catch (err) {
+    console.error("[admin/availability] Nylas availability call failed", {
+      startTime,
+      endTime,
+      participantCount: activeConnections.length,
+      err,
+    });
     return NextResponse.json(
       { error: "Couldn't reach Nylas to check availability. Please try again." },
       { status: 502 }

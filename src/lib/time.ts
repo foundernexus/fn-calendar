@@ -43,6 +43,20 @@ export function zonedDateTimeToUnix(dateStr: string, timeStr: string, timezone: 
   return Math.floor(utcDate.getTime() / 1000);
 }
 
+/** Returns the "YYYY-MM-DD" for the day after `dateStr`. Used to build an
+ * end-of-range boundary as the NEXT day's midnight rather than "23:59" —
+ * Nylas requires start_time/end_time to be exact multiples of 5 minutes, and
+ * while midnight always lands on one (every supported timezone's UTC offset
+ * is a whole number of hours), 23:59 never does. */
+export function nextDayString(dateStr: string) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d + 1));
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function shortZoneName(date: Date, timezone: string) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
