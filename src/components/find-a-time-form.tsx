@@ -14,7 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ResultsList, type AvailabilityResult } from "@/components/results-list";
+import { ResultsList, type AvailabilityResult, type Slot } from "@/components/results-list";
+import { CreateEventDialog } from "@/components/create-event-dialog";
 import type { MemberWithConnection } from "@/db/queries";
 import { TIMEZONES } from "@/lib/time";
 
@@ -44,6 +45,15 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AvailabilityResult | null>(null);
+  const [dialogSlot, setDialogSlot] = useState<Slot | null>(null);
+  // Snapshotted at search time, NOT read live from the form below — the
+  // member selection or timezone can change after a search completes (e.g.
+  // the admin unchecks someone, or flips the timezone dropdown) while the
+  // results table is still showing the old search's slots. Without this, the
+  // dialog would create an event for a group/timezone that was never actually
+  // checked for that slot.
+  const [searchedMemberIds, setSearchedMemberIds] = useState<number[]>([]);
+  const [searchedTimezone, setSearchedTimezone] = useState<string>(timezone);
 
   function toggleMember(id: number) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -78,6 +88,8 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
         return;
       }
       setResult(data);
+      setSearchedMemberIds(selectedIds);
+      setSearchedTimezone(timezone);
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
@@ -206,7 +218,20 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
         </Button>
       </form>
 
-      {result && <ResultsList result={result} />}
+      {result && <ResultsList result={result} onSelectSlot={setDialogSlot} />}
+
+      {dialogSlot && (
+        <CreateEventDialog
+          slot={dialogSlot}
+          memberIds={searchedMemberIds}
+          members={members}
+          timezone={searchedTimezone}
+          onOpenChange={(open) => {
+            if (!open) setDialogSlot(null);
+          }}
+          onCreated={() => setDialogSlot(null)}
+        />
+      )}
     </div>
   );
 }

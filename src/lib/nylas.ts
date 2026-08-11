@@ -117,6 +117,7 @@ export async function createNylasEvent(params: {
   organizerGrantId: string;
   title: string;
   description?: string;
+  meetingUrl?: string;
   startTime: number;
   endTime: number;
   timezone: string;
@@ -128,6 +129,10 @@ export async function createNylasEvent(params: {
     requestBody: {
       title: params.title,
       description: params.description,
+      // `location` (not a typed Zoom/Meet `conferencing` object) since this
+      // is an arbitrary admin-pasted URL of unknown provider — location
+      // reliably shows on the invite regardless of provider.
+      location: params.meetingUrl,
       when: {
         startTime: params.startTime,
         endTime: params.endTime,
