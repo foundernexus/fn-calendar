@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 // `variable` must stay applied via className below even though nothing references
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col">
         <SiteHeader />
         <main className="mx-auto w-full max-w-[1200px] flex-1 px-6">{children}</main>
+        <Toaster />
       </body>
     </html>
   );

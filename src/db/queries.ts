@@ -1,6 +1,23 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "./index";
-import { calendarConnections } from "./schema";
+import { calendarConnections, members } from "./schema";
+import { normalizeEmail } from "@/lib/email";
+
+/** Case-insensitive member lookup — always goes through normalizeEmail so a
+ * mixed-case input never silently misses a stored row. */
+export async function getMemberByEmail(email: string) {
+  const rows = await db
+    .select()
+    .from(members)
+    .where(eq(members.email, normalizeEmail(email)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function getMemberById(id: number) {
+  const rows = await db.select().from(members).where(eq(members.id, id)).limit(1);
+  return rows[0] ?? null;
+}
 
 export type LatestConnectionRow = {
   id: number;
