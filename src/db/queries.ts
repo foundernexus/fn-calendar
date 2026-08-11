@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "./index";
 import { calendarConnections, members } from "./schema";
 import { normalizeEmail } from "@/lib/email";
@@ -17,6 +17,12 @@ export async function getMemberByEmail(email: string) {
 export async function getMemberById(id: number) {
   const rows = await db.select().from(members).where(eq(members.id, id)).limit(1);
   return rows[0] ?? null;
+}
+
+/** Batch member lookup — one query instead of N. */
+export async function getMembersByIds(ids: number[]) {
+  if (ids.length === 0) return [];
+  return db.select().from(members).where(inArray(members.id, ids));
 }
 
 export type LatestConnectionRow = {
@@ -38,6 +44,11 @@ export type LatestConnectionRow = {
  * `getActiveConnections` instead — this one intentionally includes revoked rows.
  */
 export async function getLatestConnections(memberIds?: number[]) {
+  // `undefined` means "no filter, every member"; `[]` means "filter to
+  // nothing" — those are different requests and must not both fall through
+  // to the same unfiltered query.
+  if (memberIds && memberIds.length === 0) return [];
+
   const memberFilter =
     memberIds && memberIds.length > 0
       ? sql`WHERE member_id IN (${sql.join(
@@ -61,4 +72,34 @@ export async function getLatestConnections(memberIds?: number[]) {
 export async function getActiveConnections(memberIds?: number[]) {
   const rows = await getLatestConnections(memberIds);
   return rows.filter((row) => row.connection_status === "connected");
+}
+
+export type MemberWithConnection = {
+  id: number;
+  email: string;
+  fullName: string;
+  connected: boolean;
+  provider: string | null;
+  grantEmail: string | null;
+};
+
+/** Every member, each annotated with whether their latest connection is
+ * currently active — for the admin find-a-time multi-select's connected/not
+ * connected badges. */
+export async function getMembersWithConnectionStatus(): Promise<MemberWithConnection[]> {
+  const allMembers = await db.select().from(members).orderBy(members.fullName);
+  const active = await getActiveConnections(allMembers.map((m) => m.id));
+  const activeByMember = new Map(active.map((row) => [row.member_id, row]));
+
+  return allMembers.map((m) => {
+    const connection = activeByMember.get(m.id);
+    return {
+      id: m.id,
+      email: m.email,
+      fullName: m.fullName,
+      connected: !!connection,
+      provider: connection?.provider ?? null,
+      grantEmail: connection?.grant_email ?? null,
+    };
+  });
 }

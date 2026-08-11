@@ -1,6 +1,11 @@
 import { getMemberByEmail, getActiveConnections } from "@/db/queries";
 import { ConnectForm } from "@/components/connect-form";
 
+// Reads live connection state and must never be statically cached — currently
+// only dynamic as a side effect of reading searchParams before the DB call;
+// making it explicit means it stays correct even if that ordering changes.
+export const dynamic = "force-dynamic";
+
 export default async function ConnectPage({ searchParams }: PageProps<"/connect">) {
   const params = await searchParams;
   const email = typeof params.email === "string" ? params.email : undefined;

@@ -2,8 +2,9 @@
  * Generic HMAC-SHA256 sign/verify for short-lived, tamper-proof payloads
  * (the admin session cookie in Step 4, and the OAuth `state` param carrying a
  * member ID through the Nylas hosted-auth round trip in Step 3). Uses Web
- * Crypto (`crypto.subtle`) rather than Node's `crypto` module so the exact
- * same code runs unmodified in both Edge middleware and Node route handlers.
+ * Crypto (`crypto.subtle`), which works identically in `proxy.ts` (Node
+ * runtime by default as of Next.js 16) and in Route Handlers/Server
+ * Components — no runtime-specific code path needed either way.
  *
  * Every token embeds a `purpose` string alongside its payload so a token
  * minted for one use (e.g. the OAuth `state` param) can't be replayed
@@ -17,6 +18,9 @@ export const TOKEN_PURPOSE = {
   connectState: "connect-state",
   adminSession: "admin-session",
 } as const;
+
+export const ADMIN_COOKIE_NAME = "fn_admin_session";
+export const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
 
 function base64url(bytes: ArrayBuffer | Uint8Array) {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
