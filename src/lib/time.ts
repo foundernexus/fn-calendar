@@ -192,6 +192,39 @@ export function slotMatchesMemberAvailability(
   return start.time >= window.startTime && end.time <= window.endTime;
 }
 
+/** "YYYY-MM-DD" -> the Sunday that starts its week (0=Sunday..6=Saturday,
+ * same convention as dayOfWeek()). Used as the map key for bucketing a
+ * guest's already-booked confirmed sessions into weeks for the weekly-cap
+ * check — any two dates in the same week produce the same key. */
+export function weekStartDateString(dateStr: string) {
+  return addDaysToDateString(dateStr, -dayOfWeek(dateStr));
+}
+
+/** True if booking a guest into `slot` would NOT push them over their own
+ * stated weekly session cap (set on /me) — checked against the week
+ * containing the slot's start, in the guest's OWN timezone (same
+ * own-timezone reasoning as slotMatchesMemberAvailability: "this week" means
+ * the week where THEY are, not the admin's search zone). Only ever applied
+ * to guests, never the session lead — a facilitator's job is running
+ * multiple sessions a week, so capping them by the same field would block
+ * their normal workload the moment they set a cap on their own /me page.
+ *
+ * A guest with no timezone set has never saved anything on /me — same
+ * "never engaged = unrestricted" fallback as the availability check, rather
+ * than blocking everyone by default the moment this shipped. */
+export function slotWithinWeeklyCap(
+  slot: { startUnix: number },
+  memberTimezone: string | null,
+  weeklyCap: number,
+  confirmedCountByWeekStart: Map<string, number>
+) {
+  if (!memberTimezone) return true;
+  const { date } = zonedDateTimeParts(slot.startUnix, memberTimezone);
+  const weekStart = weekStartDateString(date);
+  const existing = confirmedCountByWeekStart.get(weekStart) ?? 0;
+  return existing < weeklyCap;
+}
+
 function shortZoneName(date: Date, timezone: string) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,

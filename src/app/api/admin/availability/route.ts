@@ -1,15 +1,23 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getActiveConnections, getMembersByIds, getMemberAvailabilityForMembers } from "@/db/queries";
+import {
+  getActiveConnections,
+  getMembersByIds,
+  getMemberAvailabilityForMembers,
+  getConfirmedEventsForMembers,
+} from "@/db/queries";
 import { getCollectiveAvailability } from "@/lib/nylas";
 import {
   zonedDateTimeToUnix,
+  zonedDateTimeParts,
   nextDayString,
   formatSlotRange,
   isValidDateString,
   isValidTimeString,
   isOnIntervalBoundary,
   slotMatchesMemberAvailability,
+  slotWithinWeeklyCap,
+  weekStartDateString,
   TIMEZONES,
   AVAILABILITY_INTERVAL_MINUTES,
   type AvailabilityWindow,
@@ -161,21 +169,37 @@ export async function POST(request: Request) {
   }
 
   let slots;
+  let confirmedEvents;
   try {
-    slots = await getCollectiveAvailability({
-      participantEmails,
-      startTime,
-      endTime,
-      durationMinutes: body.durationMinutes,
-      // Explicit rather than relying on the Nylas wrapper's own default —
-      // the grid's row spacing (AVAILABILITY_INTERVAL_MINUTES) must match
-      // this exactly or slots won't land on the rows the grid generates.
-      intervalMinutes: AVAILABILITY_INTERVAL_MINUTES,
-      timezone: body.timezone,
-      workingHoursStart: body.workingHoursStart,
-      workingHoursEnd: body.workingHoursEnd,
-      excludeWeekends: body.excludeWeekends,
-    });
+    [slots, confirmedEvents] = await Promise.all([
+      getCollectiveAvailability({
+        participantEmails,
+        startTime,
+        endTime,
+        durationMinutes: body.durationMinutes,
+        // Explicit rather than relying on the Nylas wrapper's own default —
+        // the grid's row spacing (AVAILABILITY_INTERVAL_MINUTES) must match
+        // this exactly or slots won't land on the rows the grid generates.
+        intervalMinutes: AVAILABILITY_INTERVAL_MINUTES,
+        timezone: body.timezone,
+        workingHoursStart: body.workingHoursStart,
+        workingHoursEnd: body.workingHoursEnd,
+        excludeWeekends: body.excludeWeekends,
+      }),
+      // ±7 day buffer, not ±1: a slot near either edge of [startDate, endDate]
+      // can belong to a week that extends up to 6 days beyond that edge (e.g.
+      // a single-day search on a Monday still needs that whole week's count,
+      // including days after the search range) — a 1-day buffer only covered
+      // slots right at the boundary and silently undercounted everything
+      // else in that same week. 7 days guarantees the full week either side
+      // is covered regardless of which weekday startDate/endDate land on, or
+      // timezone-driven shifts in exactly where a guest's week starts.
+      getConfirmedEventsForMembers(
+        body.guestMemberIds,
+        new Date((startTime - 7 * 86_400) * 1000),
+        new Date((endTime + 7 * 86_400) * 1000)
+      ),
+    ]);
   } catch (err) {
     console.error("[admin/availability] Nylas availability call failed", {
       startTime,
@@ -189,18 +213,44 @@ export async function POST(request: Request) {
     );
   }
 
+  // Every guest's already-booked CONFIRMED sessions, bucketed into weeks (in
+  // their OWN timezone) — see slotWithinWeeklyCap for how this is checked
+  // against each candidate slot below. Guests only, never the organizer —
+  // see slotWithinWeeklyCap's own comment for why.
+  const confirmedCountByMemberAndWeek = new Map<number, Map<string, number>>();
+  for (const row of confirmedEvents) {
+    const memberTimezone = membersById.get(row.memberId)?.timezone;
+    if (!memberTimezone) continue;
+    const { date } = zonedDateTimeParts(Math.floor(row.startsAt.getTime() / 1000), memberTimezone);
+    const weekStart = weekStartDateString(date);
+    const weekMap = confirmedCountByMemberAndWeek.get(row.memberId) ?? new Map<string, number>();
+    weekMap.set(weekStart, (weekMap.get(weekStart) ?? 0) + 1);
+    confirmedCountByMemberAndWeek.set(row.memberId, weekMap);
+  }
+
   // Nylas only knows about real calendar free/busy — it has no idea a member
-  // set "Mondays 2-5pm only" on /me. Every selected member (organizer AND
-  // guests) must individually clear their own stated window for a slot to
-  // survive, checked in each member's own timezone.
-  const availableSlots = slots.filter((slot) =>
-    allSelectedIds.every((id) =>
-      slotMatchesMemberAvailability(
-        { startUnix: slot.startTime, endUnix: slot.endTime },
-        membersById.get(id)?.timezone ?? null,
-        availabilityByMemberId.get(id) ?? []
+  // set "Mondays 2-5pm only" on /me, or that a guest is already at their
+  // weekly session cap. Every selected member (organizer AND guests) must
+  // individually clear their own stated availability window, checked in
+  // each member's own timezone; guests must additionally still have room
+  // under their own weekly cap for the week the slot falls in.
+  const availableSlots = slots.filter(
+    (slot) =>
+      allSelectedIds.every((id) =>
+        slotMatchesMemberAvailability(
+          { startUnix: slot.startTime, endUnix: slot.endTime },
+          membersById.get(id)?.timezone ?? null,
+          availabilityByMemberId.get(id) ?? []
+        )
+      ) &&
+      body.guestMemberIds.every((id) =>
+        slotWithinWeeklyCap(
+          { startUnix: slot.startTime },
+          membersById.get(id)?.timezone ?? null,
+          membersById.get(id)?.weeklySessionCap ?? Infinity,
+          confirmedCountByMemberAndWeek.get(id) ?? new Map()
+        )
       )
-    )
   );
 
   return NextResponse.json({

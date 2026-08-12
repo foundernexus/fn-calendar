@@ -3,10 +3,15 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { events, eventAttendees } from "@/db/schema";
-import { getActiveConnections, getMemberById, getMembersByIds } from "@/db/queries";
+import {
+  getActiveConnections,
+  getMemberById,
+  getMembersByIds,
+  getConfirmedEventsForMembers,
+} from "@/db/queries";
 import { createNylasEvent } from "@/lib/nylas";
 import { computeIdempotencyKey } from "@/lib/idempotency";
-import { TIMEZONES } from "@/lib/time";
+import { TIMEZONES, zonedDateTimeParts, slotWithinWeeklyCap, weekStartDateString } from "@/lib/time";
 import { requireAdminSession } from "@/lib/auth/admin";
 
 const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [string, ...string[]];
@@ -137,6 +142,48 @@ export async function POST(request: Request) {
   const missingIds = guestMemberIds.filter((id) => !guestMembers.some((m) => m.id === id));
   if (missingIds.length > 0) {
     return NextResponse.json({ error: "One or more selected guests no longer exist." }, { status: 400 });
+  }
+
+  // Re-check each guest's weekly session cap here too, not just at search
+  // time — a slot picked from a stale grid, or a race with another admin
+  // booking the same guest elsewhere, could otherwise push someone over
+  // their own stated limit. Never applied to the organizer — see
+  // slotWithinWeeklyCap's own comment for why. ±8 days is comfortably wider
+  // than any single week bucketed in any timezone around this one instant.
+  const confirmedEvents = await getConfirmedEventsForMembers(
+    guestMemberIds,
+    new Date((body.startsAtUnix - 8 * 86_400) * 1000),
+    new Date((body.startsAtUnix + 8 * 86_400) * 1000)
+  );
+  const guestMembersById = new Map(guestMembers.map((m) => [m.id, m]));
+  const confirmedCountByGuestAndWeek = new Map<number, Map<string, number>>();
+  for (const row of confirmedEvents) {
+    const memberTimezone = guestMembersById.get(row.memberId)?.timezone;
+    if (!memberTimezone) continue;
+    const { date } = zonedDateTimeParts(Math.floor(row.startsAt.getTime() / 1000), memberTimezone);
+    const weekStart = weekStartDateString(date);
+    const weekMap = confirmedCountByGuestAndWeek.get(row.memberId) ?? new Map<string, number>();
+    weekMap.set(weekStart, (weekMap.get(weekStart) ?? 0) + 1);
+    confirmedCountByGuestAndWeek.set(row.memberId, weekMap);
+  }
+  const overCapNames = guestMemberIds
+    .filter((id) => {
+      const guest = guestMembersById.get(id);
+      return !slotWithinWeeklyCap(
+        { startUnix: body.startsAtUnix },
+        guest?.timezone ?? null,
+        guest?.weeklySessionCap ?? Infinity,
+        confirmedCountByGuestAndWeek.get(id) ?? new Map()
+      );
+    })
+    .map((id) => guestMembersById.get(id)?.fullName ?? `Member #${id}`);
+  if (overCapNames.length > 0) {
+    return NextResponse.json(
+      {
+        error: `${overCapNames.join(", ")} ${overCapNames.length === 1 ? "is" : "are"} already at their weekly session limit for this week.`,
+      },
+      { status: 400 }
+    );
   }
 
   const endsAtUnix = body.startsAtUnix + body.durationMinutes * 60;

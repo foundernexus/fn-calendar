@@ -9,8 +9,9 @@ export type AvailabilityResult = {
   notConnectedNames: string[];
   error?: string;
   /** True when Nylas found real calendar overlap but it all got filtered out
-   * by someone's stated /me availability window — see api/admin/availability
-   * for how this differs from Nylas finding nothing at all. */
+   * by someone's stated /me availability window or a guest's weekly session
+   * cap — see api/admin/availability for how this differs from Nylas finding
+   * nothing at all. */
   filteredByPreferences?: boolean;
 };
 
@@ -71,7 +72,7 @@ export function ResultsList({
       {result.slots.length === 0 ? (
         <p className="mt-4 text-sm text-foreground">
           {result.filteredByPreferences
-            ? "Everyone's calendar overlaps at some point in this range, but it all falls outside someone's stated availability (set on their /me page). Try adjusting the working hours, or ask them to update their preferences."
+            ? "Everyone's calendar overlaps at some point in this range, but it all falls outside someone's stated availability, or a guest is already at their weekly session limit. Try adjusting the working hours, a different date range, or ask them to update their preferences on /me."
             : "No overlapping free time found in this range."}
         </p>
       ) : (
