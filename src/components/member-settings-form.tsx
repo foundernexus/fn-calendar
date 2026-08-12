@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,7 +70,22 @@ export function MemberSettingsForm({
   initialAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
   connection: { provider: string; grantEmail: string } | null;
 }) {
-  const [timezone, setTimezone] = useState(initialTimezone);
+  // Only ever suggests a browser-detected default when nothing's been saved
+  // yet (initialTimezone is null) — never overwrites a timezone the member
+  // already chose. Computed as the initial state itself, not in an effect —
+  // this is picking a default value, not synchronizing with an external
+  // system, so there's no reason to force an extra render to arrive at it.
+  const [timezone, setTimezone] = useState(() => {
+    if (initialTimezone) return initialTimezone;
+    try {
+      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      return detected && isSupportedTimezone(detected) ? detected : null;
+    } catch {
+      // Intl not available for some reason — leave it unset, the member can
+      // still pick one manually.
+      return null;
+    }
+  });
   const [weeklySessionCap, setWeeklySessionCap] = useState(initialCap);
   const [days, setDays] = useState<Record<number, DayState>>(() =>
     defaultDays(initialAvailability)
@@ -78,19 +93,6 @@ export function MemberSettingsForm({
   const [connection, setConnection] = useState(initialConnection);
   const [submitting, setSubmitting] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
-
-  // Only ever suggests a default when nothing's been saved yet — never
-  // overwrites a timezone the member already chose.
-  useEffect(() => {
-    if (timezone) return;
-    try {
-      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (detected && isSupportedTimezone(detected)) setTimezone(detected);
-    } catch {
-      // Intl not available for some reason — leave it unset, the member can
-      // still pick one manually.
-    }
-  }, [timezone]);
 
   function updateDay(day: number, patch: Partial<DayState>) {
     setDays((prev) => ({ ...prev, [day]: { ...prev[day], ...patch } }));

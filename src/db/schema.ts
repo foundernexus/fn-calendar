@@ -6,6 +6,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  index,
   boolean,
 } from "drizzle-orm/pg-core";
 
@@ -50,22 +51,29 @@ export const members = pgTable("members", {
 // `provider` is plain text (not a fixed enum) — stores whatever Nylas's
 // exchange response reports (google/microsoft/icloud/etc.), so it doesn't
 // need updating if Nylas adds providers later.
-export const calendarConnections = pgTable("calendar_connections", {
-  id: serial("id").primaryKey(),
-  memberId: integer("member_id")
-    .notNull()
-    .references(() => members.id, { onDelete: "cascade" }),
-  nylasGrantId: text("nylas_grant_id").notNull().unique(),
-  provider: text("provider").notNull(),
-  grantEmail: text("grant_email").notNull(),
-  connectionStatus: connectionStatusEnum("connection_status")
-    .notNull()
-    .default("connected"),
-  connectedAt: timestamp("connected_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  revokedAt: timestamp("revoked_at", { withTimezone: true }),
-});
+export const calendarConnections = pgTable(
+  "calendar_connections",
+  {
+    id: serial("id").primaryKey(),
+    memberId: integer("member_id")
+      .notNull()
+      .references(() => members.id, { onDelete: "cascade" }),
+    nylasGrantId: text("nylas_grant_id").notNull().unique(),
+    provider: text("provider").notNull(),
+    grantEmail: text("grant_email").notNull(),
+    connectionStatus: connectionStatusEnum("connection_status")
+      .notNull()
+      .default("connected"),
+    connectedAt: timestamp("connected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  // Postgres doesn't auto-index FK columns, and getLatestConnections (used
+  // on nearly every page load — /connect, /me, /admin/find-a-time) filters
+  // and sorts by member_id on every call.
+  (t) => [index("calendar_connections_member_id_idx").on(t.memberId)]
+);
 
 export const events = pgTable("events", {
   id: serial("id").primaryKey(),
@@ -96,10 +104,9 @@ export const eventAttendees = pgTable(
     eventId: integer("event_id")
       .notNull()
       .references(() => events.id, { onDelete: "cascade" }),
-    // Nullable for historical reasons (a since-reverted design briefly
-    // allowed free-typed guest emails with no member row) — every current
-    // code path always sets this, since guests are member IDs again.
-    memberId: integer("member_id").references(() => members.id),
+    memberId: integer("member_id")
+      .notNull()
+      .references(() => members.id),
     attendeeEmail: text("attendee_email").notNull(),
     responseStatus: attendeeResponseEnum("response_status")
       .notNull()

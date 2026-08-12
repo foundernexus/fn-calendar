@@ -29,6 +29,13 @@
       "when": 1786500551313,
       "tag": "0003_shiny_quentin_quire",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786557393169,
+      "tag": "0004_add_calendar_connections_index_and_attendee_not_null",
+      "breakpoints": true
     }
   ]
 }
