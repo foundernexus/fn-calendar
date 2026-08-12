@@ -20,15 +20,15 @@ export default async function MePage() {
   const connection = activeConnections[0] ?? null;
 
   return (
-    <div className="mx-auto max-w-2xl py-16">
+    <div className="mx-auto max-w-3xl py-8">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Your availability</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
+        <h1 className="text-xl font-bold text-foreground">Your availability</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           Set the days and times you&apos;re available for sessions, and how many
           you&apos;ll take per week.
         </p>
       </div>
-      <div className="mt-8">
+      <div className="mt-5">
         <MemberSettingsForm
           fullName={session.member.fullName}
           timezone={session.member.timezone}

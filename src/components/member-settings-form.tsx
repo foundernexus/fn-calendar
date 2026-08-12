@@ -17,6 +17,15 @@ type DayState = { enabled: boolean; startTime: string; endTime: string };
 // dayOfWeek() in src/lib/time.ts) — this is purely a rendering order.
 const DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const DAY_LABELS: Record<number, string> = {
+  0: "Sun",
+  1: "Mon",
+  2: "Tue",
+  3: "Wed",
+  4: "Thu",
+  5: "Fri",
+  6: "Sat",
+};
+const DAY_LABELS_FULL: Record<number, string> = {
   0: "Sunday",
   1: "Monday",
   2: "Tuesday",
@@ -99,7 +108,7 @@ export function MemberSettingsForm({
     }));
     for (const a of availability) {
       if (a.endTime <= a.startTime) {
-        toast.error(`${DAY_LABELS[a.dayOfWeek]}: end time must be after start time.`);
+        toast.error(`${DAY_LABELS_FULL[a.dayOfWeek]}: end time must be after start time.`);
         return;
       }
     }
@@ -160,106 +169,117 @@ export function MemberSettingsForm({
   }
 
   return (
-    <form onSubmit={handleSave} className="space-y-8">
-      <div className="rounded-lg border border-border bg-card p-6 shadow-card">
-        <p className="text-sm font-medium text-foreground">{fullName}</p>
-        {connection ? (
-          <div className="mt-3 flex items-center gap-2">
-            <Badge className="bg-accent text-accent-foreground">Connected</Badge>
-            <span className="text-sm text-muted-foreground">
-              {providerLabel(connection.provider)} — {connection.grantEmail}
-            </span>
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-destructive">Not connected.</p>
-        )}
-        <div className="mt-4 flex gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={handleReconnect}
-            disabled={reconnecting}
-          >
-            {connection ? "Reconnect" : "Connect calendar"}
-          </Button>
-          {connection && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={handleDisconnect}
-              disabled={submitting}
-            >
-              Disconnect
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-border bg-card p-6 shadow-card">
-        <Label htmlFor="timezone">Your timezone</Label>
-        <div className="mt-2">
-          <TimezoneSelect id="timezone" value={timezone} onChange={setTimezone} />
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-border bg-card p-6 shadow-card">
-        <Label>Weekly availability</Label>
-        <div className="mt-4 space-y-3">
-          {DISPLAY_ORDER.map((day) => {
-            const d = days[day];
-            return (
-              <div key={day} className="flex flex-wrap items-center gap-3">
-                <Switch
-                  checked={d.enabled}
-                  onCheckedChange={(checked) => updateDay(day, { enabled: checked })}
-                />
-                <span className="w-24 text-sm text-foreground">{DAY_LABELS[day]}</span>
-                {d.enabled ? (
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="time"
-                      value={d.startTime}
-                      onChange={(e) => updateDay(day, { startTime: e.target.value })}
-                      className="w-32"
-                    />
-                    <span className="text-muted-foreground">–</span>
-                    <Input
-                      type="time"
-                      value={d.endTime}
-                      onChange={(e) => updateDay(day, { endTime: e.target.value })}
-                      className="w-32"
-                    />
-                  </div>
-                ) : (
-                  <span className="text-sm text-muted-foreground">Unavailable</span>
-                )}
+    <form onSubmit={handleSave}>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[300px_1fr]">
+        {/* Left: identity, connection, timezone, cap — one consolidated card */}
+        <div className="space-y-5 rounded-lg border border-border bg-card p-5 shadow-card">
+          <div>
+            <p className="text-sm font-medium text-foreground">{fullName}</p>
+            {connection ? (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <Badge className="bg-accent text-accent-foreground">Connected</Badge>
+                <span className="text-xs text-muted-foreground">
+                  {providerLabel(connection.provider)} — {connection.grantEmail}
+                </span>
               </div>
-            );
-          })}
+            ) : (
+              <p className="mt-2 text-xs text-destructive">Not connected.</p>
+            )}
+            <div className="mt-3 flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={handleReconnect}
+                disabled={reconnecting}
+              >
+                {connection ? "Reconnect" : "Connect calendar"}
+              </Button>
+              {connection && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleDisconnect}
+                  disabled={submitting}
+                >
+                  Disconnect
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-border pt-5">
+            <Label htmlFor="timezone">Your timezone</Label>
+            <div className="mt-2">
+              <TimezoneSelect id="timezone" value={timezone} onChange={setTimezone} />
+            </div>
+          </div>
+
+          <div className="border-t border-border pt-5">
+            <Label htmlFor="weekly-cap">Sessions per week</Label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              The most sessions you&apos;re willing to take on in a given week.
+            </p>
+            <Input
+              id="weekly-cap"
+              type="number"
+              min={0}
+              max={50}
+              value={weeklySessionCap}
+              onChange={(e) => setWeeklySessionCap(Number(e.target.value))}
+              className="mt-2 w-24"
+            />
+          </div>
+        </div>
+
+        {/* Right: weekly availability */}
+        <div className="rounded-lg border border-border bg-card p-5 shadow-card">
+          <Label>Weekly availability</Label>
+          <div className="mt-3 divide-y divide-border">
+            {DISPLAY_ORDER.map((day) => {
+              const d = days[day];
+              return (
+                <div
+                  key={day}
+                  className="grid grid-cols-[auto_2.75rem_1fr] items-center gap-3 py-2 first:pt-0 last:pb-0"
+                >
+                  <Switch
+                    checked={d.enabled}
+                    onCheckedChange={(checked) => updateDay(day, { enabled: checked })}
+                  />
+                  <span className="text-sm text-foreground">{DAY_LABELS[day]}</span>
+                  {d.enabled ? (
+                    <div className="flex items-center gap-2 justify-self-start">
+                      <Input
+                        type="time"
+                        value={d.startTime}
+                        onChange={(e) => updateDay(day, { startTime: e.target.value })}
+                        className="w-[6.5rem]"
+                      />
+                      <span className="text-muted-foreground">–</span>
+                      <Input
+                        type="time"
+                        value={d.endTime}
+                        onChange={(e) => updateDay(day, { endTime: e.target.value })}
+                        className="w-[6.5rem]"
+                      />
+                    </div>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Unavailable</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-6 shadow-card">
-        <Label htmlFor="weekly-cap">Sessions per week</Label>
-        <p className="mt-1 text-xs text-muted-foreground">
-          The most sessions you&apos;re willing to take on in a given week.
-        </p>
-        <Input
-          id="weekly-cap"
-          type="number"
-          min={0}
-          max={50}
-          value={weeklySessionCap}
-          onChange={(e) => setWeeklySessionCap(Number(e.target.value))}
-          className="mt-2 w-24"
-        />
+      <div className="mt-5 flex justify-end">
+        <Button type="submit" disabled={submitting}>
+          {submitting ? "Saving…" : "Save"}
+        </Button>
       </div>
-
-      <Button type="submit" disabled={submitting}>
-        {submitting ? "Saving…" : "Save"}
-      </Button>
     </form>
   );
 }
