@@ -20,7 +20,8 @@ export function CreateEventDialog({
   slot,
   organizerMemberId,
   organizerName,
-  guestEmails,
+  guestMemberIds,
+  guestNames,
   timezone,
   onOpenChange,
   onCreated,
@@ -28,7 +29,8 @@ export function CreateEventDialog({
   slot: Slot;
   organizerMemberId: number;
   organizerName: string;
-  guestEmails: string[];
+  guestMemberIds: number[];
+  guestNames: string[];
   timezone: string;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
@@ -50,7 +52,7 @@ export function CreateEventDialog({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          guestEmails,
+          guestMemberIds,
           organizerMemberId,
           title,
           description: description || undefined,
@@ -120,9 +122,9 @@ export function CreateEventDialog({
             </div>
             <div>
               <p className="text-xs text-muted-foreground">
-                Guest{guestEmails.length === 1 ? "" : "s"}
+                Guest{guestNames.length === 1 ? "" : "s"}
               </p>
-              <p className="text-foreground">{guestEmails.join(", ")}</p>
+              <p className="text-foreground">{guestNames.join(", ")}</p>
             </div>
           </div>
           <DialogFooter>

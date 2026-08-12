@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getActiveConnections } from "@/db/queries";
+import { getActiveConnections, getMembersByIds } from "@/db/queries";
 import { getCollectiveAvailability } from "@/lib/nylas";
 import {
   zonedDateTimeToUnix,
@@ -19,6 +19,11 @@ const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [string, ...string[]]
 const bodySchema = z
   .object({
     organizerMemberId: z.number().int({ error: "Pick who's leading this session." }),
+    guestMemberIds: z
+      .array(z.number().int())
+      .min(1, "Add at least one guest.")
+      .max(49, "Add at most 49 guests.") // 49 + organizer = Nylas's 50-participant cap
+      .refine((ids) => new Set(ids).size === ids.length, "Duplicate guest selected."),
     startDate: z.string().refine(isValidDateString, "Invalid start date."),
     endDate: z.string().refine(isValidDateString, "Invalid end date."),
     durationMinutes: z.union([z.literal(30), z.literal(45), z.literal(60)]),
@@ -70,16 +75,54 @@ export async function POST(request: Request) {
   }
   const body = parsed.data;
 
-  // Only the session lead's own calendar is checked — guests are free-typed
-  // emails with no calendar connection on file (the whole point: an outside
-  // expert or a member who's never connected shouldn't block scheduling).
-  const [organizerConnection] = await getActiveConnections([body.organizerMemberId]);
+  // The UI only ever offers connected members as options, but that's a
+  // client-side filter, not a guarantee — someone could disconnect between
+  // page load and search. Re-verify server-side rather than trusting it.
+  // Deduped up front — the lead could theoretically also appear in
+  // guestMemberIds (e.g. a stale selection from before they were picked as
+  // lead), and counting the same person twice would desync `checkedCount`/
+  // `totalSelected` from `notConnectedNames`.
+  const allSelectedIds = [...new Set([body.organizerMemberId, ...body.guestMemberIds])];
+  const [activeConnections, selectedMembers] = await Promise.all([
+    getActiveConnections(allSelectedIds),
+    getMembersByIds(allSelectedIds),
+  ]);
+  const connectionByMemberId = new Map(activeConnections.map((c) => [c.member_id, c]));
+  const membersById = new Map(selectedMembers.map((m) => [m.id, m]));
+
+  const organizerConnection = connectionByMemberId.get(body.organizerMemberId);
   if (!organizerConnection) {
     return NextResponse.json({
       slots: [],
+      checkedCount: 0,
+      totalSelected: allSelectedIds.length,
+      notConnectedNames: [],
       error: "The selected session lead isn't connected. Connect their calendar first.",
     });
   }
+
+  const notConnectedNames = allSelectedIds
+    .filter((id) => !connectionByMemberId.has(id))
+    .map((id) => membersById.get(id)?.fullName ?? `Unknown member #${id}`);
+
+  // checkedCount/totalSelected count people (member IDs), not calendars —
+  // keep this in the same unit as allSelectedIds/notConnectedNames above, or
+  // two members sharing a connected account (deduped below by grant_email
+  // for the actual Nylas call) would silently desync the two numbers shown
+  // in the UI.
+  const checkedCount = allSelectedIds.filter((id) => connectionByMemberId.has(id)).length;
+
+  // Dedupe by grant_email, not member ID — two members could theoretically
+  // share a connected account, and Nylas's participants list shouldn't carry
+  // the same email twice.
+  const participantEmails = [
+    ...new Set(
+      allSelectedIds
+        .map((id) => connectionByMemberId.get(id))
+        .filter((c) => c !== undefined)
+        .map((c) => c.grant_email)
+    ),
+  ];
 
   // Nylas requires start_time/end_time to be exact multiples of 5 minutes.
   // Midnight always qualifies (every supported timezone's UTC offset is a
@@ -94,7 +137,7 @@ export async function POST(request: Request) {
   let slots;
   try {
     slots = await getCollectiveAvailability({
-      participantEmails: [organizerConnection.grant_email],
+      participantEmails,
       startTime,
       endTime,
       durationMinutes: body.durationMinutes,
@@ -111,6 +154,7 @@ export async function POST(request: Request) {
     console.error("[admin/availability] Nylas availability call failed", {
       startTime,
       endTime,
+      participantCount: participantEmails.length,
       err,
     });
     return NextResponse.json(
@@ -125,5 +169,8 @@ export async function POST(request: Request) {
       endUnix: slot.endTime,
       label: formatSlotRange(slot.startTime, slot.endTime, body.timezone),
     })),
+    checkedCount,
+    totalSelected: allSelectedIds.length,
+    notConnectedNames,
   });
 }

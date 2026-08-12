@@ -69,9 +69,9 @@ export const events = pgTable("events", {
     .references(() => members.id),
   nylasEventId: text("nylas_event_id").notNull(),
   status: eventStatusEnum("status").notNull().default("confirmed"),
-  // Hash of sorted guest emails + slot start + duration (organizer intentionally
-  // excluded — same guest list + same time is always a duplicate, regardless of
-  // who's leading the session).
+  // Hash of sorted guest member IDs + slot start + duration (organizer
+  // intentionally excluded — same guest list + same time is always a
+  // duplicate, regardless of who's leading the session).
   idempotencyKey: text("idempotency_key").notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -85,8 +85,9 @@ export const eventAttendees = pgTable(
     eventId: integer("event_id")
       .notNull()
       .references(() => events.id, { onDelete: "cascade" }),
-    // Nullable: null for a free-text guest invitee who isn't a seeded member
-    // (e.g. the outside expert, or a member who's never connected a calendar).
+    // Nullable for historical reasons (a since-reverted design briefly
+    // allowed free-typed guest emails with no member row) — every current
+    // code path always sets this, since guests are member IDs again.
     memberId: integer("member_id").references(() => members.id),
     attendeeEmail: text("attendee_email").notNull(),
     responseStatus: attendeeResponseEnum("response_status")
