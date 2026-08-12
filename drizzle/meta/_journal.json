@@ -22,6 +22,13 @@
       "when": 1786495984711,
       "tag": "0002_thick_killraven",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786500551313,
+      "tag": "0003_shiny_quentin_quire",
+      "breakpoints": true
     }
   ]
 }

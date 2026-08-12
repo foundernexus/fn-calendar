@@ -2,8 +2,13 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { calendarConnections } from "@/db/schema";
-import { getMemberById } from "@/db/queries";
-import { verifyValue, TOKEN_PURPOSE } from "@/lib/auth/session";
+import {
+  signValue,
+  verifyValue,
+  TOKEN_PURPOSE,
+  MEMBER_COOKIE_NAME,
+  MEMBER_SESSION_TTL_SECONDS,
+} from "@/lib/auth/session";
 import { exchangeNylasCode } from "@/lib/nylas";
 import { env } from "@/lib/env";
 
@@ -81,12 +86,22 @@ export async function GET(request: Request) {
       },
     });
 
-  // Redirect using the member's registered email (not the Nylas grant's email —
-  // someone may connect a personal Gmail that differs from their registered
-  // address), so the /connect page's status lookup finds the right member row.
-  const member = await getMemberById(statePayload.memberId);
-  const redirectUrl = new URL("/connect", env.APP_URL);
-  if (member) redirectUrl.searchParams.set("email", member.email);
-  redirectUrl.searchParams.set("status", "connected");
-  return NextResponse.redirect(redirectUrl);
+  // A successful connection doubles as login (see /me) — sign a member
+  // session and send them straight to their settings page instead of back
+  // to /connect.
+  const memberSessionToken = await signValue(
+    TOKEN_PURPOSE.memberSession,
+    { memberId: statePayload.memberId },
+    env.SESSION_SECRET,
+    MEMBER_SESSION_TTL_SECONDS
+  );
+  const response = NextResponse.redirect(new URL("/me", env.APP_URL));
+  response.cookies.set(MEMBER_COOKIE_NAME, memberSessionToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: MEMBER_SESSION_TTL_SECONDS,
+    path: "/",
+  });
+  return response;
 }

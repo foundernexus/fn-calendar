@@ -1,6 +1,6 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "./index";
-import { calendarConnections, members } from "./schema";
+import { calendarConnections, members, memberAvailability } from "./schema";
 import { normalizeEmail } from "@/lib/email";
 
 /** Case-insensitive member lookup — always goes through normalizeEmail so a
@@ -23,6 +23,17 @@ export async function getMemberById(id: number) {
 export async function getMembersByIds(ids: number[]) {
   if (ids.length === 0) return [];
   return db.select().from(members).where(inArray(members.id, ids));
+}
+
+/** A member's own weekly availability rows, ordered by day. No row for a
+ * given day means that day is off — see the comment on `memberAvailability`
+ * in schema.ts. */
+export async function getMemberAvailability(memberId: number) {
+  return db
+    .select()
+    .from(memberAvailability)
+    .where(eq(memberAvailability.memberId, memberId))
+    .orderBy(memberAvailability.dayOfWeek);
 }
 
 export type LatestConnectionRow = {

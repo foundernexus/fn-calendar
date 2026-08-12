@@ -37,6 +37,11 @@ export const members = pgTable("members", {
   // member eligible as a guest). A curated, small set of people actually run
   // sessions; everyone else who connects is a guest-only participant.
   isFacilitator: boolean("is_facilitator").notNull().default(false),
+  // Nullable — no guessed default for a global membership. Null means the
+  // member has never saved their /me settings yet; the client suggests the
+  // browser-detected zone in that case but writes nothing until they save.
+  timezone: text("timezone"),
+  weeklySessionCap: integer("weekly_session_cap").notNull().default(5),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -104,4 +109,30 @@ export const eventAttendees = pgTable(
       .defaultNow(),
   },
   (t) => [uniqueIndex("event_attendees_event_member_unique").on(t.eventId, t.memberId)]
+);
+
+// A member's own weekly availability preference, set on /me — independent of
+// (and currently NOT consulted by) the admin's find-a-time collective
+// availability search, which only ever looks at real calendar free/busy.
+// Wiring these together is a deliberate later step, not part of this table's
+// initial purpose.
+export const memberAvailability = pgTable(
+  "member_availability",
+  {
+    id: serial("id").primaryKey(),
+    memberId: integer("member_id")
+      .notNull()
+      .references(() => members.id, { onDelete: "cascade" }),
+    // 0=Sunday..6=Saturday — same convention as `dayOfWeek()` in src/lib/time.ts.
+    dayOfWeek: integer("day_of_week").notNull(),
+    // "HH:mm", same string format used for workingHoursStart/End elsewhere.
+    // No row for a given (memberId, dayOfWeek) means that day is off — there's
+    // no separate `enabled` boolean to keep in sync.
+    startTime: text("start_time").notNull(),
+    endTime: text("end_time").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex("member_availability_member_day_unique").on(t.memberId, t.dayOfWeek)]
 );

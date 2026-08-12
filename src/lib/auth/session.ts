@@ -17,10 +17,17 @@
 export const TOKEN_PURPOSE = {
   connectState: "connect-state",
   adminSession: "admin-session",
+  memberSession: "member-session",
 } as const;
 
 export const ADMIN_COOKIE_NAME = "fn_admin_session";
 export const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
+
+export const MEMBER_COOKIE_NAME = "fn_member_session";
+// Long-lived on purpose — unlike the admin session (short-TTL, shared login
+// context), a member logs in once by connecting their calendar and shouldn't
+// have to redo that OAuth round trip every visit.
+export const MEMBER_SESSION_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days
 
 function base64url(bytes: ArrayBuffer | Uint8Array) {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);

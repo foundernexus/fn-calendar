@@ -1,5 +1,7 @@
+import { redirect } from "next/navigation";
 import { getMemberByEmail, getActiveConnections } from "@/db/queries";
 import { ConnectForm } from "@/components/connect-form";
+import { requireMemberSession } from "@/lib/auth/member";
 
 // Reads live connection state and must never be statically cached — currently
 // only dynamic as a side effect of reading searchParams before the DB call;
@@ -10,6 +12,17 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
   const params = await searchParams;
   const email = typeof params.email === "string" ? params.email : undefined;
   const hadError = params.status === "error";
+
+  // A returning, already-logged-in member shouldn't have to re-enter their
+  // email — send them straight to their settings page. But NOT if they just
+  // landed here after a failed OAuth attempt (e.g. Reconnect from /me with
+  // an expired link) — they still have their old session, and silently
+  // bouncing them back to /me with no feedback would hide the failure and
+  // strand them in a retry loop.
+  if (!hadError) {
+    const memberSession = await requireMemberSession();
+    if (memberSession) redirect("/me");
+  }
 
   let initialStatus: "connected" | "not_connected" = "not_connected";
   let initialProvider: string | undefined;
