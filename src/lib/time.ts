@@ -148,6 +148,50 @@ export function zonedDateTimeParts(unixSeconds: number, timezone: string) {
   };
 }
 
+export type AvailabilityWindow = { dayOfWeek: number; startTime: string; endTime: string };
+
+/** True if a candidate slot falls within a member's OWN stated weekly
+ * availability (set on /me), checked in the member's OWN timezone — not the
+ * admin search's timezone, since a member's "2-5pm" means 2-5pm where THEY
+ * are, regardless of what zone the admin searched in.
+ *
+ * A member with no `timezone` set has never saved anything on /me at all —
+ * treated as unrestricted (calendar free/busy alone still applies) rather
+ * than fully blocked, so existing members already in the system aren't
+ * silently locked out of every search the moment this shipped. `timezone` is
+ * always written on every /me save regardless of how many days are enabled
+ * (see api/me/route.ts), so once it's set, a member who saved with EVERY day
+ * switched off has zero `memberAvailability` rows on purpose — they get
+ * rejected for every day below, same as anyone who left just one day off.
+ * Not "no rows = unrestricted," only "never saved at all = unrestricted."
+ *
+ * Windows themselves can't cross midnight (the /me form only accepts a
+ * single startTime < endTime range per day), so a slot that spans local
+ * midnight in the member's zone can never fit inside one — rejecting it is
+ * mathematically correct, not just conservative. Known limitation this
+ * implies: for a member in a timezone far from the admin's search zone (the
+ * admin only searches within 4 curated US zones, but a member can set any
+ * IANA zone on /me), ordinary business-hours slots can land near local
+ * midnight for them and get dropped even during hours they'd otherwise
+ * accept — there's currently no way for a member to express an
+ * overnight-spanning window at all. */
+export function slotMatchesMemberAvailability(
+  slot: { startUnix: number; endUnix: number },
+  memberTimezone: string | null,
+  windows: AvailabilityWindow[]
+) {
+  if (!memberTimezone) return true;
+
+  const start = zonedDateTimeParts(slot.startUnix, memberTimezone);
+  const end = zonedDateTimeParts(slot.endUnix, memberTimezone);
+  if (start.date !== end.date) return false;
+
+  const window = windows.find((w) => w.dayOfWeek === dayOfWeek(start.date));
+  if (!window) return false;
+
+  return start.time >= window.startTime && end.time <= window.endTime;
+}
+
 function shortZoneName(date: Date, timezone: string) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,

@@ -253,6 +253,7 @@ export function MemberSettingsForm({
                     <div className="flex items-center gap-2 justify-self-start">
                       <Input
                         type="time"
+                        lang="en-US"
                         value={d.startTime}
                         onChange={(e) => updateDay(day, { startTime: e.target.value })}
                         className="w-[6.5rem]"
@@ -260,6 +261,7 @@ export function MemberSettingsForm({
                       <span className="text-muted-foreground">–</span>
                       <Input
                         type="time"
+                        lang="en-US"
                         value={d.endTime}
                         onChange={(e) => updateDay(day, { endTime: e.target.value })}
                         className="w-[6.5rem]"

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getActiveConnections, getMembersByIds } from "@/db/queries";
+import { getActiveConnections, getMembersByIds, getMemberAvailabilityForMembers } from "@/db/queries";
 import { getCollectiveAvailability } from "@/lib/nylas";
 import {
   zonedDateTimeToUnix,
@@ -9,8 +9,10 @@ import {
   isValidDateString,
   isValidTimeString,
   isOnIntervalBoundary,
+  slotMatchesMemberAvailability,
   TIMEZONES,
   AVAILABILITY_INTERVAL_MINUTES,
+  type AvailabilityWindow,
 } from "@/lib/time";
 import { requireAdminSession } from "@/lib/auth/admin";
 
@@ -83,12 +85,23 @@ export async function POST(request: Request) {
   // lead), and counting the same person twice would desync `checkedCount`/
   // `totalSelected` from `notConnectedNames`.
   const allSelectedIds = [...new Set([body.organizerMemberId, ...body.guestMemberIds])];
-  const [activeConnections, selectedMembers] = await Promise.all([
+  const [activeConnections, selectedMembers, availabilityRows] = await Promise.all([
     getActiveConnections(allSelectedIds),
     getMembersByIds(allSelectedIds),
+    getMemberAvailabilityForMembers(allSelectedIds),
   ]);
   const connectionByMemberId = new Map(activeConnections.map((c) => [c.member_id, c]));
   const membersById = new Map(selectedMembers.map((m) => [m.id, m]));
+
+  // Every selected member's (organizer + guests) own stated weekly windows,
+  // grouped by member — see slotMatchesMemberAvailability for how this is
+  // checked against each candidate slot below.
+  const availabilityByMemberId = new Map<number, AvailabilityWindow[]>();
+  for (const row of availabilityRows) {
+    const list = availabilityByMemberId.get(row.memberId) ?? [];
+    list.push({ dayOfWeek: row.dayOfWeek, startTime: row.startTime, endTime: row.endTime });
+    availabilityByMemberId.set(row.memberId, list);
+  }
 
   const organizerConnection = connectionByMemberId.get(body.organizerMemberId);
   if (!organizerConnection) {
@@ -176,8 +189,22 @@ export async function POST(request: Request) {
     );
   }
 
+  // Nylas only knows about real calendar free/busy — it has no idea a member
+  // set "Mondays 2-5pm only" on /me. Every selected member (organizer AND
+  // guests) must individually clear their own stated window for a slot to
+  // survive, checked in each member's own timezone.
+  const availableSlots = slots.filter((slot) =>
+    allSelectedIds.every((id) =>
+      slotMatchesMemberAvailability(
+        { startUnix: slot.startTime, endUnix: slot.endTime },
+        membersById.get(id)?.timezone ?? null,
+        availabilityByMemberId.get(id) ?? []
+      )
+    )
+  );
+
   return NextResponse.json({
-    slots: slots.map((slot) => ({
+    slots: availableSlots.map((slot) => ({
       startUnix: slot.startTime,
       endUnix: slot.endTime,
       label: formatSlotRange(slot.startTime, slot.endTime, body.timezone),

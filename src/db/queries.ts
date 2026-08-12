@@ -36,6 +36,16 @@ export async function getMemberAvailability(memberId: number) {
     .orderBy(memberAvailability.dayOfWeek);
 }
 
+/** Same as `getMemberAvailability`, batched for the find-a-time search — one
+ * query for every selected member (organizer + guests) instead of N. */
+export async function getMemberAvailabilityForMembers(memberIds: number[]) {
+  if (memberIds.length === 0) return [];
+  return db
+    .select()
+    .from(memberAvailability)
+    .where(inArray(memberAvailability.memberId, memberIds));
+}
+
 export type LatestConnectionRow = {
   id: number;
   member_id: number;
