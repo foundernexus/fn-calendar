@@ -41,9 +41,12 @@ function defaultDateString(daysFromNow: number) {
 
 export function FindATimeForm({ members }: { members: MemberWithConnection[] }) {
   const connectedMembers = members.filter((m) => m.connected);
+  // Session lead is a curated subset — connecting a calendar makes someone
+  // eligible as a guest, not automatically eligible to lead a session.
+  const facilitators = connectedMembers.filter((m) => m.isFacilitator);
 
   const [organizerMemberId, setOrganizerMemberId] = useState<number | null>(
-    connectedMembers[0]?.id ?? null
+    facilitators[0]?.id ?? null
   );
   const [guestMemberIds, setGuestMemberIds] = useState<number[]>([]);
   const [startDate, setStartDate] = useState(defaultDateString(0));
@@ -76,7 +79,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
       return;
     }
 
-    const organizer = connectedMembers.find((m) => m.id === organizerMemberId);
+    const organizer = facilitators.find((m) => m.id === organizerMemberId);
     if (!organizer) {
       toast.error("Pick who's leading this session.");
       return;
@@ -134,7 +137,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
           <Label htmlFor="session-lead">Session lead</Label>
           <MemberSelect
             id="session-lead"
-            members={connectedMembers}
+            members={facilitators}
             value={organizerMemberId}
             onChange={(id) => {
               setOrganizerMemberId(id);
@@ -145,14 +148,11 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
               setGuestMemberIds((ids) => ids.filter((gid) => gid !== id));
             }}
             placeholder="Who's leading this session?"
+            emptyText="No matching facilitators — they may be connected but not set up to lead sessions."
           />
-          {connectedMembers.length === 0 && (
+          {facilitators.length === 0 && (
             <p className="text-sm text-destructive">
-              No connected calendars yet —{" "}
-              <Link href="/connect" className="underline">
-                connect one
-              </Link>{" "}
-              first.
+              No facilitators have connected their calendar yet.
             </p>
           )}
         </div>
@@ -167,10 +167,20 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
             excludeId={organizerMemberId}
             placeholder="Who's this session for?"
           />
-          <p className="text-xs text-muted-foreground">
-            Only people who&apos;ve connected their calendar can be selected — that&apos;s what
-            makes the grid below meaningful.
-          </p>
+          {connectedMembers.length === 0 ? (
+            <p className="text-sm text-destructive">
+              No one&apos;s connected a calendar yet —{" "}
+              <Link href="/connect" className="underline">
+                connect one
+              </Link>{" "}
+              first.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Only people who&apos;ve connected their calendar can be selected — that&apos;s what
+              makes the grid below meaningful.
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">

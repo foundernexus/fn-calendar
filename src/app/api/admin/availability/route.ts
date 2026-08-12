@@ -101,6 +101,19 @@ export async function POST(request: Request) {
     });
   }
 
+  // The UI only offers facilitators as session-lead options — same
+  // client-side-filter-isn't-a-guarantee reasoning as the connection check
+  // above.
+  if (!membersById.get(body.organizerMemberId)?.isFacilitator) {
+    return NextResponse.json({
+      slots: [],
+      checkedCount: 0,
+      totalSelected: allSelectedIds.length,
+      notConnectedNames: [],
+      error: "The selected session lead isn't a facilitator.",
+    });
+  }
+
   const notConnectedNames = allSelectedIds
     .filter((id) => !connectionByMemberId.has(id))
     .map((id) => membersById.get(id)?.fullName ?? `Unknown member #${id}`);

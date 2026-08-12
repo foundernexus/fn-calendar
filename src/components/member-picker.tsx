@@ -26,12 +26,14 @@ export function MemberSelect({
   value,
   onChange,
   placeholder,
+  emptyText = "No connected calendars match.",
 }: {
   id?: string;
   members: MemberWithConnection[];
   value: number | null;
   onChange: (id: number | null) => void;
   placeholder: string;
+  emptyText?: string;
 }) {
   const [open, setOpen] = useState(false);
   const selected = members.find((m) => m.id === value);
@@ -60,7 +62,7 @@ export function MemberSelect({
         <Command>
           <CommandInput placeholder="Search name or email…" />
           <CommandList>
-            <CommandEmpty>No connected calendars match.</CommandEmpty>
+            <CommandEmpty>{emptyText}</CommandEmpty>
             <CommandGroup>
               {members.map((m) => (
                 <CommandItem

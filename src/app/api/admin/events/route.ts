@@ -124,6 +124,16 @@ export async function POST(request: Request) {
     );
   }
 
+  // The UI only offers facilitators as session-lead options — same
+  // client-side-filter-isn't-a-guarantee reasoning as the connection check
+  // above.
+  if (!organizerMember.isFacilitator) {
+    return NextResponse.json(
+      { error: "The selected session lead isn't a facilitator." },
+      { status: 400 }
+    );
+  }
+
   const missingIds = guestMemberIds.filter((id) => !guestMembers.some((m) => m.id === id));
   if (missingIds.length > 0) {
     return NextResponse.json({ error: "One or more selected guests no longer exist." }, { status: 400 });

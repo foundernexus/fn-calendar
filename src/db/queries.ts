@@ -79,13 +79,17 @@ export type MemberWithConnection = {
   email: string;
   fullName: string;
   connected: boolean;
+  isFacilitator: boolean;
   provider: string | null;
   grantEmail: string | null;
 };
 
 /** Every member, each annotated with whether their latest connection is
- * currently active — for the admin find-a-time multi-select's connected/not
- * connected badges. */
+ * currently active — for the admin find-a-time pickers' connected/not
+ * connected filtering, and whether they're eligible to be picked as
+ * "Session lead" (`isFacilitator` — a smaller set than "connected"; every
+ * facilitator must also connect a calendar, but not every connected member
+ * is a facilitator). */
 export async function getMembersWithConnectionStatus(): Promise<MemberWithConnection[]> {
   const allMembers = await db.select().from(members).orderBy(members.fullName);
   const active = await getActiveConnections(allMembers.map((m) => m.id));
@@ -98,6 +102,7 @@ export async function getMembersWithConnectionStatus(): Promise<MemberWithConnec
       email: m.email,
       fullName: m.fullName,
       connected: !!connection,
+      isFacilitator: m.isFacilitator,
       provider: connection?.provider ?? null,
       grantEmail: connection?.grant_email ?? null,
     };

@@ -6,6 +6,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  boolean,
 } from "drizzle-orm/pg-core";
 
 export const memberRoleEnum = pgEnum("member_role", ["member", "admin"]);
@@ -31,6 +32,11 @@ export const members = pgTable("members", {
   email: text("email").notNull().unique(),
   fullName: text("full_name").notNull(),
   role: memberRoleEnum("role").notNull().default("member"),
+  // Gates who can be picked as a session's "Session lead" in the find-a-time
+  // UI — connecting a calendar alone is NOT enough (that's what makes a
+  // member eligible as a guest). A curated, small set of people actually run
+  // sessions; everyone else who connects is a guest-only participant.
+  isFacilitator: boolean("is_facilitator").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

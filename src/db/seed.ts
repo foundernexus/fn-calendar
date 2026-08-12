@@ -4,15 +4,19 @@ import { normalizeEmail } from "@/lib/email";
 
 // Edit these before running `npm run db:seed`. Emails must be real inboxes
 // you can log into for /connect and /admin testing.
+// `isFacilitator` gates who can be picked as "Session lead" in find-a-time —
+// a curated set of people who actually run sessions, separate from who's
+// merely connected a calendar (which is all any guest needs).
 const SEED_MEMBERS: {
   email: string;
   fullName: string;
   role: "member" | "admin";
+  isFacilitator: boolean;
 }[] = [
-  { email: "tobias@foundernexus.com", fullName: "Tobias", role: "admin" },
-  { email: "tobiasj.hock137@gmail.com", fullName: "Tobias (personal)", role: "member" },
-  { email: "karink@foundernexus.com", fullName: "Karin", role: "admin" },
-  { email: "mattm@foundernexus.com", fullName: "Matt", role: "admin" },
+  { email: "tobias@foundernexus.com", fullName: "Tobias", role: "admin", isFacilitator: true },
+  { email: "tobiasj.hock137@gmail.com", fullName: "Tobias (personal)", role: "member", isFacilitator: false },
+  { email: "karink@foundernexus.com", fullName: "Karin", role: "admin", isFacilitator: true },
+  { email: "mattm@foundernexus.com", fullName: "Matt", role: "admin", isFacilitator: false },
 ];
 
 async function seed() {
