@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getActiveConnections, getMembersByIds } from "@/db/queries";
+import { getActiveConnections } from "@/db/queries";
 import { getCollectiveAvailability } from "@/lib/nylas";
 import {
   zonedDateTimeToUnix,
@@ -18,11 +18,7 @@ const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [string, ...string[]]
 
 const bodySchema = z
   .object({
-    memberIds: z
-      .array(z.number().int())
-      .min(1)
-      .max(50) // 50 = Nylas's participant cap
-      .refine((ids) => new Set(ids).size === ids.length, "Duplicate member selected."),
+    organizerMemberId: z.number().int({ error: "Pick who's leading this session." }),
     startDate: z.string().refine(isValidDateString, "Invalid start date."),
     endDate: z.string().refine(isValidDateString, "Invalid end date."),
     durationMinutes: z.union([z.literal(30), z.literal(45), z.literal(60)]),
@@ -74,26 +70,14 @@ export async function POST(request: Request) {
   }
   const body = parsed.data;
 
-  // Only the connected subset can actually be checked — Nylas has no free/busy
-  // data for anyone who hasn't connected. Participants are queried by their
-  // connected calendar's grant_email, NOT members.email (those can differ).
-  const [activeConnections, selectedMembers] = await Promise.all([
-    getActiveConnections(body.memberIds),
-    getMembersByIds(body.memberIds),
-  ]);
-  const connectedMemberIds = new Set(activeConnections.map((c) => c.member_id));
-  const membersById = new Map(selectedMembers.map((m) => [m.id, m]));
-  const notConnectedNames = body.memberIds
-    .filter((id) => !connectedMemberIds.has(id))
-    .map((id) => membersById.get(id)?.fullName ?? `Unknown member #${id}`);
-
-  if (activeConnections.length === 0) {
+  // Only the session lead's own calendar is checked — guests are free-typed
+  // emails with no calendar connection on file (the whole point: an outside
+  // expert or a member who's never connected shouldn't block scheduling).
+  const [organizerConnection] = await getActiveConnections([body.organizerMemberId]);
+  if (!organizerConnection) {
     return NextResponse.json({
       slots: [],
-      checkedCount: 0,
-      totalSelected: body.memberIds.length,
-      notConnectedNames,
-      error: "None of the selected members have connected their calendar yet.",
+      error: "The selected session lead isn't connected. Connect their calendar first.",
     });
   }
 
@@ -110,7 +94,7 @@ export async function POST(request: Request) {
   let slots;
   try {
     slots = await getCollectiveAvailability({
-      participantEmails: activeConnections.map((c) => c.grant_email),
+      participantEmails: [organizerConnection.grant_email],
       startTime,
       endTime,
       durationMinutes: body.durationMinutes,
@@ -127,7 +111,6 @@ export async function POST(request: Request) {
     console.error("[admin/availability] Nylas availability call failed", {
       startTime,
       endTime,
-      participantCount: activeConnections.length,
       err,
     });
     return NextResponse.json(
@@ -142,8 +125,5 @@ export async function POST(request: Request) {
       endUnix: slot.endTime,
       label: formatSlotRange(slot.startTime, slot.endTime, body.timezone),
     })),
-    checkedCount: activeConnections.length,
-    totalSelected: body.memberIds.length,
-    notConnectedNames,
   });
 }

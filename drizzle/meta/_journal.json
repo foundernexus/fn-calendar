@@ -8,6 +8,13 @@
       "when": 1786477419351,
       "tag": "0000_special_onslaught",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786491639652,
+      "tag": "0001_powerful_tarantula",
+      "breakpoints": true
     }
   ]
 }

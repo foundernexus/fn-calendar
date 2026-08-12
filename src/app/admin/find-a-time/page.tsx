@@ -23,7 +23,7 @@ export default async function FindATimePage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Find a time</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Pick the members for this session and see when everyone&apos;s free.
+            Pick who&apos;s leading the session, add guests, and see when the lead is free.
           </p>
         </div>
         <LogoutButton />

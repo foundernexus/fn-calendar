@@ -4,16 +4,17 @@ export type Slot = { startUnix: number; endUnix: number; label: string };
 
 export type AvailabilityResult = {
   slots: Slot[];
-  checkedCount: number;
-  totalSelected: number;
-  notConnectedNames: string[];
   error?: string;
 };
 
-/** The search parameters the grid needs to lay itself out — snapshotted by
- * the caller at search time, not read live, so the grid never renders
- * against a range/timezone that's since changed in the form above it. */
+/** The search parameters the grid needs — snapshotted by the caller at
+ * search time, not read live, so it never renders against a range/timezone/
+ * organizer that's since changed in the form above it. Guest emails aren't
+ * part of this: they don't affect the search, so the dialog reads them fresh
+ * from the form at slot-click time instead (see handleSelectSlot). */
 export type SearchedParams = {
+  organizerMemberId: number;
+  organizerName: string;
   startDate: string;
   endDate: string;
   workingHoursStart: string;
@@ -35,9 +36,6 @@ export function ResultsList({
     return (
       <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-6 text-sm text-destructive">
         <p>{result.error}</p>
-        {result.notConnectedNames.length > 0 && (
-          <p className="mt-2">Not connected: {result.notConnectedNames.join(", ")}.</p>
-        )}
       </div>
     );
   }
@@ -45,26 +43,18 @@ export function ResultsList({
   return (
     <div className="rounded-lg border border-border bg-card p-6 shadow-card">
       <p className="text-sm text-muted-foreground">
-        Checked {result.checkedCount} of {result.totalSelected} selected member
-        {result.totalSelected === 1 ? "" : "s"}.
-        {result.notConnectedNames.length > 0 && (
-          <>
-            {" "}
-            {result.notConnectedNames.join(", ")}{" "}
-            {result.notConnectedNames.length === 1 ? "hasn't" : "haven't"} connected yet.
-          </>
-        )}
+        Showing {searchedParams.organizerName}&apos;s availability.
       </p>
 
       {result.slots.length === 0 ? (
         <p className="mt-4 text-sm text-foreground">
-          No overlapping free time found in this range.
+          No free time found in this range.
         </p>
       ) : (
         <div className="mt-4">
           <div className="mb-3 flex items-center gap-4 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <span className="inline-block size-3 rounded-xs bg-accent" /> Everyone free
+              <span className="inline-block size-3 rounded-xs bg-accent" /> Free
             </span>
             <span className="flex items-center gap-1.5">
               <span className="inline-block size-3 rounded-xs bg-secondary" /> Not available

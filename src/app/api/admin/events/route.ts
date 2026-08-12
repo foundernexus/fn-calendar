@@ -3,20 +3,21 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { events, eventAttendees } from "@/db/schema";
-import { getActiveConnections, getMembersByIds } from "@/db/queries";
+import { getActiveConnections, getMemberById } from "@/db/queries";
 import { createNylasEvent } from "@/lib/nylas";
 import { computeIdempotencyKey } from "@/lib/idempotency";
 import { TIMEZONES } from "@/lib/time";
+import { normalizeEmail } from "@/lib/email";
 import { requireAdminSession } from "@/lib/auth/admin";
 
 const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [string, ...string[]];
 
 const bodySchema = z.object({
-  memberIds: z
-    .array(z.number().int())
-    .min(1, "Select at least one member.")
-    .max(50, "Select at most 50 members.") // 50 = Nylas's participant cap
-    .refine((ids) => new Set(ids).size === ids.length, "Duplicate member selected."),
+  guestEmails: z
+    .array(z.string().trim().toLowerCase().email("Enter a valid email."))
+    .min(1, "Add at least one guest email.")
+    .max(49, "Add at most 49 guests.") // 49 + organizer = Nylas's 50-participant cap
+    .refine((emails) => new Set(emails).size === emails.length, "Duplicate guest email."),
   organizerMemberId: z.number().int({ error: "Pick an organizer." }),
   title: z.string().trim().min(1, "Title is required."),
   description: z.string().trim().optional(),
@@ -63,15 +64,62 @@ export async function POST(request: Request) {
   }
   const body = parsed.data;
 
+  // No Nylas call has happened yet on this branch, so a clean JSON error is
+  // safe here — nothing to warn the admin about having possibly already sent.
+  let organizerConnection, organizerMember;
+  try {
+    [organizerConnection] = await getActiveConnections([body.organizerMemberId]);
+    organizerMember = await getMemberById(body.organizerMemberId);
+  } catch (err) {
+    console.error("[admin/events] Pre-flight DB lookup failed", { err });
+    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
+  }
+
+  if (!organizerConnection || !organizerMember) {
+    return NextResponse.json(
+      { error: "The selected session lead isn't connected. Pick someone who's connected." },
+      { status: 400 }
+    );
+  }
+
+  const endsAtUnix = body.startsAtUnix + body.durationMinutes * 60;
+
+  // The session lead is always invited — they're leading it — in addition to
+  // hosting it. Guests are free-typed emails with no member row (an outside
+  // expert, or a member who's never connected); drop any guest email that
+  // matches the organizer's own — either their registered address or the
+  // (possibly different) calendar account they actually connected — so
+  // they're not double-invited or listed as an attendee of their own event.
+  const organizerEmails = new Set([
+    normalizeEmail(organizerMember.email),
+    normalizeEmail(organizerConnection.grant_email),
+  ]);
+  const guestEmails = body.guestEmails.filter((email) => !organizerEmails.has(email));
+
+  // zod's .min(1) on the raw list doesn't catch this: if the only typed
+  // address WAS the organizer's own, filtering leaves nothing. Reject rather
+  // than silently creating a solo event — an empty guest list would also
+  // hash identically for every such solo event (the organizer is
+  // deliberately excluded from the hash below), colliding unrelated events.
+  if (guestEmails.length === 0) {
+    return NextResponse.json(
+      { error: "That's the session lead's own address — add at least one other guest." },
+      { status: 400 }
+    );
+  }
+
+  // Hashed AFTER the organizer-collision filter — the hash must reflect the
+  // actual participant set Nylas receives, or two requests that produce the
+  // identical real invite (one where the admin also typed the lead's own
+  // address, one where they didn't) get different keys and duplicate
+  // protection silently fails to catch them.
   const idempotencyKey = await computeIdempotencyKey({
-    memberIds: body.memberIds,
+    guestEmails,
     startsAtUnix: body.startsAtUnix,
     durationMinutes: body.durationMinutes,
   });
 
-  // No Nylas call has happened yet on this branch, so a clean JSON error is
-  // safe here — nothing to warn the admin about having possibly already sent.
-  let existing, organizerConnection, selectedMembers;
+  let existing;
   try {
     // Fast-path: avoids a redundant Nylas call in the common (non-racing)
     // case. NOT the correctness guarantee — that's the unique-constraint
@@ -84,33 +132,10 @@ export async function POST(request: Request) {
     if (existing) {
       return NextResponse.json({ event: existing, alreadyExisted: true });
     }
-
-    [organizerConnection] = await getActiveConnections([body.organizerMemberId]);
-
-    // Every selected member becomes an invitee, connected or not — an
-    // unconnected member's free/busy couldn't be checked, but they still
-    // receive a real invite (confirmed product decision). Participants are
-    // members.email (not grant_email): unconnected members have no
-    // grant_email at all, so this is the only address that works uniformly.
-    selectedMembers = await getMembersByIds(body.memberIds);
   } catch (err) {
-    console.error("[admin/events] Pre-flight DB lookup failed", { idempotencyKey, err });
+    console.error("[admin/events] Idempotency lookup failed", { idempotencyKey, err });
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
   }
-
-  if (!organizerConnection) {
-    return NextResponse.json(
-      { error: "The selected organizer isn't connected. Pick someone who's connected." },
-      { status: 400 }
-    );
-  }
-
-  const missingIds = body.memberIds.filter((id) => !selectedMembers.some((m) => m.id === id));
-  if (missingIds.length > 0) {
-    return NextResponse.json({ error: "One or more selected members no longer exist." }, { status: 400 });
-  }
-
-  const endsAtUnix = body.startsAtUnix + body.durationMinutes * 60;
 
   let nylasEvent;
   try {
@@ -122,7 +147,10 @@ export async function POST(request: Request) {
       startTime: body.startsAtUnix,
       endTime: endsAtUnix,
       timezone: body.timezone,
-      participants: selectedMembers.map((m) => ({ email: m.email, name: m.fullName })),
+      participants: [
+        { email: organizerMember.email, name: organizerMember.fullName },
+        ...guestEmails.map((email) => ({ email })),
+      ],
     });
     nylasEvent = result.data;
   } catch (err) {
@@ -193,13 +221,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    await db.insert(eventAttendees).values(
-      selectedMembers.map((m) => ({
-        eventId: inserted.id,
-        memberId: m.id,
-        attendeeEmail: m.email,
-      }))
-    );
+    await db.insert(eventAttendees).values([
+      { eventId: inserted.id, memberId: body.organizerMemberId, attendeeEmail: organizerMember.email },
+      ...guestEmails.map((email) => ({ eventId: inserted.id, memberId: null, attendeeEmail: email })),
+    ]);
   } catch (err) {
     console.error("[admin/events] event_attendees insert failed after events row was created", {
       idempotencyKey,

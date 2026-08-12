@@ -14,32 +14,25 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import type { MemberWithConnection } from "@/db/queries";
 import type { Slot } from "@/components/results-list";
 
 export function CreateEventDialog({
   slot,
-  memberIds,
-  members,
+  organizerMemberId,
+  organizerName,
+  guestEmails,
   timezone,
   onOpenChange,
   onCreated,
 }: {
   slot: Slot;
-  memberIds: number[];
-  members: MemberWithConnection[];
+  organizerMemberId: number;
+  organizerName: string;
+  guestEmails: string[];
   timezone: string;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
 }) {
-  const connectedMembers = members.filter((m) => m.connected);
   // Derived from the slot itself (not a separately-tracked value) so it can
   // never drift from what was actually searched for this slot.
   const durationMinutes = Math.round((slot.endUnix - slot.startUnix) / 60);
@@ -47,25 +40,18 @@ export function CreateEventDialog({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [meetingUrl, setMeetingUrl] = useState("");
-  const [organizerMemberId, setOrganizerMemberId] = useState<string>(
-    connectedMembers[0] ? String(connectedMembers[0].id) : ""
-  );
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!organizerMemberId) {
-      toast.error("Pick an organizer — someone whose calendar hosts the event.");
-      return;
-    }
     setSubmitting(true);
     try {
       const res = await fetch("/api/admin/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          memberIds,
-          organizerMemberId: Number(organizerMemberId),
+          guestEmails,
+          organizerMemberId,
           title,
           description: description || undefined,
           meetingUrl: meetingUrl || undefined,
@@ -127,32 +113,20 @@ export function CreateEventDialog({
               placeholder="https://zoom.us/j/… (optional)"
             />
           </div>
-          <div className="space-y-2">
-            <Label>Organizer</Label>
-            <Select
-              items={Object.fromEntries(connectedMembers.map((m) => [String(m.id), m.fullName]))}
-              value={organizerMemberId}
-              onValueChange={(v) => v && setOrganizerMemberId(v)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Whose calendar hosts this?" />
-              </SelectTrigger>
-              <SelectContent>
-                {connectedMembers.map((m) => (
-                  <SelectItem key={m.id} value={String(m.id)}>
-                    {m.fullName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {connectedMembers.length === 0 && (
-              <p className="text-sm text-destructive">
-                No connected members available to organize this event.
+          <div className="grid grid-cols-2 gap-4 rounded-lg border border-border bg-secondary/40 p-3 text-sm">
+            <div>
+              <p className="text-xs text-muted-foreground">Session lead</p>
+              <p className="text-foreground">{organizerName}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">
+                Guest{guestEmails.length === 1 ? "" : "s"}
               </p>
-            )}
+              <p className="text-foreground">{guestEmails.join(", ")}</p>
+            </div>
           </div>
           <DialogFooter>
-            <Button type="submit" disabled={submitting || connectedMembers.length === 0}>
+            <Button type="submit" disabled={submitting}>
               {submitting ? "Creating…" : "Create event"}
             </Button>
           </DialogFooter>

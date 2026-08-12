@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "./index";
 import { calendarConnections, members } from "./schema";
 import { normalizeEmail } from "@/lib/email";
@@ -17,12 +17,6 @@ export async function getMemberByEmail(email: string) {
 export async function getMemberById(id: number) {
   const rows = await db.select().from(members).where(eq(members.id, id)).limit(1);
   return rows[0] ?? null;
-}
-
-/** Batch member lookup — one query instead of N. */
-export async function getMembersByIds(ids: number[]) {
-  if (ids.length === 0) return [];
-  return db.select().from(members).where(inArray(members.id, ids));
 }
 
 export type LatestConnectionRow = {

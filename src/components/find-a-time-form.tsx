@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -23,6 +24,7 @@ import {
 import { CreateEventDialog } from "@/components/create-event-dialog";
 import type { MemberWithConnection } from "@/db/queries";
 import { TIMEZONES } from "@/lib/time";
+import { isValidEmail, normalizeEmail } from "@/lib/email";
 
 const DURATIONS = [30, 45, 60] as const;
 
@@ -38,8 +40,52 @@ function defaultDateString(daysFromNow: number) {
   return `${year}-${month}-${day}`;
 }
 
+/** Splits free-typed guest input on commas, semicolons, or newlines, trims,
+ * lowercases, and dedupes — order-preserving so the dialog's guest list
+ * matches what the admin typed. */
+function parseGuestEmails(text: string): string[] {
+  return Array.from(
+    new Set(
+      text
+        .split(/[,;\n]+/)
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+/** Parses + validates the guest textarea, toasting and returning null on the
+ * first problem. Run twice: once at search time (early feedback) and again
+ * at slot-click time (authoritative — guests don't affect the availability
+ * grid, so the admin can freely edit the list between searching and
+ * clicking a slot, and the click must validate what's there *then*, not
+ * whatever was typed when the search ran). 49 = Nylas's 50-participant cap
+ * minus the organizer, who's always added separately server-side. */
+function validateGuestEmails(text: string): string[] | null {
+  const guestEmails = parseGuestEmails(text);
+  if (guestEmails.length === 0) {
+    toast.error("Add at least one guest email.");
+    return null;
+  }
+  const invalid = guestEmails.find((email) => !isValidEmail(email));
+  if (invalid) {
+    toast.error(`"${invalid}" doesn't look like a valid email.`);
+    return null;
+  }
+  if (guestEmails.length > 49) {
+    toast.error("Add at most 49 guests.");
+    return null;
+  }
+  return guestEmails;
+}
+
 export function FindATimeForm({ members }: { members: MemberWithConnection[] }) {
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const connectedMembers = members.filter((m) => m.connected);
+
+  const [organizerMemberId, setOrganizerMemberId] = useState<string>(
+    connectedMembers[0] ? String(connectedMembers[0].id) : ""
+  );
+  const [guestEmailsText, setGuestEmailsText] = useState("");
   const [startDate, setStartDate] = useState(defaultDateString(0));
   const [endDate, setEndDate] = useState(defaultDateString(14));
   const [durationMinutes, setDurationMinutes] = useState(60);
@@ -51,25 +97,34 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AvailabilityResult | null>(null);
   const [dialogSlot, setDialogSlot] = useState<Slot | null>(null);
+  // The guest list the dialog will actually use — captured fresh at the
+  // moment a grid cell is clicked (see handleSelectSlot), not at search
+  // time, since guests have no effect on the availability grid and can be
+  // freely edited between searching and picking a slot.
+  const [dialogGuestEmails, setDialogGuestEmails] = useState<string[]>([]);
   // Snapshotted at search time, NOT read live from the form above — every
   // field here can change after a search completes while the grid is still
   // showing the old search's results. Without this, the grid could render
-  // against a range/timezone it was never actually searched for, and the
-  // dialog could create an event for a group that was never checked.
-  const [searchedParams, setSearchedParams] = useState<
-    (SearchedParams & { memberIds: number[] }) | null
-  >(null);
-
-  function toggleMember(id: number) {
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  }
+  // against a range/timezone/lead it was never actually searched for.
+  const [searchedParams, setSearchedParams] = useState<SearchedParams | null>(null);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
-    if (selectedIds.length === 0) {
-      toast.error("Select at least one member.");
+    if (!organizerMemberId) {
+      toast.error("Pick who's leading this session.");
       return;
     }
+    // Just an early check here — guests don't affect the search, so this
+    // isn't sent to the API and isn't the authoritative validation (that
+    // happens again in handleSelectSlot, against whatever's typed by then).
+    if (!validateGuestEmails(guestEmailsText)) return;
+
+    const organizer = connectedMembers.find((m) => String(m.id) === organizerMemberId);
+    if (!organizer) {
+      toast.error("Pick who's leading this session.");
+      return;
+    }
+
     setLoading(true);
     setResult(null);
     try {
@@ -77,7 +132,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          memberIds: selectedIds,
+          organizerMemberId: Number(organizerMemberId),
           startDate,
           endDate,
           durationMinutes,
@@ -94,7 +149,8 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
       }
       setResult(data);
       setSearchedParams({
-        memberIds: selectedIds,
+        organizerMemberId: Number(organizerMemberId),
+        organizerName: organizer.fullName,
         startDate,
         endDate,
         workingHoursStart,
@@ -109,40 +165,73 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
     }
   }
 
+  function handleSelectSlot(slot: Slot) {
+    const guestEmails = validateGuestEmails(guestEmailsText);
+    if (!guestEmails) return;
+
+    // Mirrors the server's own dedup (src/app/api/admin/events/route.ts) so
+    // the dialog's guest preview matches what's actually invited — otherwise
+    // an admin who typed the lead's own address by mistake would see it
+    // listed as a guest here even though the server silently drops it there.
+    const organizer = members.find((m) => m.id === searchedParams?.organizerMemberId);
+    const filtered = organizer
+      ? guestEmails.filter((email) => email !== normalizeEmail(organizer.email))
+      : guestEmails;
+    if (filtered.length === 0) {
+      toast.error("That's the session lead's own address — add at least one other guest.");
+      return;
+    }
+
+    setDialogGuestEmails(filtered);
+    setDialogSlot(slot);
+  }
+
   return (
     <div className="space-y-8">
       <form
         onSubmit={handleSearch}
         className="space-y-6 rounded-lg border border-border bg-card p-6 shadow-card"
       >
-        <div>
-          <Label>Members</Label>
-          <div className="mt-2 space-y-2">
-            {members.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                No members seeded yet — run `npm run db:seed`.
-              </p>
-            )}
-            {members.map((m) => (
-              <label key={m.id} className="flex items-center gap-3 text-sm">
-                <Checkbox
-                  checked={selectedIds.includes(m.id)}
-                  onCheckedChange={() => toggleMember(m.id)}
-                />
-                <span className="text-foreground">{m.fullName}</span>
-                <span className="text-muted-foreground">{m.email}</span>
-                <Badge
-                  className={
-                    m.connected
-                      ? "bg-accent text-accent-foreground"
-                      : "bg-secondary text-secondary-foreground"
-                  }
-                >
-                  {m.connected ? "Connected" : "Not connected"}
-                </Badge>
-              </label>
-            ))}
-          </div>
+        <div className="space-y-2">
+          <Label>Session lead</Label>
+          <Select
+            items={Object.fromEntries(connectedMembers.map((m) => [String(m.id), m.fullName]))}
+            value={organizerMemberId}
+            onValueChange={(v) => v && setOrganizerMemberId(v)}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Who's leading this session?" />
+            </SelectTrigger>
+            <SelectContent>
+              {connectedMembers.map((m) => (
+                <SelectItem key={m.id} value={String(m.id)}>
+                  {m.fullName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {connectedMembers.length === 0 && (
+            <p className="text-sm text-destructive">
+              No connected calendars yet —{" "}
+              <Link href="/connect" className="underline">
+                connect one
+              </Link>{" "}
+              first.
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="guest-emails">Guest emails</Label>
+          <Textarea
+            id="guest-emails"
+            value={guestEmailsText}
+            onChange={(e) => setGuestEmailsText(e.target.value)}
+            placeholder="jane@example.com, expert@example.com"
+          />
+          <p className="text-xs text-muted-foreground">
+            Separate multiple emails with a comma or newline.
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -238,14 +327,15 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
       </form>
 
       {result && searchedParams && (
-        <ResultsList result={result} searchedParams={searchedParams} onSelectSlot={setDialogSlot} />
+        <ResultsList result={result} searchedParams={searchedParams} onSelectSlot={handleSelectSlot} />
       )}
 
       {dialogSlot && searchedParams && (
         <CreateEventDialog
           slot={dialogSlot}
-          memberIds={searchedParams.memberIds}
-          members={members}
+          organizerMemberId={searchedParams.organizerMemberId}
+          organizerName={searchedParams.organizerName}
+          guestEmails={dialogGuestEmails}
           timezone={searchedParams.timezone}
           onOpenChange={(open) => {
             if (!open) setDialogSlot(null);

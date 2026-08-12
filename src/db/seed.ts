@@ -9,8 +9,9 @@ const SEED_MEMBERS: {
   fullName: string;
   role: "member" | "admin";
 }[] = [
+  { email: "tobias@foundernexus.com", fullName: "Tobias", role: "admin" },
   { email: "tobiasj.hock137@gmail.com", fullName: "Tobias (personal)", role: "member" },
-  { email: "karink@foundernexus.com", fullName: "Karin", role: "member" },
+  { email: "karink@foundernexus.com", fullName: "Karin", role: "admin" },
   { email: "mattm@foundernexus.com", fullName: "Matt", role: "admin" },
 ];
 
