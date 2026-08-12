@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { getMembersWithConnectionStatus } from "@/db/queries";
 import { FindATimeForm } from "@/components/find-a-time-form";
-import { LogoutButton } from "@/components/logout-button";
 import { requireAdminSession } from "@/lib/auth/admin";
 
 // Authenticated (gated by proxy.ts) and reads live connection state — must
@@ -13,20 +12,17 @@ export default async function FindATimePage() {
   // proxy.ts already blocks unauthenticated requests here — this is
   // defense-in-depth per Next's own guidance not to rely on Proxy alone.
   const session = await requireAdminSession();
-  if (!session) redirect("/admin/login");
+  if (!session) redirect("/connect");
 
   const members = await getMembersWithConnectionStatus();
 
   return (
     <div className="py-10">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Find a time</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Pick the session lead and guests, and see when everyone&apos;s free.
-          </p>
-        </div>
-        <LogoutButton />
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Find a time</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Pick the session lead and guests, and see when everyone&apos;s free.
+        </p>
       </div>
       <div className="mt-8">
         <FindATimeForm members={members} />

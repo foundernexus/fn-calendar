@@ -50,7 +50,10 @@ export function ConnectForm({
         setSubmitting(false);
         return;
       }
-      window.location.href = data.url;
+      // An admin email gets `redirect` (straight to the admin dashboard, no
+      // calendar connect needed); anyone else gets `url` (the Nylas hosted
+      // auth flow, unchanged from before).
+      window.location.href = data.redirect ?? data.url;
     } catch {
       toast.error("Something went wrong. Please try again.");
       setSubmitting(false);
@@ -122,7 +125,7 @@ export function ConnectForm({
         />
       </div>
       <Button type="submit" disabled={submitting}>
-        {submitting ? "Connecting…" : "Connect calendar"}
+        {submitting ? "Continuing…" : "Continue"}
       </Button>
     </form>
   );

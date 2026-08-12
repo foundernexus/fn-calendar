@@ -1,17 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import {
-  signValue,
-  TOKEN_PURPOSE,
-  ADMIN_COOKIE_NAME,
-  ADMIN_SESSION_TTL_SECONDS,
-} from "@/lib/auth/session";
-import { isAdminEmail } from "@/lib/auth/admin";
-import { normalizeEmail } from "@/lib/email";
+import { isAdminEmail, setAdminSessionCookie } from "@/lib/auth/admin";
 import { env } from "@/lib/env";
 
 const bodySchema = z.object({ email: z.string().email() });
 
+// No longer reachable from any UI (the shared /connect form now handles
+// admin sign-in), kept only so the old bookmark-safety-net /admin/login
+// page's underlying API isn't a dead file — same trust model as before.
 export async function POST(request: Request) {
   let json: unknown;
   try {
@@ -29,20 +25,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not an admin email." }, { status: 403 });
   }
 
-  const token = await signValue(
-    TOKEN_PURPOSE.adminSession,
-    { email: normalizeEmail(parsed.data.email) },
-    env.SESSION_SECRET,
-    ADMIN_SESSION_TTL_SECONDS
-  );
-
   const res = NextResponse.json({ status: "ok" });
-  res.cookies.set(ADMIN_COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: ADMIN_SESSION_TTL_SECONDS,
-    path: "/",
-  });
+  await setAdminSessionCookie(res, parsed.data.email);
   return res;
 }

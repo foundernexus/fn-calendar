@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getMemberByEmail, getActiveConnections } from "@/db/queries";
 import { ConnectForm } from "@/components/connect-form";
 import { requireMemberSession } from "@/lib/auth/member";
+import { requireAdminSession } from "@/lib/auth/admin";
 
 // Reads live connection state and must never be statically cached — currently
 // only dynamic as a side effect of reading searchParams before the DB call;
@@ -13,13 +14,15 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
   const email = typeof params.email === "string" ? params.email : undefined;
   const hadError = params.status === "error";
 
-  // A returning, already-logged-in member shouldn't have to re-enter their
-  // email — send them straight to their settings page. But NOT if they just
-  // landed here after a failed OAuth attempt (e.g. Reconnect from /me with
-  // an expired link) — they still have their old session, and silently
-  // bouncing them back to /me with no feedback would hide the failure and
-  // strand them in a retry loop.
+  // A returning, already-logged-in person (admin or member) shouldn't have
+  // to re-enter their email — send them straight to their real destination.
+  // But NOT if they just landed here after a failed OAuth attempt (e.g.
+  // Reconnect from /me with an expired link) — they still have their old
+  // session, and silently bouncing them back with no feedback would hide
+  // the failure and strand them in a retry loop.
   if (!hadError) {
+    const adminSession = await requireAdminSession();
+    if (adminSession) redirect("/admin/find-a-time");
     const memberSession = await requireMemberSession();
     if (memberSession) redirect("/me");
   }
@@ -45,10 +48,10 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
 
   return (
     <div className="mx-auto max-w-md py-16">
-      <h1 className="text-2xl font-bold text-foreground">Connect your calendar</h1>
+      <h1 className="text-2xl font-bold text-foreground">Sign in</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        Enter your email to connect your calendar (Google, Microsoft, or iCloud) so
-        an admin can find a time that works for your next expert session.
+        Enter your email to get started. If you haven&apos;t connected your calendar
+        yet (Google, Microsoft, or iCloud), you&apos;ll do that next.
       </p>
       {hadError && (
         <p className="mt-6 rounded-md border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">

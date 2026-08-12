@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import { requireMemberSession } from "@/lib/auth/member";
 import { getMemberAvailability, getActiveConnections } from "@/db/queries";
 import { MemberSettingsForm } from "@/components/member-settings-form";
-import { MemberLogoutButton } from "@/components/member-logout-button";
 
 // Reads a live session cookie + live connection state — must never be
 // statically cached, same reasoning as /connect and /admin/find-a-time.
@@ -22,15 +21,12 @@ export default async function MePage() {
 
   return (
     <div className="mx-auto max-w-2xl py-16">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Your availability</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Set the days and times you&apos;re available for sessions, and how many
-            you&apos;ll take per week.
-          </p>
-        </div>
-        <MemberLogoutButton />
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Your availability</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Set the days and times you&apos;re available for sessions, and how many
+          you&apos;ll take per week.
+        </p>
       </div>
       <div className="mt-8">
         <MemberSettingsForm

@@ -41,15 +41,17 @@ async function handleAdminRoute(req: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    return NextResponse.redirect(new URL("/admin/login", req.url));
+    return NextResponse.redirect(new URL("/connect", req.url));
   }
 
   if (!session) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const loginUrl = new URL("/admin/login", req.url);
-    return NextResponse.redirect(loginUrl);
+    // /admin/login itself just redirects to /connect now (it's no longer
+    // linked from anywhere, kept only as a bookmark safety net) — go
+    // straight there instead of bouncing through it.
+    return NextResponse.redirect(new URL("/connect", req.url));
   }
 
   return NextResponse.next();

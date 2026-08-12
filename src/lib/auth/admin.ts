@@ -1,6 +1,13 @@
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { normalizeEmail } from "@/lib/email";
-import { verifyValue, TOKEN_PURPOSE, ADMIN_COOKIE_NAME } from "@/lib/auth/session";
+import {
+  signValue,
+  verifyValue,
+  TOKEN_PURPOSE,
+  ADMIN_COOKIE_NAME,
+  ADMIN_SESSION_TTL_SECONDS,
+} from "@/lib/auth/session";
 import { env } from "@/lib/env";
 
 /** Checks `email` against the ADMIN_EMAILS allowlist (comma-separated env var).
@@ -34,4 +41,23 @@ export async function requireAdminSession() {
   // very next request, not after their cookie's 8h TTL expires.
   if (!isAdminEmail(session.email, env.ADMIN_EMAILS)) return null;
   return session;
+}
+
+/** Signs an admin session and sets it on `res` — the one place this happens,
+ * so /api/admin/login and /api/connect/start's admin branch can't drift
+ * apart on TTL, cookie flags, or payload shape. */
+export async function setAdminSessionCookie(res: NextResponse, email: string) {
+  const token = await signValue(
+    TOKEN_PURPOSE.adminSession,
+    { email: normalizeEmail(email) },
+    env.SESSION_SECRET,
+    ADMIN_SESSION_TTL_SECONDS
+  );
+  res.cookies.set(ADMIN_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: ADMIN_SESSION_TTL_SECONDS,
+    path: "/",
+  });
 }
