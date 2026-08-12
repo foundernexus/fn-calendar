@@ -43,9 +43,10 @@ export async function requireAdminSession() {
   return session;
 }
 
-/** Signs an admin session and sets it on `res` — the one place this happens,
- * so /api/admin/login and /api/connect/start's admin branch can't drift
- * apart on TTL, cookie flags, or payload shape. */
+/** Signs an admin session and sets it on `res`. Called from exactly one
+ * place — /api/nylas/callback, and only after verifying the OAuth-authenticated
+ * email matches the admin's registered address — so no other code path can
+ * mint an admin session from an unverified email string. */
 export async function setAdminSessionCookie(res: NextResponse, email: string) {
   const token = await signValue(
     TOKEN_PURPOSE.adminSession,

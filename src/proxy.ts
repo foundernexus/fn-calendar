@@ -12,7 +12,11 @@ export const config = {
   matcher: ["/admin/:path*", "/api/admin/:path*", "/me/:path*", "/api/me/:path*"],
 };
 
-const PUBLIC_PATHS = new Set(["/admin/login", "/api/admin/login"]);
+// /api/admin/login no longer exists (deleted — same bare-email vulnerability
+// as the old /api/connect/start fast path, see /api/nylas/callback for the
+// real admin-verification logic). /admin/login stays as a bookmark safety
+// net that just redirects to /connect — never links anywhere itself.
+const PUBLIC_PATHS = new Set(["/admin/login"]);
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;

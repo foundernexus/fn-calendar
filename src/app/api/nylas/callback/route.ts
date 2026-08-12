@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { calendarConnections } from "@/db/schema";
+import { getMemberById } from "@/db/queries";
 import {
   signValue,
   verifyValue,
@@ -9,7 +10,9 @@ import {
   MEMBER_COOKIE_NAME,
   MEMBER_SESSION_TTL_SECONDS,
 } from "@/lib/auth/session";
+import { isAdminEmail, setAdminSessionCookie } from "@/lib/auth/admin";
 import { exchangeNylasCode } from "@/lib/nylas";
+import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 
 export async function GET(request: Request) {
@@ -35,6 +38,32 @@ export async function GET(request: Request) {
     exchanged = await exchangeNylasCode(code);
   } catch {
     return NextResponse.redirect(new URL("/connect?status=error", env.APP_URL));
+  }
+
+  // Admin login is only ever granted here, never on the bare email POSTed to
+  // /api/connect/start — typing a string isn't proof of owning that inbox.
+  // The Google/Microsoft account actually signed into during this OAuth round
+  // trip must match the admin's registered email exactly, and they must
+  // still be on the live ADMIN_EMAILS allowlist (in case they were removed
+  // while this 10-minute flow was in flight). On any mismatch, bail out
+  // BEFORE touching calendar_connections — an attacker who requested this
+  // flow for someone else's memberId but authenticated with their own
+  // account must not silently overwrite that person's real connection.
+  let grantAdminSession = false;
+  if (statePayload.redirectTo === "admin") {
+    const targetMember = await getMemberById(statePayload.memberId);
+    const emailMatches =
+      !!targetMember && normalizeEmail(exchanged.email) === normalizeEmail(targetMember.email);
+    const stillAdmin = !!targetMember && isAdminEmail(targetMember.email, env.ADMIN_EMAILS);
+    if (!emailMatches || !stillAdmin) {
+      console.warn("[nylas/callback] admin verification failed", {
+        memberId: statePayload.memberId,
+        expectedEmail: targetMember?.email,
+        actualEmail: exchanged.email,
+      });
+      return NextResponse.redirect(new URL("/connect?status=error", env.APP_URL));
+    }
+    grantAdminSession = true;
   }
 
   const provider = exchanged.provider ?? "unknown";
@@ -108,5 +137,10 @@ export async function GET(request: Request) {
     maxAge: MEMBER_SESSION_TTL_SECONDS,
     path: "/",
   });
+  // Only reached when redirectTo === "admin" AND the verification above
+  // passed — this is the one and only place an admin session is ever minted.
+  if (grantAdminSession) {
+    await setAdminSessionCookie(response, exchanged.email);
+  }
   return response;
 }
