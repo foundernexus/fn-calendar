@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { TimezoneSelect } from "@/components/timezone-select";
+import { TimeSelect } from "@/components/time-select";
 import { isSupportedTimezone } from "@/lib/timezones";
 
 type DayState = { enabled: boolean; startTime: string; endTime: string };
@@ -251,20 +252,14 @@ export function MemberSettingsForm({
                   <span className="text-sm text-foreground">{DAY_LABELS[day]}</span>
                   {d.enabled ? (
                     <div className="flex items-center gap-2 justify-self-start">
-                      <Input
-                        type="time"
-                        lang="en-US"
+                      <TimeSelect
                         value={d.startTime}
-                        onChange={(e) => updateDay(day, { startTime: e.target.value })}
-                        className="w-[6.5rem]"
+                        onChange={(startTime) => updateDay(day, { startTime })}
                       />
                       <span className="text-muted-foreground">–</span>
-                      <Input
-                        type="time"
-                        lang="en-US"
+                      <TimeSelect
                         value={d.endTime}
-                        onChange={(e) => updateDay(day, { endTime: e.target.value })}
-                        className="w-[6.5rem]"
+                        onChange={(endTime) => updateDay(day, { endTime })}
                       />
                     </div>
                   ) : (
