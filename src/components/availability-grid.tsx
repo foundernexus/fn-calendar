@@ -9,8 +9,9 @@ import {
   generateTimeRows,
   isWeekendDateString,
   zonedDateTimeParts,
+  AVAILABILITY_INTERVAL_MINUTES,
 } from "@/lib/time";
-import type { Slot } from "@/components/results-list";
+import type { Slot, BookedSlot } from "@/components/results-list";
 
 function getDaysInRange(startDate: string, endDate: string) {
   const days: string[] = [];
@@ -22,8 +23,14 @@ function getDaysInRange(startDate: string, endDate: string) {
   return days;
 }
 
+function timeToMinutes(time: string) {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
 export function AvailabilityGrid({
   slots,
+  bookedSlots,
   startDate,
   endDate,
   workingHoursStart,
@@ -33,6 +40,7 @@ export function AvailabilityGrid({
   onSelectSlot,
 }: {
   slots: Slot[];
+  bookedSlots: BookedSlot[];
   startDate: string;
   endDate: string;
   workingHoursStart: string;
@@ -62,6 +70,29 @@ export function AvailabilityGrid({
     const { date, time } = zonedDateTimeParts(slot.startUnix, timezone);
     const key = `${date}_${time}`;
     if (!slotsByCell.has(key)) slotsByCell.set(key, slot);
+  }
+
+  // A booked session's duration (30/45/60 min) doesn't always align to the
+  // grid's AVAILABILITY_INTERVAL_MINUTES rows the way a candidate slot does
+  // (e.g. a 45-min session doesn't end on a 30-min mark) — so this marks
+  // every row whose 30-min window OVERLAPS the booked event at all, not just
+  // an exact-match row. A booked event spanning midnight in this timezone
+  // (never happens for anything created through this tool — max duration is
+  // 60 min) is defensively skipped rather than guessed at.
+  const bookedByCell = new Map<string, BookedSlot>();
+  for (const booked of bookedSlots) {
+    const start = zonedDateTimeParts(booked.startUnix, timezone);
+    const end = zonedDateTimeParts(booked.endUnix, timezone);
+    if (start.date !== end.date) continue;
+    const startMinutes = timeToMinutes(start.time);
+    const endMinutes = timeToMinutes(end.time);
+    for (const time of timeRows) {
+      const rowStart = timeToMinutes(time);
+      const rowEnd = rowStart + AVAILABILITY_INTERVAL_MINUTES;
+      if (rowStart < endMinutes && rowEnd > startMinutes) {
+        bookedByCell.set(`${start.date}_${time}`, booked);
+      }
+    }
   }
 
   return (
@@ -117,6 +148,18 @@ export function AvailabilityGrid({
                   {formatTimeLabel(time)}
                 </div>
                 {visibleDays.map((day) => {
+                  const booked = bookedByCell.get(`${day}_${time}`);
+                  if (booked) {
+                    return (
+                      <div
+                        key={`${day}_${time}`}
+                        title={booked.title}
+                        className="truncate border-b border-l border-border bg-white px-1.5 py-1.5 text-[10px] text-foreground ring-1 ring-inset ring-foreground/15"
+                      >
+                        {booked.title}
+                      </div>
+                    );
+                  }
                   const slot = slotsByCell.get(`${day}_${time}`);
                   return (
                     <button

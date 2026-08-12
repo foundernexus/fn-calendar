@@ -1,4 +1,4 @@
-import { eq, inArray, and, gte, lte, sql } from "drizzle-orm";
+import { eq, inArray, and, or, gte, lte, lt, gt, sql } from "drizzle-orm";
 import { db } from "./index";
 import { calendarConnections, members, memberAvailability, events, eventAttendees } from "./schema";
 import { normalizeEmail } from "@/lib/email";
@@ -66,6 +66,40 @@ export async function getConfirmedEventsForMembers(memberIds: number[], from: Da
         lte(events.startsAt, to)
       )
     );
+}
+
+/** Every CONFIRMED event overlapping [from, to) that any of `memberIds` is
+ * either leading or attending — used to mark already-booked cells on the
+ * find-a-time grid, so an admin sees WHY a slot is unavailable (something
+ * booked through this tool) instead of an unexplained gray cell. Deduped by
+ * event id: a session could match via both its organizer and one of its
+ * guests being in `memberIds`, or via two selected guests both being on the
+ * same event — either way it's one block, not two. */
+export async function getBookedEventsOverlapping(memberIds: number[], from: Date, to: Date) {
+  if (memberIds.length === 0) return [];
+  const rows = await db
+    .select({
+      id: events.id,
+      title: events.title,
+      startsAt: events.startsAt,
+      endsAt: events.endsAt,
+    })
+    .from(events)
+    .leftJoin(eventAttendees, eq(eventAttendees.eventId, events.id))
+    .where(
+      and(
+        eq(events.status, "confirmed"),
+        or(inArray(events.organizerMemberId, memberIds), inArray(eventAttendees.memberId, memberIds)),
+        lt(events.startsAt, to),
+        gt(events.endsAt, from)
+      )
+    );
+
+  const byId = new Map<number, { id: number; title: string; startsAt: Date; endsAt: Date }>();
+  for (const row of rows) {
+    if (!byId.has(row.id)) byId.set(row.id, row);
+  }
+  return [...byId.values()];
 }
 
 export type LatestConnectionRow = {

@@ -1,6 +1,7 @@
 import { AvailabilityGrid } from "@/components/availability-grid";
 
 export type Slot = { startUnix: number; endUnix: number; label: string };
+export type BookedSlot = { startUnix: number; endUnix: number; title: string };
 
 export type AvailabilityResult = {
   slots: Slot[];
@@ -13,6 +14,10 @@ export type AvailabilityResult = {
    * cap — see api/admin/availability for how this differs from Nylas finding
    * nothing at all. */
   filteredByPreferences?: boolean;
+  /** Real sessions already booked through this tool, overlapping the search
+   * and involving anyone selected — rendered on the grid as a distinct cell
+   * instead of an unexplained gray "not available" one. */
+  bookedSlots?: BookedSlot[];
 };
 
 /** The search parameters the grid needs — snapshotted by the caller at
@@ -69,7 +74,7 @@ export function ResultsList({
         )}
       </p>
 
-      {result.slots.length === 0 ? (
+      {result.slots.length === 0 && (result.bookedSlots?.length ?? 0) === 0 ? (
         <p className="mt-4 text-sm text-foreground">
           {result.filteredByPreferences
             ? "Everyone's calendar overlaps at some point in this range, but it all falls outside someone's stated availability, or a guest is already at their weekly session limit. Try adjusting the working hours, a different date range, or ask them to update their preferences on /me."
@@ -84,9 +89,14 @@ export function ResultsList({
             <span className="flex items-center gap-1.5">
               <span className="inline-block size-3 rounded-xs bg-secondary" /> Not available
             </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block size-3 rounded-xs border border-foreground/30 bg-white" /> Already
+              booked
+            </span>
           </div>
           <AvailabilityGrid
             slots={result.slots}
+            bookedSlots={result.bookedSlots ?? []}
             startDate={searchedParams.startDate}
             endDate={searchedParams.endDate}
             workingHoursStart={searchedParams.workingHoursStart}

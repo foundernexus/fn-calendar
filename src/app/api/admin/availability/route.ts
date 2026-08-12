@@ -5,6 +5,7 @@ import {
   getMembersByIds,
   getMemberAvailabilityForMembers,
   getConfirmedEventsForMembers,
+  getBookedEventsOverlapping,
 } from "@/db/queries";
 import { getCollectiveAvailability } from "@/lib/nylas";
 import {
@@ -170,8 +171,9 @@ export async function POST(request: Request) {
 
   let slots;
   let confirmedEvents;
+  let bookedEvents;
   try {
-    [slots, confirmedEvents] = await Promise.all([
+    [slots, confirmedEvents, bookedEvents] = await Promise.all([
       getCollectiveAvailability({
         participantEmails,
         startTime,
@@ -199,6 +201,10 @@ export async function POST(request: Request) {
         new Date((startTime - 7 * 86_400) * 1000),
         new Date((endTime + 7 * 86_400) * 1000)
       ),
+      // Unlike the weekly-cap fetch above, this only needs to cover the
+      // visible search range itself, not a buffered week either side — the
+      // grid never renders cells outside [startDate, endDate] to begin with.
+      getBookedEventsOverlapping(allSelectedIds, new Date(startTime * 1000), new Date(endTime * 1000)),
     ]);
   } catch (err) {
     console.error("[admin/availability] Nylas availability call failed", {
@@ -268,5 +274,13 @@ export async function POST(request: Request) {
     // saying "no overlapping free time" when calendars genuinely overlap and
     // it's actually a stated preference doing the filtering.
     filteredByPreferences: slots.length > 0 && availableSlots.length === 0,
+    // Real sessions already booked through this tool involving anyone
+    // selected — shown on the grid as a distinct "already booked" cell
+    // instead of an unexplained gray one.
+    bookedSlots: bookedEvents.map((e) => ({
+      startUnix: Math.floor(e.startsAt.getTime() / 1000),
+      endUnix: Math.floor(e.endsAt.getTime() / 1000),
+      title: e.title,
+    })),
   });
 }
