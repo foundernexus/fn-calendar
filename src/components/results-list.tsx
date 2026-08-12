@@ -8,6 +8,10 @@ export type AvailabilityResult = {
   totalSelected: number;
   notConnectedNames: string[];
   error?: string;
+  /** True when Nylas found real calendar overlap but it all got filtered out
+   * by someone's stated /me availability window — see api/admin/availability
+   * for how this differs from Nylas finding nothing at all. */
+  filteredByPreferences?: boolean;
 };
 
 /** The search parameters the grid needs — snapshotted by the caller at
@@ -66,7 +70,9 @@ export function ResultsList({
 
       {result.slots.length === 0 ? (
         <p className="mt-4 text-sm text-foreground">
-          No overlapping free time found in this range.
+          {result.filteredByPreferences
+            ? "Everyone's calendar overlaps at some point in this range, but it all falls outside someone's stated availability (set on their /me page). Try adjusting the working hours, or ask them to update their preferences."
+            : "No overlapping free time found in this range."}
         </p>
       ) : (
         <div className="mt-4">

@@ -111,11 +111,9 @@ export const eventAttendees = pgTable(
   (t) => [uniqueIndex("event_attendees_event_member_unique").on(t.eventId, t.memberId)]
 );
 
-// A member's own weekly availability preference, set on /me — independent of
-// (and currently NOT consulted by) the admin's find-a-time collective
-// availability search, which only ever looks at real calendar free/busy.
-// Wiring these together is a deliberate later step, not part of this table's
-// initial purpose.
+// A member's own weekly availability preference, set on /me — checked by the
+// admin's find-a-time search (see slotMatchesMemberAvailability in
+// src/lib/time.ts) on top of real calendar free/busy, not instead of it.
 export const memberAvailability = pgTable(
   "member_availability",
   {

@@ -212,5 +212,11 @@ export async function POST(request: Request) {
     checkedCount,
     totalSelected: allSelectedIds.length,
     notConnectedNames,
+    // True only when Nylas found real calendar overlap but every one of
+    // those slots got excluded by someone's stated /me availability window —
+    // distinct from Nylas finding nothing at all, so the UI isn't stuck
+    // saying "no overlapping free time" when calendars genuinely overlap and
+    // it's actually a stated preference doing the filtering.
+    filteredByPreferences: slots.length > 0 && availableSlots.length === 0,
   });
 }
