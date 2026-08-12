@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MemberSelect, MemberMultiSelect } from "@/components/member-picker";
+import { AddGuestDialog } from "@/components/add-guest-dialog";
 import {
   ResultsList,
   type AvailabilityResult,
@@ -39,7 +40,18 @@ function defaultDateString(daysFromNow: number) {
   return `${year}-${month}-${day}`;
 }
 
-export function FindATimeForm({ members }: { members: MemberWithConnection[] }) {
+export function FindATimeForm({
+  members: initialMembers,
+  connectUrl,
+}: {
+  members: MemberWithConnection[];
+  connectUrl: string;
+}) {
+  // Lifted into state so a newly-added guest (AddGuestDialog) is reflected
+  // immediately without a full page reload — though since they start out not
+  // connected, they won't actually appear in connectedMembers/facilitators
+  // below until they connect a calendar themselves.
+  const [members, setMembers] = useState(initialMembers);
   const connectedMembers = members.filter((m) => m.connected);
   // Session lead is a curated subset — connecting a calendar makes someone
   // eligible as a guest, not automatically eligible to lead a session.
@@ -158,7 +170,13 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="guests">Guests</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="guests">Guests</Label>
+            <AddGuestDialog
+              connectUrl={connectUrl}
+              onAdded={(member) => setMembers((prev) => [...prev, member])}
+            />
+          </div>
           <MemberMultiSelect
             id="guests"
             members={connectedMembers}

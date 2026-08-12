@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getMembersWithConnectionStatus } from "@/db/queries";
 import { FindATimeForm } from "@/components/find-a-time-form";
 import { requireAdminSession } from "@/lib/auth/admin";
+import { env } from "@/lib/env";
 
 // Authenticated (gated by proxy.ts) and reads live connection state — must
 // never be statically cached. Without this, Next tries to prerender it at
@@ -25,7 +26,7 @@ export default async function FindATimePage() {
         </p>
       </div>
       <div className="mt-8">
-        <FindATimeForm members={members} />
+        <FindATimeForm members={members} connectUrl={`${env.APP_URL}/connect`} />
       </div>
     </div>
   );
