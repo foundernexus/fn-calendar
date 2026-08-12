@@ -8,13 +8,12 @@ import { env } from "@/lib/env";
 
 const STATE_TTL_SECONDS = 60 * 10; // matches /api/connect/start
 
-/** The shared /connect form always routes an admin email straight to the
- * admin dashboard — which means an admin who's ALSO a member (e.g. Tobias
- * and Karin, who lead sessions as facilitators and need their own connected
- * calendar) has no way to reach the calendar-connect flow through that form.
- * This is their way back in: same Nylas hosted-auth flow as the member
- * path, just entered from inside the admin area using their own registered
- * email instead of one typed into a form. */
+/** For an admin who's already on the dashboard and needs to (re)connect
+ * their own calendar — e.g. their connection broke, or they skipped it on
+ * first login. Same Nylas hosted-auth flow as the member path, tagged
+ * `redirectTo: "admin"` so /api/nylas/callback sends them back to the admin
+ * dashboard afterward instead of /me (see /api/connect/start for the other
+ * place this same tag is used, on an admin's very first login). */
 export async function POST() {
   const session = await requireAdminSession();
   if (!session) {
@@ -31,7 +30,7 @@ export async function POST() {
 
   const state = await signValue(
     TOKEN_PURPOSE.connectState,
-    { memberId: member.id },
+    { memberId: member.id, redirectTo: "admin" as const },
     env.SESSION_SECRET,
     STATE_TTL_SECONDS
   );

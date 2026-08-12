@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getMemberByEmail } from "@/db/queries";
+import { getMemberByEmail, getActiveConnections } from "@/db/queries";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
 import { isAdminEmail, setAdminSessionCookie } from "@/lib/auth/admin";
 import { buildHostedAuthUrl } from "@/lib/nylas";
@@ -13,15 +13,15 @@ const STATE_TTL_SECONDS = 60 * 10; // 10 minutes — just long enough for the OA
 
 /** The single shared sign-in entry point for everyone — admins and members
  * type their email into the same form (src/components/connect-form.tsx).
- * An admin email short-circuits straight to an admin session; anyone else
- * falls through to the member calendar-connect flow below.
  *
- * Note this means an email that's BOTH an admin and a member (e.g. a
- * facilitator who's also an admin) always lands in the admin dashboard from
- * THIS form — that's the intended behavior. If they've never connected a
- * calendar, or need to reconnect, they can't get there through this form at
- * all (it always wins to admin) — see /api/admin/connect-calendar for the
- * admin-only path back into the calendar-connect flow for their own email. */
+ * An admin email always gets an admin session. If they're also a member
+ * (a facilitator — e.g. Tobias, Karin) without a currently-connected
+ * calendar, they go through the SAME Nylas hosted-auth flow a guest would,
+ * just tagged with `redirectTo: "admin"` in the state token so
+ * /api/nylas/callback sends them to the admin dashboard afterward instead
+ * of /me. Already-connected admins (or admins with no member row at all —
+ * nothing to connect) skip straight to the dashboard. Anyone who isn't an
+ * admin falls through to the plain member calendar-connect flow below. */
 export async function POST(request: Request) {
   let json: unknown;
   try {
@@ -36,6 +36,25 @@ export async function POST(request: Request) {
   }
 
   if (isAdminEmail(parsed.data.email, env.ADMIN_EMAILS)) {
+    const member = await getMemberByEmail(parsed.data.email);
+    const activeConnections = member ? await getActiveConnections([member.id]) : [];
+
+    if (member && activeConnections.length === 0) {
+      const state = await signValue(
+        TOKEN_PURPOSE.connectState,
+        { memberId: member.id, redirectTo: "admin" as const },
+        env.SESSION_SECRET,
+        STATE_TTL_SECONDS
+      );
+      const url = buildHostedAuthUrl({
+        loginHint: normalizeEmail(member.email),
+        state,
+      });
+      const res = NextResponse.json({ url });
+      await setAdminSessionCookie(res, parsed.data.email);
+      return res;
+    }
+
     const res = NextResponse.json({ redirect: "/admin/find-a-time" });
     await setAdminSessionCookie(res, parsed.data.email);
     return res;
