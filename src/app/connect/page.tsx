@@ -1,12 +1,9 @@
 import { redirect } from "next/navigation";
-import { getMemberByEmail, getActiveConnections } from "@/db/queries";
 import { ConnectForm } from "@/components/connect-form";
 import { requireMemberSession } from "@/lib/auth/member";
 import { requireAdminSession } from "@/lib/auth/admin";
 
-// Reads live connection state and must never be statically cached — currently
-// only dynamic as a side effect of reading searchParams before the DB call;
-// making it explicit means it stays correct even if that ordering changes.
+// Reads live session cookies and must never be statically cached.
 export const dynamic = "force-dynamic";
 
 export default async function ConnectPage({ searchParams }: PageProps<"/connect">) {
@@ -27,25 +24,6 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
     if (memberSession) redirect("/me");
   }
 
-  let initialStatus: "connected" | "not_connected" = "not_connected";
-  let initialProvider: string | undefined;
-  let initialGrantEmail: string | undefined;
-
-  if (email) {
-    const member = await getMemberByEmail(email);
-    if (member) {
-      const active = await getActiveConnections([member.id]);
-      if (active.length > 0) {
-        initialStatus = "connected";
-        initialProvider = active[0].provider;
-        // The actually-connected calendar account can differ from the
-        // registered email (e.g. a personal Gmail) — show it explicitly so a
-        // member can tell if they connected the wrong account.
-        initialGrantEmail = active[0].grant_email;
-      }
-    }
-  }
-
   return (
     <div className="mx-auto max-w-md py-16">
       <h1 className="text-2xl font-bold text-foreground">Sign in</h1>
@@ -60,12 +38,7 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
         </p>
       )}
       <div className="mt-8">
-        <ConnectForm
-          initialEmail={email}
-          initialStatus={initialStatus}
-          initialProvider={initialProvider}
-          initialGrantEmail={initialGrantEmail}
-        />
+        <ConnectForm initialEmail={email} />
       </div>
     </div>
   );
