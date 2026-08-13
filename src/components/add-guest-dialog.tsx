@@ -64,6 +64,7 @@ export function AddGuestDialog({
         email: data.member.email,
         fullName: data.member.fullName,
         connected: false,
+        needsReconnect: false,
         isFacilitator: false,
         provider: null,
         grantEmail: null,

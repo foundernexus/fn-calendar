@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireAdminSession } from "@/lib/auth/admin";
 import { requireMemberSession } from "@/lib/auth/member";
-import { getMemberByEmail, getActiveConnections } from "@/db/queries";
+import { getMemberByEmail, getMemberConnectionState } from "@/db/queries";
 import { SignOutControl } from "@/components/sign-out-control";
 import { AdminConnectCalendarButton } from "@/components/admin-connect-calendar-button";
 
@@ -28,10 +28,7 @@ export async function SiteHeader() {
     const member = await getMemberByEmail(adminSession.email);
     adminHasMemberRow = !!member;
     if (member) {
-      const [connection] = await getActiveConnections([member.id]);
-      adminConnection = connection
-        ? { provider: connection.provider, grantEmail: connection.grant_email }
-        : null;
+      adminConnection = (await getMemberConnectionState(member.id)).connection;
     }
   }
 

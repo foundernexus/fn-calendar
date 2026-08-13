@@ -2,6 +2,7 @@ import { eq, inArray, and, or, gte, lte, lt, gt, sql } from "drizzle-orm";
 import { db } from "./index";
 import { calendarConnections, members, memberAvailability, events, eventAttendees } from "./schema";
 import { normalizeEmail } from "@/lib/email";
+import { env } from "@/lib/env";
 
 /** Case-insensitive member lookup — always goes through normalizeEmail so a
  * mixed-case input never silently misses a stored row. */
@@ -108,10 +109,22 @@ export type LatestConnectionRow = {
   nylas_grant_id: string;
   provider: string;
   grant_email: string;
+  nylas_client_id: string | null;
   connection_status: "connected" | "revoked";
   connected_at: Date;
   revoked_at: Date | null;
 };
+
+/** A connection is only actually usable if it's marked connected AND belongs
+ * to the Nylas app we're currently configured against — grants don't carry
+ * over between Nylas apps (Sandbox vs Production, or after rotating to a new
+ * app entirely), so a row with a stale nylas_client_id will fail at the
+ * Nylas API regardless of what connection_status says. Rows from before this
+ * column existed (nylas_client_id is null) are treated as stale rather than
+ * assumed valid — we have no record of which app actually created them. */
+export function isConnectionUsable(row: LatestConnectionRow) {
+  return row.connection_status === "connected" && row.nylas_client_id === env.NYLAS_CLIENT_ID;
+}
 
 /**
  * The latest connection row per member (a member can reconnect and produce
@@ -145,10 +158,28 @@ export async function getLatestConnections(memberIds?: number[]) {
 }
 
 /** Same as `getLatestConnections`, filtered to members whose latest connection is
- * actually usable — i.e. connection_status = 'connected', not revoked. */
+ * actually usable right now — connected AND under the currently active Nylas
+ * app (see isConnectionUsable). */
 export async function getActiveConnections(memberIds?: number[]) {
   const rows = await getLatestConnections(memberIds);
-  return rows.filter((row) => row.connection_status === "connected");
+  return rows.filter(isConnectionUsable);
+}
+
+/** A single member's connection state, distinguishing three cases the UI
+ * needs to tell apart: never connected, connected and usable, or connected
+ * at some point but now stale (belongs to a different Nylas app than the one
+ * currently configured — e.g. after switching Sandbox/Production tiers) and
+ * needs reconnecting. */
+export async function getMemberConnectionState(memberId: number): Promise<{
+  connection: { provider: string; grantEmail: string } | null;
+  needsReconnect: boolean;
+}> {
+  const [row] = await getLatestConnections([memberId]);
+  if (!row) return { connection: null, needsReconnect: false };
+  if (isConnectionUsable(row)) {
+    return { connection: { provider: row.provider, grantEmail: row.grant_email }, needsReconnect: false };
+  }
+  return { connection: null, needsReconnect: row.connection_status === "connected" };
 }
 
 export type MemberWithConnection = {
@@ -156,6 +187,11 @@ export type MemberWithConnection = {
   email: string;
   fullName: string;
   connected: boolean;
+  // True when this member has a connection row that's marked "connected" but
+  // belongs to a different Nylas app than the one currently configured — it
+  // won't work for a search/booking (see isConnectionUsable) and needs a
+  // fresh reconnect, as opposed to never having connected at all.
+  needsReconnect: boolean;
   isFacilitator: boolean;
   provider: string | null;
   grantEmail: string | null;
@@ -169,19 +205,21 @@ export type MemberWithConnection = {
  * is a facilitator). */
 export async function getMembersWithConnectionStatus(): Promise<MemberWithConnection[]> {
   const allMembers = await db.select().from(members).orderBy(members.fullName);
-  const active = await getActiveConnections(allMembers.map((m) => m.id));
-  const activeByMember = new Map(active.map((row) => [row.member_id, row]));
+  const latest = await getLatestConnections(allMembers.map((m) => m.id));
+  const latestByMember = new Map(latest.map((row) => [row.member_id, row]));
 
   return allMembers.map((m) => {
-    const connection = activeByMember.get(m.id);
+    const connection = latestByMember.get(m.id);
+    const usable = !!connection && isConnectionUsable(connection);
     return {
       id: m.id,
       email: m.email,
       fullName: m.fullName,
-      connected: !!connection,
+      connected: usable,
+      needsReconnect: !!connection && connection.connection_status === "connected" && !usable,
       isFacilitator: m.isFacilitator,
-      provider: connection?.provider ?? null,
-      grantEmail: connection?.grant_email ?? null,
+      provider: usable ? connection!.provider : null,
+      grantEmail: usable ? connection!.grant_email : null,
     };
   });
 }

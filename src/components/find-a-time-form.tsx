@@ -28,6 +28,12 @@ import { TIMEZONES } from "@/lib/time";
 
 const DURATIONS = [30, 45, 60] as const;
 
+// Nylas Sandbox apps hard-cap at 5 connected accounts total — no overage, no
+// increasing it. This is just a heads-up threshold, not an enforced limit:
+// harmless to leave showing after eventually moving back to a Production
+// app (which has no such cap), since it only warns, never blocks anything.
+const SANDBOX_CONNECTED_ACCOUNT_LIMIT = 5;
+
 /** Local date, not UTC — `toISOString()` would return tomorrow's date for
  * anyone west of UTC in the evening (e.g. 6pm PT is already after midnight
  * UTC), silently dropping "today" from the default range. */
@@ -53,6 +59,11 @@ export function FindATimeForm({
   // below until they connect a calendar themselves.
   const [members, setMembers] = useState(initialMembers);
   const connectedMembers = members.filter((m) => m.connected);
+  const nearSandboxLimit = connectedMembers.length >= SANDBOX_CONNECTED_ACCOUNT_LIMIT - 1;
+  // Previously connected under a different Nylas app (e.g. we switched
+  // Sandbox/Production tiers) — their old connection no longer works, but
+  // they shouldn't look identical to someone who's simply never connected.
+  const needsReconnectMembers = members.filter((m) => m.needsReconnect);
   // Session lead is a curated subset — connecting a calendar makes someone
   // eligible as a guest, not automatically eligible to lead a session.
   const facilitators = connectedMembers.filter((m) => m.isFacilitator);
@@ -141,6 +152,31 @@ export function FindATimeForm({
 
   return (
     <div className="space-y-8">
+      <p
+        className={
+          nearSandboxLimit
+            ? "text-sm font-medium text-destructive"
+            : "text-sm text-muted-foreground"
+        }
+      >
+        {connectedMembers.length} calendar{connectedMembers.length === 1 ? "" : "s"} connected
+        {nearSandboxLimit &&
+          ` — Nylas Sandbox apps cap at ${SANDBOX_CONNECTED_ACCOUNT_LIMIT} connected calendars total. If you're on Sandbox, new connections will start failing once you hit that.`}
+      </p>
+      {needsReconnectMembers.length > 0 && (
+        <div className="rounded-lg border border-border bg-secondary p-4 text-sm text-secondary-foreground">
+          <p className="font-medium">
+            {needsReconnectMembers.length === 1
+              ? "1 member needs to reconnect their calendar"
+              : `${needsReconnectMembers.length} members need to reconnect their calendars`}
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            {needsReconnectMembers.map((m) => m.fullName).join(", ")} — connected under a
+            previous setup that&apos;s no longer active, so they&apos;re excluded from the
+            pickers below until they reconnect on their own /me page.
+          </p>
+        </div>
+      )}
       <form
         onSubmit={handleSearch}
         className="space-y-6 rounded-lg border border-border bg-card p-6 shadow-card"

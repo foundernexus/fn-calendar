@@ -61,6 +61,14 @@ export const calendarConnections = pgTable(
     nylasGrantId: text("nylas_grant_id").notNull().unique(),
     provider: text("provider").notNull(),
     grantEmail: text("grant_email").notNull(),
+    // Which Nylas application (client_id) this grant was created under —
+    // grants aren't portable between Nylas apps (e.g. Sandbox vs Production,
+    // or after rotating to a new app), so a row whose nylasClientId doesn't
+    // match the currently active env.NYLAS_CLIENT_ID is unusable even though
+    // connectionStatus still says "connected". Nullable: rows created before
+    // this column existed have no recorded value and are treated as stale
+    // (see isConnectionUsable in db/queries.ts).
+    nylasClientId: text("nylas_client_id"),
     connectionStatus: connectionStatusEnum("connection_status")
       .notNull()
       .default("connected"),

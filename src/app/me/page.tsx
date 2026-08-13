@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireMemberSession } from "@/lib/auth/member";
-import { getMemberAvailability, getActiveConnections } from "@/db/queries";
+import { getMemberAvailability, getMemberConnectionState } from "@/db/queries";
 import { MemberSettingsForm } from "@/components/member-settings-form";
 
 // Reads a live session cookie + live connection state — must never be
@@ -13,11 +13,10 @@ export default async function MePage() {
   const session = await requireMemberSession();
   if (!session) redirect("/connect");
 
-  const [availability, activeConnections] = await Promise.all([
+  const [availability, connectionState] = await Promise.all([
     getMemberAvailability(session.memberId),
-    getActiveConnections([session.memberId]),
+    getMemberConnectionState(session.memberId),
   ]);
-  const connection = activeConnections[0] ?? null;
 
   return (
     <div className="mx-auto max-w-3xl py-8">
@@ -38,11 +37,8 @@ export default async function MePage() {
             startTime: a.startTime,
             endTime: a.endTime,
           }))}
-          connection={
-            connection
-              ? { provider: connection.provider, grantEmail: connection.grant_email }
-              : null
-          }
+          connection={connectionState.connection}
+          needsReconnect={connectionState.needsReconnect}
         />
       </div>
     </div>

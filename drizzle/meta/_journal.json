@@ -36,6 +36,13 @@
       "when": 1786557393169,
       "tag": "0004_add_calendar_connections_index_and_attendee_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786590281450,
+      "tag": "0005_first_celestials",
+      "breakpoints": true
     }
   ]
 }

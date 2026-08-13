@@ -63,12 +63,19 @@ export function MemberSettingsForm({
   weeklySessionCap: initialCap,
   initialAvailability,
   connection: initialConnection,
+  needsReconnect,
 }: {
   fullName: string;
   timezone: string | null;
   weeklySessionCap: number;
   initialAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
   connection: { provider: string; grantEmail: string } | null;
+  /** They were connected before, but that connection now belongs to a
+   * different Nylas app (e.g. we switched Sandbox/Production tiers) and no
+   * longer works — distinct from never having connected at all, so the copy
+   * below can say "reconnect" instead of implying something's wrong with
+   * their calendar itself. */
+  needsReconnect: boolean;
 }) {
   // Only ever suggests a browser-detected default when nothing's been saved
   // yet (initialTimezone is null) — never overwrites a timezone the member
@@ -185,6 +192,13 @@ export function MemberSettingsForm({
                   {providerLabel(connection.provider)} — {connection.grantEmail}
                 </span>
               </div>
+            ) : needsReconnect ? (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <Badge className="bg-secondary text-secondary-foreground">Needs reconnect</Badge>
+                <span className="text-xs text-muted-foreground">
+                  Your calendar connection is out of date — reconnect below.
+                </span>
+              </div>
             ) : (
               <p className="mt-2 text-xs text-destructive">Not connected.</p>
             )}
@@ -196,9 +210,9 @@ export function MemberSettingsForm({
                 onClick={handleReconnect}
                 disabled={reconnecting}
               >
-                {connection ? "Reconnect" : "Connect calendar"}
+                {connection || needsReconnect ? "Reconnect" : "Connect calendar"}
               </Button>
-              {connection && (
+              {(connection || needsReconnect) && (
                 <Button
                   type="button"
                   variant="secondary"
