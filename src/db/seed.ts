@@ -17,6 +17,8 @@ const SEED_MEMBERS: {
   { email: "tobiasj.hock137@gmail.com", fullName: "Tobias (personal)", role: "member", isFacilitator: false },
   { email: "karink@foundernexus.com", fullName: "Karin", role: "admin", isFacilitator: true },
   { email: "mattm@foundernexus.com", fullName: "Matt", role: "member", isFacilitator: true },
+  { email: "bohdan@fluidlabs.com", fullName: "Bohdan", role: "admin", isFacilitator: false },
+  { email: "shamil@fluidlabs.com", fullName: "Shamil", role: "admin", isFacilitator: false },
 ];
 
 async function seed() {
