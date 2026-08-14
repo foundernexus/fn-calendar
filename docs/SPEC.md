@@ -5,6 +5,28 @@
 
 ---
 
+## 0. Access — how to get in
+
+**Sign in: https://fn-calendar-liard.vercel.app/connect**
+
+Same entry point for everyone. Enter your work email, connect Google / Microsoft / iCloud, and you land on
+`/me` (member) or `/admin/find-a-time` (admin).
+
+⚠️ **There is no self-signup.** Sending someone this link is not enough — an address that has no `members`
+row gets `"No matching member found. Contact an admin to be added."` To add someone today:
+
+1. Add them to `SEED_MEMBERS` in `src/db/seed.ts` and run `npm run db:seed`.
+2. If they need admin, also add their address to `ADMIN_EMAILS` in Vercel and redeploy — read §11 first, that
+   variable is write-only and overwriting it blind drops existing admins.
+
+Removing this two-step is exactly what §9.1 is about.
+
+You must OAuth with the **same address** you were registered under. The callback verifies the Google/Microsoft
+account matches before granting anything, so signing in with a personal account fails even if your work
+address is allowlisted.
+
+---
+
 ## 1. What this is and why it exists
 
 Booking an expert session between a facilitator and several founders used to mean an email poll: propose times, wait, collect replies, discover a clash, repeat. This tool removes that loop.
