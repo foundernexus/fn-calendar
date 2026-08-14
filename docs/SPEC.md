@@ -202,6 +202,12 @@ rely on middleware alone — a matcher edit or a moved route would otherwise sil
 On `/me` a member sets their timezone, their weekly availability windows (one time range per enabled day), and
 their weekly session cap. They can also disconnect or reconnect.
 
+![The member availability page: connected calendar with reconnect/disconnect, timezone, sessions-per-week cap, and a weekly availability toggle per day](images/founder-availability.png)
+
+Note what the left card shows: the **connected account** (`tobiasj.hock137@gmail.com`) is a different address from
+the registered member — exactly the `grant_email` vs `members.email` distinction in §3. Days toggled off read
+"Unavailable" and simply have no `member_availability` row.
+
 ⚠️ **Disconnect is a local flag only.** `POST /api/me/disconnect` marks rows `revoked`; it does **not** call Nylas
 to revoke the real OAuth grant. The grant stays live on Nylas's side.
 
@@ -224,6 +230,16 @@ to revoke the real OAuth grant. The grant stays live on Nylas's side.
                                                               │
                               real Nylas event + real invites sent immediately
 ```
+
+![The find-a-time search form: session lead, guests, date range, duration, timezone, working hours, exclude weekends](images/admin-find-a-time.png)
+
+Two things in this screenshot are worth reading closely:
+
+- **The reconnect banner.** "Karin, Matt — connected under a previous setup that's no longer active" is the stale
+  `nylas_client_id` state from §3 rendered in the UI. They are excluded from the pickers until they reconnect on
+  their own `/me` page. This is a live condition, not a mock.
+- **"Only people who've connected their calendar can be selected."** The guest picker deliberately hides
+  unconnected members, because a person with no connection contributes nothing to the intersection.
 
 There is **no dry-run mode.** Clicking confirm sends real calendar invites to real people.
 
@@ -275,7 +291,21 @@ unexplained gap.
 it ("why not just return the best three slots?"), so the reasoning is recorded here.
 
 The obvious alternative is a ranked list: compute valid slots, sort them, show the top few. That is cheaper to
-build and worse at the actual job. Seven reasons:
+build and worse at the actual job.
+
+![The availability grid: blue cells where all three are free, grey where someone is not, and bordered cells for sessions already booked](images/admin-availability-grid.png)
+
+**Read that screenshot before arguing for a list.** Three legend states — everyone free, not available, already
+booked — and the week tells a story a list cannot:
+
+- **Friday 21st is wide open** from noon to 4:30.
+- **Monday 24th offers exactly one hour**, 2:00–3:00.
+- **Tuesday 25th** has a session already booked at 3:00 and one free slot at 4:00.
+- **Wednesday and Thursday are solid walls.** Nothing, all day, for anyone.
+
+A ranked list of this same data returns about six rows and conveys none of it. The admin cannot see that moving
+the session to Friday makes the problem disappear, or that pushing into the following week is pointless because
+midweek is structurally blocked. Seven reasons this matters:
 
 **1. Zero results is the common case, and a list has nothing to say about it.**
 With six or more busy people, "everyone is free" is often empty. A list renders as "no times available" and the
