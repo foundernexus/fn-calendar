@@ -50,9 +50,29 @@ const ALLOWED: Record<string, string[]> = {
 type Connector = { provider: string; scope?: string[] };
 
 async function main() {
-  const res = await fetch(`${process.env.NYLAS_API_URI}/v3/connectors`, {
-    headers: { Authorization: `Bearer ${process.env.NYLAS_API_KEY}` },
-  });
+  const auth = { Authorization: `Bearer ${process.env.NYLAS_API_KEY}` };
+
+  // Always announce which app the key actually belongs to, and refuse to
+  // report "ok" for a sandbox one. The Nylas org has two apps whose config is
+  // indistinguishable from the outside, and on 2026-08-17 a full round of
+  // scope changes was applied to Sandbox while production stayed wide open,
+  // because nothing in the output said which app was being talked to. A
+  // green check against the wrong app is worse than no check at all.
+  const appRes = await fetch(`${process.env.NYLAS_API_URI}/v3/applications`, { headers: auth });
+  if (!appRes.ok) throw new Error(`Nylas returned ${appRes.status} identifying the application`);
+  const { data: app } = (await appRes.json()) as {
+    data: { application_id: string; environment: string; branding?: { name?: string } };
+  };
+  console.log(`app: ${app.branding?.name ?? "(unnamed)"} · ${app.environment} · ${app.application_id}`);
+  if (app.environment !== "production") {
+    console.error(
+      `FAIL this key belongs to a ${app.environment} app — production scopes are NOT what was just checked`
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const res = await fetch(`${process.env.NYLAS_API_URI}/v3/connectors`, { headers: auth });
   if (!res.ok) {
     throw new Error(`Nylas returned ${res.status} listing connectors`);
   }
