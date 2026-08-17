@@ -14,6 +14,56 @@ import { isAdminEmail, setAdminSessionCookie } from "@/lib/auth/admin";
 import { exchangeNylasCode } from "@/lib/nylas";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
+import { NylasApiError, NylasOAuthError } from "nylas";
+
+/** Which bail-out sent the user back to /connect. The page renders a different
+ * message per status (src/app/connect/page.tsx) — a single generic "the link
+ * may have expired" is actively misleading when the real cause is a Nylas
+ * misconfiguration, and it cost real debugging time on 2026-08-17. */
+const FAILURE_STATUS = {
+  /** State token missing or failed HMAC/TTL verification — the user's problem, retrying may fix it. */
+  expired: "expired",
+  /** Nylas rejected the code exchange — our configuration problem, retrying will NOT fix it. */
+  provider: "provider",
+  /** OAuth'd account didn't match the registered member, or they're no longer an admin. */
+  denied: "denied",
+} as const;
+
+type FailureStatus = (typeof FAILURE_STATUS)[keyof typeof FAILURE_STATUS];
+
+function failureRedirect(status: FailureStatus) {
+  return NextResponse.redirect(new URL(`/connect?status=${status}`, env.APP_URL));
+}
+
+/** Nylas throws two different error shapes and neither has a usable `message`
+ * on its own. The OAuth endpoints (including /connect/token) throw
+ * NylasOAuthError, whose errorDescription is the only field that actually says
+ * why a 403 happened — which app, which key, which redirect URI. Pull the
+ * fields out explicitly so they survive into the Vercel logs. */
+function describeNylasError(err: unknown) {
+  if (err instanceof NylasOAuthError) {
+    return {
+      kind: "NylasOAuthError",
+      statusCode: err.statusCode,
+      error: err.error,
+      errorCode: err.errorCode,
+      errorDescription: err.errorDescription,
+      errorUri: err.errorUri,
+      requestId: err.requestId,
+    };
+  }
+  if (err instanceof NylasApiError) {
+    return {
+      kind: "NylasApiError",
+      statusCode: err.statusCode,
+      type: err.type,
+      message: err.message,
+      providerError: err.providerError,
+      requestId: err.requestId,
+    };
+  }
+  return { kind: "unknown", message: err instanceof Error ? err.message : String(err) };
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -21,7 +71,11 @@ export async function GET(request: Request) {
   const state = searchParams.get("state");
 
   if (!code || !state) {
-    return NextResponse.redirect(new URL("/connect?status=error", env.APP_URL));
+    console.warn("[nylas/callback] missing OAuth params", {
+      hasCode: !!code,
+      hasState: !!state,
+    });
+    return failureRedirect(FAILURE_STATUS.expired);
   }
 
   const statePayload = await verifyValue<{ memberId: number; redirectTo?: "admin" }>(
@@ -30,14 +84,24 @@ export async function GET(request: Request) {
     env.SESSION_SECRET
   );
   if (!statePayload || typeof statePayload.memberId !== "number") {
-    return NextResponse.redirect(new URL("/connect?status=error", env.APP_URL));
+    // Don't log the token itself — it's signed with SESSION_SECRET.
+    console.warn("[nylas/callback] state token rejected (expired, tampered, or signed with a rotated SESSION_SECRET)");
+    return failureRedirect(FAILURE_STATUS.expired);
   }
 
   let exchanged;
   try {
     exchanged = await exchangeNylasCode(code);
-  } catch {
-    return NextResponse.redirect(new URL("/connect?status=error", env.APP_URL));
+  } catch (err) {
+    // Never swallow this. It is the ONLY place the real reason for a failed
+    // connection is visible, and discarding it made a hard-down login look
+    // like an expired link for three days.
+    console.error("[nylas/callback] Nylas code exchange failed", {
+      memberId: statePayload.memberId,
+      apiUri: env.NYLAS_API_URI,
+      ...describeNylasError(err),
+    });
+    return failureRedirect(FAILURE_STATUS.provider);
   }
 
   // Admin login is only ever granted here, never on the bare email POSTed to
@@ -61,7 +125,7 @@ export async function GET(request: Request) {
         expectedEmail: targetMember?.email,
         actualEmail: exchanged.email,
       });
-      return NextResponse.redirect(new URL("/connect?status=error", env.APP_URL));
+      return failureRedirect(FAILURE_STATUS.denied);
     }
     grantAdminSession = true;
   }

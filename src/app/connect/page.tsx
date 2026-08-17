@@ -6,10 +6,24 @@ import { requireAdminSession } from "@/lib/auth/admin";
 // Reads live session cookies and must never be statically cached.
 export const dynamic = "force-dynamic";
 
+/** Keyed to the FAILURE_STATUS values set by /api/nylas/callback. "error" is
+ * kept as a generic fallback so older in-flight links (and any future caller)
+ * still render feedback rather than silently bouncing. */
+const FAILURE_MESSAGES: Record<string, string> = {
+  expired: "That sign-in link expired before you finished. Please try again.",
+  provider:
+    "We couldn't reach your calendar provider. That's a configuration problem on our side, not something you did — please let an admin know.",
+  denied:
+    "The calendar account you signed in with doesn't match the email you entered. Use the exact address you were registered under.",
+  error: "That connection attempt didn't go through. Please try again.",
+};
+
 export default async function ConnectPage({ searchParams }: PageProps<"/connect">) {
   const params = await searchParams;
   const email = typeof params.email === "string" ? params.email : undefined;
-  const hadError = params.status === "error";
+  const status = typeof params.status === "string" ? params.status : undefined;
+  const errorMessage = status ? FAILURE_MESSAGES[status] : undefined;
+  const hadError = !!errorMessage;
 
   // A returning, already-logged-in person (admin or member) shouldn't have
   // to re-enter their email — send them straight to their real destination.
@@ -31,10 +45,9 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
         Enter your email to get started. If you haven&apos;t connected your calendar
         yet (Google, Microsoft, or iCloud), you&apos;ll do that next.
       </p>
-      {hadError && (
+      {errorMessage && (
         <p className="mt-6 rounded-md border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          That connection attempt didn&apos;t go through — the link may have expired.
-          Please try again.
+          {errorMessage}
         </p>
       )}
       <div className="mt-8">
