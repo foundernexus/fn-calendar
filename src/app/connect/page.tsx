@@ -43,7 +43,8 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
       <h1 className="text-2xl font-bold text-foreground">Sign in</h1>
       <p className="mt-2 text-sm text-muted-foreground">
         Enter your email to get started. If you haven&apos;t connected your calendar
-        yet (Google, Microsoft, or iCloud), you&apos;ll do that next.
+        yet (Google or Microsoft), you&apos;ll do that next. We only ever ask for
+        calendar access — never your email or contacts.
       </p>
       {errorMessage && (
         <p className="mt-6 rounded-md border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
