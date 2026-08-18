@@ -325,7 +325,12 @@ export function MemberSettingsForm({
                   />
                   <span className="mt-1.5 text-sm text-foreground">{DAY_LABELS[day]}</span>
                   {d.enabled ? (
-                    <div className="flex flex-col items-start gap-2">
+                    // Wrap rather than a hard column: on a wide screen two
+                    // blocks sit side by side, on a narrow one they stack.
+                    // Each block is two selects plus a remove button, so a
+                    // fixed row would overflow the card on mobile — which is
+                    // why Calendly and Cal.com stack theirs unconditionally.
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                       {d.blocks.map((block, index) => (
                         <div key={index} className="flex items-center gap-2">
                           <TimeSelect
