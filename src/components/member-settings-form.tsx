@@ -54,7 +54,21 @@ function providerLabel(provider: string) {
   return PROVIDER_LABELS[provider] ?? provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
-function defaultDays(initial: { dayOfWeek: number; startTime: string; endTime: string }[]) {
+/** `neverSaved` is what a member's timezone being null tells us: they have
+ * never submitted this form. It is NOT the same as "has no availability rows"
+ * — a member who deliberately switched every day off also has no rows, and
+ * must keep seeing every day off rather than having weekdays silently handed
+ * back to them on the next visit.
+ *
+ * First-timers get Mon–Fri 09:00–17:00 switched on, the same starting point
+ * Calendly and Cal.com use. The alternative — every day off — reads as a
+ * neutral empty form but is really the most restrictive setting there is:
+ * saving it (to pick a timezone, say) makes the member unbookable for
+ * everyone, with no warning, and no slot will ever show for them again. */
+function defaultDays(
+  initial: { dayOfWeek: number; startTime: string; endTime: string }[],
+  neverSaved: boolean
+) {
   const byDay = new Map<number, Block[]>();
   for (const row of initial) {
     const list = byDay.get(row.dayOfWeek) ?? [];
@@ -65,12 +79,14 @@ function defaultDays(initial: { dayOfWeek: number; startTime: string; endTime: s
   const days: Record<number, DayState> = {};
   for (let d = 0; d < 7; d++) {
     const existing = byDay.get(d);
+    // 0 = Sunday, 6 = Saturday (see DISPLAY_ORDER) — so 1..5 is Mon–Fri.
+    const weekdayDefault = neverSaved && d >= 1 && d <= 5;
     days[d] = existing?.length
       ? // Sorted because the rows come back in insertion order, and a member
         // who added an early-morning block second would otherwise see their
         // day listed out of order.
         { enabled: true, blocks: [...existing].sort((a, b) => a.startTime.localeCompare(b.startTime)) }
-      : { enabled: false, blocks: [{ ...DEFAULT_BLOCK }] };
+      : { enabled: weekdayDefault, blocks: [{ ...DEFAULT_BLOCK }] };
   }
   return days;
 }
@@ -120,7 +136,7 @@ export function MemberSettingsForm({
   });
   const [weeklySessionCap, setWeeklySessionCap] = useState(initialCap);
   const [days, setDays] = useState<Record<number, DayState>>(() =>
-    defaultDays(initialAvailability)
+    defaultDays(initialAvailability, initialTimezone === null)
   );
   const [connection, setConnection] = useState(initialConnection);
   const [submitting, setSubmitting] = useState(false);
