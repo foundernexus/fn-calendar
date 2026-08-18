@@ -54,7 +54,7 @@ export async function SiteHeader() {
                 href="/admin/members"
                 className="text-muted-foreground transition-colors hover:text-foreground"
               >
-                Members
+                People
               </Link>
             </nav>
             {adminHasMemberRow && (

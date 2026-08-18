@@ -17,8 +17,13 @@ export default async function MembersPage() {
 
   return (
     <div className="py-10">
+      {/* "People", not "Members": this list holds founders, advisors, FN staff
+          and — before long — prospects, and only one of those groups is
+          actually a member. The route and the `members` table keep their
+          names; a display label and a data model are allowed to differ, and
+          renaming the table would cost a migration for nothing. */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Members</h1>
+        <h1 className="text-2xl font-bold text-foreground">People</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Everyone who&apos;s been added, and whether their calendar is connected yet.
         </p>

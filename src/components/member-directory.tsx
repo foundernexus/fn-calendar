@@ -167,14 +167,21 @@ export function MemberDirectory({
                       {inGroup.length === 1 ? label.one : label.many}
                       <span className="ml-1.5 normal-case opacity-60">{inGroup.length}</span>
                     </p>
-                    <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-card">
-                      <Table>
+                    <div className="overflow-hidden rounded-lg border border-border bg-card shadow-card">
+                      {/* table-fixed with explicit widths, so the columns land
+                          in the same place in all three tables. Left to size
+                          themselves, each table measures its own longest name
+                          and Email starts at a different x in every one — which
+                          reads as three unrelated lists rather than one roster
+                          split into groups. min-w keeps them scrolling rather
+                          than crushing on a narrow screen. */}
+                      <Table className="min-w-[40rem] table-fixed">
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Name</TableHead>
+                            <TableHead className="w-[15rem]">Name</TableHead>
                             <TableHead>Email</TableHead>
-                            <TableHead className="w-24 text-center">Calendar</TableHead>
-                            <TableHead className="w-12" />
+                            <TableHead className="w-[6rem] text-center">Calendar</TableHead>
+                            <TableHead className="w-[3.5rem]" />
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -183,18 +190,26 @@ export function MemberDirectory({
                             .map((m) => (
                               <TableRow key={m.id}>
                                 <TableCell className="font-medium text-foreground">
-                                  {m.fullName}
+                                  {/* Fixed columns mean long values have to be
+                                      clipped rather than pushing the layout
+                                      around; the title keeps the full value
+                                      reachable on hover. */}
+                                  <div className="truncate" title={m.fullName}>
+                                    {m.fullName}
+                                  </div>
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">
-                                  {m.email}
+                                  <div className="truncate" title={m.email}>
+                                    {m.email}
+                                  </div>
                                   {/* Only shown when it differs — a member can
                                       sign in with a personal calendar that isn't
                                       their registered address, and their invites
                                       go to whichever one is named here. */}
                                   {m.grantEmail && m.grantEmail !== m.email && (
-                                    <span className="block text-xs">
+                                    <div className="truncate text-xs" title={m.grantEmail}>
                                       invites go to {m.grantEmail}
-                                    </span>
+                                    </div>
                                   )}
                                 </TableCell>
                                 <TableCell>
@@ -314,7 +329,7 @@ function RemoveMemberDialog({
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Remove this member?</DialogTitle>
+          <DialogTitle>Remove this person?</DialogTitle>
           <DialogDescription>
             <span className="font-medium text-foreground">{member.fullName}</span>
             <br />
