@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getMembersWithConnectionStatus } from "@/db/queries";
 import { MemberDirectory } from "@/components/member-directory";
+import { AddPersonDialog } from "@/components/add-person-dialog";
 import { requireAdminSession } from "@/lib/auth/admin";
 import { env } from "@/lib/env";
 
@@ -23,7 +24,14 @@ export default async function MembersPage() {
           names; a display label and a data model are allowed to differ, and
           renaming the table would cost a migration for nothing. */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">People</h1>
+        {/* Title and primary action share a row — the standard page-header
+            pattern. The description sits below both rather than pushing the
+            button down, so the button lines up with the title itself and not
+            with the middle of a two-line block. */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold text-foreground">People</h1>
+          <AddPersonDialog connectUrl={`${env.APP_URL}/connect`} />
+        </div>
         <p className="mt-2 text-sm text-muted-foreground">
           Everyone who&apos;s been added, and whether their calendar is connected yet.
         </p>

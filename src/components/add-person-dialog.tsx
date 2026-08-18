@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -63,6 +65,7 @@ export function AddPersonDialog({
   defaultRole?: PersonRole;
   onAdded?: () => void;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -94,6 +97,10 @@ export function AddPersonDialog({
         return;
       }
       setCreated(data.member);
+      // Refreshes here rather than leaving it to the caller, so this can be
+      // dropped into a Server Component (the page header) without that page
+      // needing to become a client one just to pass a callback down.
+      router.refresh();
       onAdded?.();
     } catch {
       toast.error("Something went wrong. Please try again.");
@@ -119,8 +126,13 @@ export function AddPersonDialog({
         if (!next) reset();
       }}
     >
-      <DialogTrigger render={<Button type="button" variant="secondary" size="sm" />}>
-        + Add person
+      {/* Filled, not secondary: this is the one thing this page is for, and a
+          grey button sitting beside the title read as an afterthought. The
+          icon replaces a literal "+" so its stroke weight matches the other
+          icons in the table below. */}
+      <DialogTrigger render={<Button type="button" />}>
+        <Plus data-icon="inline-start" />
+        Add person
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         {created ? (
