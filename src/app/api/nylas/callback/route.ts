@@ -27,6 +27,9 @@ const FAILURE_STATUS = {
   provider: "provider",
   /** OAuth'd account didn't match the registered member, or they're no longer an admin. */
   denied: "denied",
+  /** Tried to add a calendar that's already another member's connection.
+   * Attaching it would have taken it off them. */
+  taken: "taken",
 } as const;
 
 type FailureStatus = (typeof FAILURE_STATUS)[keyof typeof FAILURE_STATUS];
@@ -203,6 +206,20 @@ export async function GET(request: Request) {
     .where(eq(calendarConnections.nylasGrantId, exchanged.grantId))
     .limit(1);
   if (existing && existing.memberId !== statePayload.memberId) {
+    // Reassigning is right when someone is SIGNING IN: they just proved they
+    // own this calendar, so it belongs to them and whoever held it before was
+    // wrong. It is not right when someone is ADDING a calendar to their own
+    // profile — that would quietly strip another member of their connection,
+    // leaving them unbookable with nothing on screen to explain it. Refuse and
+    // let them pick a different account.
+    if (addingCalendar) {
+      console.warn("[nylas/callback] refused to attach a calendar already held by another member", {
+        grantId: exchanged.grantId,
+        heldBy: existing.memberId,
+        requestedBy: statePayload.memberId,
+      });
+      return failureRedirect(FAILURE_STATUS.taken);
+    }
     console.warn(
       `[nylas/callback] grant ${exchanged.grantId} was connected to member ${existing.memberId}, now reassigned to member ${statePayload.memberId}`
     );

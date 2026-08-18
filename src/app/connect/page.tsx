@@ -15,6 +15,8 @@ const FAILURE_MESSAGES: Record<string, string> = {
     "We couldn't reach your calendar provider. That's a configuration problem on our side, not something you did — please let an admin know.",
   denied:
     "The calendar account you signed in with doesn't match the email you entered. Use the exact address you were registered under.",
+  taken:
+    "That calendar is already connected to someone else here, so it can't be added to your profile too. Pick a different account.",
   error: "That connection attempt didn't go through. Please try again.",
 };
 
