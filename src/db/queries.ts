@@ -48,27 +48,6 @@ export async function getMemberAvailabilityForMembers(memberIds: number[]) {
     .where(inArray(memberAvailability.memberId, memberIds));
 }
 
-/** Raw (memberId, startsAt) pairs for every CONFIRMED event a given set of
- * members is attending, within [from, to] — used to bucket into weeks (in
- * each member's own timezone) for the weekly-session-cap check. Bucketing
- * itself happens in application code (see slotWithinWeeklyCap in
- * src/lib/time.ts), not here, matching how member_availability's day/time
- * checks are also done in JS rather than SQL. */
-export async function getConfirmedEventsForMembers(memberIds: number[], from: Date, to: Date) {
-  if (memberIds.length === 0) return [];
-  return db
-    .select({ memberId: eventAttendees.memberId, startsAt: events.startsAt })
-    .from(eventAttendees)
-    .innerJoin(events, eq(eventAttendees.eventId, events.id))
-    .where(
-      and(
-        inArray(eventAttendees.memberId, memberIds),
-        eq(events.status, "confirmed"),
-        gte(events.startsAt, from),
-        lte(events.startsAt, to)
-      )
-    );
-}
 
 /** Every CONFIRMED event overlapping [from, to) that any of `memberIds` is
  * either leading or attending — used to mark already-booked cells on the

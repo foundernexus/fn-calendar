@@ -7,11 +7,10 @@ import {
   getActiveConnections,
   getMemberById,
   getMembersByIds,
-  getConfirmedEventsForMembers,
 } from "@/db/queries";
 import { createNylasEvent } from "@/lib/nylas";
 import { computeIdempotencyKey } from "@/lib/idempotency";
-import { TIMEZONES, zonedDateTimeParts, slotWithinWeeklyCap, weekStartDateString } from "@/lib/time";
+import { TIMEZONES } from "@/lib/time";
 import { requireAdminSession } from "@/lib/auth/admin";
 
 const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [string, ...string[]];
@@ -177,49 +176,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "One or more selected founders no longer exist." }, { status: 400 });
   }
 
-  // Re-check the advisor's weekly session cap here too, not just at search
-  // time — a slot picked from a stale grid, or a race with another admin
-  // booking the same advisor elsewhere, could otherwise push them past their
-  // own stated limit. ±8 days is comfortably wider than any single week
-  // bucketed in any timezone around this one instant.
-  //
-  // Advisors only, and deliberately so. The cap answers "how many of these am
-  // I willing to sit in a week", which is a question only advisors have —
-  // founders are scheduled as often as their calendar allows, and the cap is
-  // neither shown to them nor applied. It is never applied to the organizer
-  // either; see slotWithinWeeklyCap's own comment for why.
-  if (advisorMember) {
-    const confirmedEvents = await getConfirmedEventsForMembers(
-      [advisorMember.id],
-      new Date((body.startsAtUnix - 8 * 86_400) * 1000),
-      new Date((body.startsAtUnix + 8 * 86_400) * 1000)
-    );
-    const countByWeek = new Map<string, number>();
-    if (advisorMember.timezone) {
-      for (const row of confirmedEvents) {
-        const { date } = zonedDateTimeParts(
-          Math.floor(row.startsAt.getTime() / 1000),
-          advisorMember.timezone
-        );
-        const weekStart = weekStartDateString(date);
-        countByWeek.set(weekStart, (countByWeek.get(weekStart) ?? 0) + 1);
-      }
-    }
-    const withinCap = slotWithinWeeklyCap(
-      { startUnix: body.startsAtUnix },
-      advisorMember.timezone ?? null,
-      advisorMember.weeklySessionCap ?? Infinity,
-      countByWeek
-    );
-    if (!withinCap) {
-      return NextResponse.json(
-        {
-          error: `${advisorMember.fullName} is already at their weekly session limit for this week.`,
-        },
-        { status: 400 }
-      );
-    }
-  }
 
   const endsAtUnix = body.startsAtUnix + body.durationMinutes * 60;
 

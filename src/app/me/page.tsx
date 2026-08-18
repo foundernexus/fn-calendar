@@ -31,7 +31,6 @@ export default async function MePage() {
         <MemberSettingsForm
           fullName={session.member.fullName}
           timezone={session.member.timezone}
-          weeklySessionCap={session.member.weeklySessionCap}
           initialAvailability={availability.map((a) => ({
             dayOfWeek: a.dayOfWeek,
             startTime: a.startTime,

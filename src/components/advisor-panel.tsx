@@ -15,7 +15,6 @@ type Tab = "availability" | "sessions";
 export function AdvisorPanel({
   fullName,
   timezone,
-  weeklySessionCap,
   initialAvailability,
   connection,
   needsReconnect,
@@ -23,7 +22,6 @@ export function AdvisorPanel({
 }: {
   fullName: string;
   timezone: string | null;
-  weeklySessionCap: number;
   initialAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
   connection: { provider: string; grantEmail: string } | null;
   needsReconnect: boolean;
@@ -93,13 +91,11 @@ export function AdvisorPanel({
           <MemberSettingsForm
             fullName={fullName}
             timezone={timezone}
-            weeklySessionCap={weeklySessionCap}
             initialAvailability={initialAvailability}
             connection={connection}
             needsReconnect={needsReconnect}
             // Advisors are the scarce side of the marketplace — capping how
             // many sessions they'll take is the point. Founders don't get this.
-            showSessionCap
           />
         ) : (
           <AdvisorSessionList sessions={sessions} />

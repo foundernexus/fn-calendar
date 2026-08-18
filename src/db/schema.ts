@@ -54,6 +54,11 @@ export const members = pgTable("members", {
   // member has never saved their /me settings yet; the client suggests the
   // browser-detected zone in that case but writes nothing until they save.
   timezone: text("timezone"),
+  // Unused. Nothing reads or writes this any more: the weekly session cap was
+  // removed after it turned out advisors were the only ones who could set it
+  // and founders the only ones it applied to. Kept rather than dropped — a
+  // migration against production buys nothing here, and the column is where
+  // the number would live if the idea ever comes back.
   weeklySessionCap: integer("weekly_session_cap").notNull().default(5),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()

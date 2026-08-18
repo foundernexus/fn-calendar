@@ -94,23 +94,14 @@ function defaultDays(
 export function MemberSettingsForm({
   fullName,
   timezone: initialTimezone,
-  weeklySessionCap: initialCap,
   initialAvailability,
   connection: initialConnection,
   needsReconnect,
-  showSessionCap = false,
 }: {
   fullName: string;
   timezone: string | null;
-  weeklySessionCap: number;
   initialAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
   connection: { provider: string; grantEmail: string } | null;
-  /** Advisors only. A founder being booked into sessions has no reason to cap
-   * themselves — the number exists so a scarce advisor isn't over-booked, and
-   * offering it to everyone invited people to throttle their own invitations
-   * for no reason. Members keep whatever value is already stored and it's
-   * still submitted unchanged; it's simply not theirs to edit. */
-  showSessionCap?: boolean;
   /** They were connected before, but that connection now belongs to a
    * different Nylas app (e.g. we switched Sandbox/Production tiers) and no
    * longer works — distinct from never having connected at all, so the copy
@@ -134,7 +125,6 @@ export function MemberSettingsForm({
       return null;
     }
   });
-  const [weeklySessionCap, setWeeklySessionCap] = useState(initialCap);
   const [days, setDays] = useState<Record<number, DayState>>(() =>
     defaultDays(initialAvailability, initialTimezone === null)
   );
@@ -208,7 +198,7 @@ export function MemberSettingsForm({
       const res = await fetch("/api/me", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ timezone, weeklySessionCap, availability }),
+        body: JSON.stringify({ timezone, availability }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -313,24 +303,6 @@ export function MemberSettingsForm({
             </div>
           </div>
 
-          {showSessionCap && (
-            <div>
-              <Label htmlFor="weekly-cap">Sessions per week</Label>
-              <p className="mt-1 text-xs text-muted-foreground">
-                The most you&apos;ll take on in a given week. Once you&apos;ve hit it, no more
-                times are offered for you until the next week starts.
-              </p>
-              <Input
-                id="weekly-cap"
-                type="number"
-                min={0}
-                max={50}
-                value={weeklySessionCap}
-                onChange={(e) => setWeeklySessionCap(Number(e.target.value))}
-                className="mt-2 w-24"
-              />
-            </div>
-          )}
         </div>
       </div>
 

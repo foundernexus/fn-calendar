@@ -25,7 +25,6 @@ const MAX_BLOCKS_PER_DAY = 3;
 
 const bodySchema = z.object({
   timezone: z.string().refine(isSupportedTimezone, "Unsupported timezone."),
-  weeklySessionCap: z.number().int().min(0).max(50),
   availability: z
     .array(dayEntrySchema)
     .max(7 * MAX_BLOCKS_PER_DAY)
@@ -89,7 +88,7 @@ export async function PATCH(request: Request) {
   try {
     await db
       .update(members)
-      .set({ timezone: body.timezone, weeklySessionCap: body.weeklySessionCap })
+      .set({ timezone: body.timezone })
       .where(eq(members.id, memberId));
 
     // Replace this member's blocks wholesale rather than upserting per day.
@@ -129,7 +128,6 @@ export async function PATCH(request: Request) {
 
   return NextResponse.json({
     timezone: body.timezone,
-    weeklySessionCap: body.weeklySessionCap,
     availability: body.availability,
   });
 }

@@ -12,8 +12,6 @@ import {
   generateTimeRows,
   formatTimeLabel,
   slotMatchesMemberAvailability,
-  weekStartDateString,
-  slotWithinWeeklyCap,
 } from "./time";
 
 describe("dayOfWeek", () => {
@@ -287,85 +285,5 @@ describe("slotMatchesMemberAvailability", () => {
     expect(
       slotMatchesMemberAvailability(spansMidnight, "America/Los_Angeles", overnightWindow)
     ).toBe(false);
-  });
-});
-
-describe("weekStartDateString", () => {
-  it("returns the same Sunday for every day in that week", () => {
-    // 2026-08-16 is a Sunday, 2026-08-22 is the following Saturday.
-    expect(weekStartDateString("2026-08-16")).toBe("2026-08-16");
-    expect(weekStartDateString("2026-08-17")).toBe("2026-08-16");
-    expect(weekStartDateString("2026-08-22")).toBe("2026-08-16");
-  });
-
-  it("returns a different week start for the following Sunday", () => {
-    expect(weekStartDateString("2026-08-23")).toBe("2026-08-23");
-  });
-
-  it("handles a week that crosses a month boundary", () => {
-    // 2026-08-31 is a Monday; that week started Sunday 2026-08-30.
-    expect(weekStartDateString("2026-08-31")).toBe("2026-08-30");
-  });
-});
-
-describe("slotWithinWeeklyCap", () => {
-  const mondaySlot = {
-    startUnix: zonedDateTimeToUnix("2026-08-17", "14:00", "America/Los_Angeles"),
-  };
-
-  it("allows booking when under the cap", () => {
-    const counts = new Map([["2026-08-16", 2]]);
-    expect(slotWithinWeeklyCap(mondaySlot, "America/Los_Angeles", 5, counts)).toBe(true);
-  });
-
-  it("rejects booking when already at the cap", () => {
-    const counts = new Map([["2026-08-16", 5]]);
-    expect(slotWithinWeeklyCap(mondaySlot, "America/Los_Angeles", 5, counts)).toBe(false);
-  });
-
-  it("rejects booking when already over the cap", () => {
-    const counts = new Map([["2026-08-16", 7]]);
-    expect(slotWithinWeeklyCap(mondaySlot, "America/Los_Angeles", 5, counts)).toBe(false);
-  });
-
-  it("allows any count when the cap is effectively unlimited", () => {
-    const counts = new Map([["2026-08-16", 999]]);
-    expect(slotWithinWeeklyCap(mondaySlot, "America/Los_Angeles", Infinity, counts)).toBe(true);
-  });
-
-  it("a cap of 0 always rejects, regardless of existing count", () => {
-    expect(slotWithinWeeklyCap(mondaySlot, "America/Los_Angeles", 0, new Map())).toBe(false);
-  });
-
-  it("ignores counts from a different week", () => {
-    // All booked into the FOLLOWING week (starting 2026-08-23), not this one.
-    const counts = new Map([["2026-08-23", 5]]);
-    expect(slotWithinWeeklyCap(mondaySlot, "America/Los_Angeles", 5, counts)).toBe(true);
-  });
-
-  it("is unrestricted when the member has no timezone set", () => {
-    const counts = new Map([["2026-08-16", 999]]);
-    expect(slotWithinWeeklyCap(mondaySlot, null, 5, counts)).toBe(true);
-  });
-
-  it("buckets the same instant into a different week depending on the member's own timezone", () => {
-    // Sunday 11pm Pacific is already Monday in most zones east of it —
-    // different member timezones can legitimately bucket the same instant
-    // into different weeks.
-    const lateSaturdayPacific = {
-      startUnix: zonedDateTimeToUnix("2026-08-22", "23:00", "America/Los_Angeles"),
-    };
-    // In Pacific time this is still Saturday the 22nd — week of Aug 16.
-    const pacificCounts = new Map([["2026-08-16", 5]]);
-    expect(slotWithinWeeklyCap(lateSaturdayPacific, "America/Los_Angeles", 5, pacificCounts)).toBe(
-      false
-    );
-    // In Eastern time (3 hours ahead) this has already rolled into Sunday
-    // the 23rd — the NEXT week — so a cap already hit for the prior week
-    // doesn't apply here.
-    const easternCounts = new Map([["2026-08-16", 5]]);
-    expect(slotWithinWeeklyCap(lateSaturdayPacific, "America/New_York", 5, easternCounts)).toBe(
-      true
-    );
   });
 });
