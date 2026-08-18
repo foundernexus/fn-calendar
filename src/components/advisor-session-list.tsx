@@ -30,26 +30,24 @@ function formatParts(session: MemberSession) {
   return { date, time: `${start} – ${end}`, minutes };
 }
 
-const RESPONSE_LABELS: Record<SessionAttendee["responseStatus"], string> = {
-  yes: "Accepted",
-  no: "Declined",
-  maybe: "Maybe",
-  noreply: "No reply yet",
-};
-
+/** Deliberately shows no RSVP status. `event_attendees.response_status` is
+ * written once at creation and never updated — nothing subscribes to the
+ * provider's RSVP events — so every attendee read as "No reply yet" forever,
+ * including ones who had accepted days ago. A field that is always wrong is
+ * worse than no field: it told advisors nobody had responded.
+ *
+ * Whoever needs the real answer has it already — the provider shows each
+ * attendee's response on the event itself, in the calendar both the organizer
+ * and the attendees are already looking at. Restoring it here means a Nylas
+ * webhook, which is a new public endpoint, not a display change. */
 function AttendeeRow({ attendee }: { attendee: SessionAttendee }) {
   return (
-    <li className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2">
-      <div className="min-w-0">
-        <span className="text-sm text-foreground">{attendee.fullName}</span>
-        {attendee.role === "advisor" && (
-          <span className="ml-2 text-xs text-muted-foreground">(advisor)</span>
-        )}
-        <p className="text-xs text-muted-foreground">{attendee.email}</p>
-      </div>
-      <span className="shrink-0 text-xs text-muted-foreground">
-        {RESPONSE_LABELS[attendee.responseStatus]}
-      </span>
+    <li className="py-2">
+      <span className="text-sm text-foreground">{attendee.fullName}</span>
+      {attendee.role === "advisor" && (
+        <span className="ml-2 text-xs text-muted-foreground">(advisor)</span>
+      )}
+      <p className="text-xs text-muted-foreground">{attendee.email}</p>
     </li>
   );
 }

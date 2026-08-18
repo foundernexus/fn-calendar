@@ -104,12 +104,16 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
   return [...byId.values()];
 }
 
+/** No responseStatus: the column exists but nothing ever updates it (see
+ * AttendeeRow in advisor-session-list.tsx), so selecting it only offered
+ * callers a value that is permanently "noreply". The column itself is kept —
+ * dropping it would be a migration against production for no gain, and it's
+ * what a future RSVP webhook would write into. */
 export type SessionAttendee = {
   memberId: number;
   fullName: string;
   email: string;
   role: "guest" | "advisor";
-  responseStatus: "noreply" | "yes" | "no" | "maybe";
 };
 
 export type MemberSession = {
@@ -171,7 +175,6 @@ export async function getSessionsForMember(memberId: number): Promise<MemberSess
       // one when someone connected a different calendar account.
       email: eventAttendees.attendeeEmail,
       role: eventAttendees.role,
-      responseStatus: eventAttendees.responseStatus,
     })
     .from(eventAttendees)
     .innerJoin(members, eq(eventAttendees.memberId, members.id))
@@ -190,7 +193,6 @@ export async function getSessionsForMember(memberId: number): Promise<MemberSess
       fullName: a.fullName,
       email: a.email,
       role: a.role,
-      responseStatus: a.responseStatus,
     });
     attendeesByEvent.set(a.eventId, list);
   }
