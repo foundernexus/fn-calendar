@@ -44,8 +44,8 @@ export function AdvisorPanel({
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-foreground">{fullName}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">{fullName}</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">
             {tab === "availability"
               ? "Founders are only ever offered times that work for you."
               : "Sessions you've been booked into."}

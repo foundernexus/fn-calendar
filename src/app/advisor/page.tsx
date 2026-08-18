@@ -36,7 +36,7 @@ export default async function AdvisorPage() {
   ]);
 
   return (
-    <div className="mx-auto max-w-3xl py-8">
+    <div className="mx-auto max-w-5xl px-6 py-10">
       <AdvisorPanel
         fullName={session.member.fullName}
         timezone={session.member.timezone}

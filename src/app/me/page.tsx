@@ -19,15 +19,15 @@ export default async function MePage() {
   ]);
 
   return (
-    <div className="mx-auto max-w-3xl py-8">
+    <div className="mx-auto max-w-5xl px-6 py-10">
       <div>
-        <h1 className="text-xl font-bold text-foreground">Your availability</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Your availability</h1>
+        <p className="mt-1.5 text-sm text-muted-foreground">
           Set the days and times you&apos;re available for sessions, and how many
           you&apos;ll take per week.
         </p>
       </div>
-      <div className="mt-5">
+      <div className="mt-6">
         <MemberSettingsForm
           fullName={session.member.fullName}
           timezone={session.member.timezone}

@@ -119,6 +119,21 @@ export function MemberSettingsForm({
   const [submitting, setSubmitting] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
 
+  /** Sum of every enabled block, in hours, rounded to one decimal. Times are
+   * "HH:mm" strings on a 24h clock and blocks can't cross midnight (see
+   * slotMatchesMemberAvailability), so plain minute arithmetic is exact —
+   * no date maths or timezone involved. */
+  const totalWeeklyHours = (() => {
+    const minutes = DISPLAY_ORDER.filter((d) => days[d].enabled)
+      .flatMap((d) => days[d].blocks)
+      .reduce((sum, b) => {
+        const [sh, sm] = b.startTime.split(":").map(Number);
+        const [eh, em] = b.endTime.split(":").map(Number);
+        return sum + Math.max(0, eh * 60 + em - (sh * 60 + sm));
+      }, 0);
+    return Math.round((minutes / 60) * 10) / 10;
+  })();
+
   function updateDay(day: number, patch: Partial<DayState>) {
     setDays((prev) => ({ ...prev, [day]: { ...prev[day], ...patch } }));
   }
@@ -237,11 +252,11 @@ export function MemberSettingsForm({
 
   return (
     <form onSubmit={handleSave}>
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[300px_1fr]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[340px_1fr]">
         {/* Left: identity, connection, timezone, cap — one consolidated card */}
-        <div className="space-y-5 rounded-lg border border-border bg-card p-5 shadow-card">
+        <div className="space-y-6 rounded-xl border border-border bg-card p-6 shadow-card">
           <div>
-            <p className="text-sm font-medium text-foreground">{fullName}</p>
+            <p className="text-base font-semibold text-foreground">{fullName}</p>
             {connection ? (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <Badge className="bg-accent text-accent-foreground">Connected</Badge>
@@ -308,22 +323,42 @@ export function MemberSettingsForm({
         </div>
 
         {/* Right: weekly availability */}
-        <div className="rounded-lg border border-border bg-card p-5 shadow-card">
-          <Label>Weekly availability</Label>
-          <div className="mt-3 divide-y divide-border">
+        <div className="rounded-xl border border-border bg-card p-6 shadow-card">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <p className="text-base font-semibold text-foreground">Weekly availability</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                The hours you&apos;re open to sessions. Your calendar is still checked on top of
+                this — these are the outer bounds, not a promise you&apos;re free.
+              </p>
+            </div>
+            {/* A running total is the one number that tells you at a glance
+                whether you've set something unreasonable, and it's invisible
+                when the days are read one row at a time. */}
+            <span className="shrink-0 rounded-full bg-secondary px-3 py-1 text-xs text-secondary-foreground">
+              {totalWeeklyHours} h / week
+            </span>
+          </div>
+          <div className="mt-4 divide-y divide-border">
             {DISPLAY_ORDER.map((day) => {
               const d = days[day];
               return (
                 <div
                   key={day}
-                  className="grid grid-cols-[auto_2.75rem_1fr] items-start gap-3 py-2 first:pt-0 last:pb-0"
+                  className="grid grid-cols-[auto_3.5rem_1fr] items-start gap-4 py-3 first:pt-0 last:pb-0"
                 >
                   <Switch
                     className="mt-1"
                     checked={d.enabled}
                     onCheckedChange={(checked) => updateDay(day, { enabled: checked })}
                   />
-                  <span className="mt-1.5 text-sm text-foreground">{DAY_LABELS[day]}</span>
+                  <span
+                    className={`mt-1.5 text-sm font-medium ${
+                      d.enabled ? "text-foreground" : "text-muted-foreground"
+                    }`}
+                  >
+                    {DAY_LABELS[day]}
+                  </span>
                   {d.enabled ? (
                     <div className="flex flex-col items-start gap-2">
                       {d.blocks.map((block, index) => (
