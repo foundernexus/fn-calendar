@@ -60,6 +60,12 @@ export function FindATimeForm({
   const facilitators = connectedMembers.filter((m) => m.isFacilitator);
   // Same idea as facilitators: a curated subset, not everyone connected.
   const advisors = connectedMembers.filter((m) => m.isAdvisor);
+  // Advisors are deliberately absent from the guest list entirely, not just
+  // hidden once picked above: being an advisor is a distinct role on the
+  // session (own dashboard, own session cap, its own attendee role), so
+  // booking one as an ordinary guest is never what's intended. Marking
+  // someone as an advisor is what moves them from one field to the other.
+  const guestCandidates = connectedMembers.filter((m) => !m.isAdvisor);
 
   const [organizerMemberId, setOrganizerMemberId] = useState<number | null>(
     facilitators[0]?.id ?? null
@@ -254,15 +260,11 @@ export function FindATimeForm({
             id="advisor"
             members={advisors}
             value={advisorMemberId}
-            onChange={(id) => {
-              setAdvisorMemberId(id);
-              // Same reasoning as the session lead: the guest multi-select
-              // hides whoever's picked here, so a stale selection would sit
-              // invisibly in state. The server rejects advisor-also-guest
-              // anyway (event_attendees is unique per member per event), but
-              // it should never get that far.
-              if (id) setGuestMemberIds((ids) => ids.filter((gid) => gid !== id));
-            }}
+            // No need to clear this person out of the guest selection the way
+            // the session lead does: advisors are filtered out of the guest
+            // list entirely (see guestCandidates), so they can never have been
+            // selected as a guest in the first place.
+            onChange={setAdvisorMemberId}
             placeholder="Add an advisor to this session?"
             emptyText="No connected advisors — mark someone as an advisor when adding them."
           />
@@ -282,11 +284,10 @@ export function FindATimeForm({
           </div>
           <MemberMultiSelect
             id="guests"
-            members={connectedMembers}
+            members={guestCandidates}
             value={guestMemberIds}
             onChange={setGuestMemberIds}
             excludeId={organizerMemberId}
-            excludeIds={advisorMemberId ? [advisorMemberId] : undefined}
             placeholder="Who's this session for?"
           />
           {connectedMembers.length === 0 ? (
@@ -296,6 +297,14 @@ export function FindATimeForm({
                 connect one
               </Link>{" "}
               first.
+            </p>
+          ) : guestCandidates.length === 0 ? (
+            // Everyone connected is an advisor. Without this the picker would
+            // just be empty with the reassuring "only connected people can be
+            // selected" note below it, which reads like a bug.
+            <p className="text-sm text-destructive">
+              Everyone who&apos;s connected is marked as an advisor — add them through the advisor
+              field above, or add a guest who isn&apos;t an advisor.
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">
