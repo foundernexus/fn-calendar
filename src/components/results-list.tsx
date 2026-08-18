@@ -1,7 +1,7 @@
 import { AvailabilityGrid } from "@/components/availability-grid";
 
 export type Slot = { startUnix: number; endUnix: number; label: string };
-export type BookedSlot = { startUnix: number; endUnix: number; title: string };
+export type BookedSlot = { id: number; startUnix: number; endUnix: number; title: string };
 
 export type AvailabilityResult = {
   slots: Slot[];
@@ -46,10 +46,12 @@ export function ResultsList({
   result,
   searchedParams,
   onSelectSlot,
+  onSelectBooked,
 }: {
   result: AvailabilityResult;
   searchedParams: SearchedParams;
   onSelectSlot: (slot: Slot) => void;
+  onSelectBooked: (booked: BookedSlot) => void;
 }) {
   if (result.error) {
     return (
@@ -107,6 +109,7 @@ export function ResultsList({
             excludeWeekends={searchedParams.excludeWeekends}
             timezone={searchedParams.timezone}
             onSelectSlot={onSelectSlot}
+            onSelectBooked={onSelectBooked}
           />
         </div>
       )}

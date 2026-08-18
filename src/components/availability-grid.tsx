@@ -38,6 +38,7 @@ export function AvailabilityGrid({
   excludeWeekends,
   timezone,
   onSelectSlot,
+  onSelectBooked,
 }: {
   slots: Slot[];
   bookedSlots: BookedSlot[];
@@ -48,6 +49,8 @@ export function AvailabilityGrid({
   excludeWeekends: boolean;
   timezone: string;
   onSelectSlot: (slot: Slot) => void;
+  /** Opens a booked session so it can be reviewed or cancelled. */
+  onSelectBooked: (booked: BookedSlot) => void;
 }) {
   const [weekOffset, setWeekOffset] = useState(0);
 
@@ -150,14 +153,20 @@ export function AvailabilityGrid({
                 {visibleDays.map((day) => {
                   const booked = bookedByCell.get(`${day}_${time}`);
                   if (booked) {
+                    // A button, not a div: a booked cell is now the way in to
+                    // cancelling that session, so it has to be reachable by
+                    // keyboard and announce itself as actionable.
                     return (
-                      <div
+                      <button
                         key={`${day}_${time}`}
-                        title={booked.title}
-                        className="truncate border-b border-l border-border bg-white px-1.5 py-1.5 text-[10px] text-foreground ring-1 ring-inset ring-foreground/15"
+                        type="button"
+                        onClick={() => onSelectBooked(booked)}
+                        title={`${booked.title} — click to view or cancel`}
+                        aria-label={`${booked.title}, booked — view or cancel`}
+                        className="truncate border-b border-l border-border bg-white px-1.5 py-1.5 text-left text-[10px] text-foreground ring-1 ring-inset ring-foreground/15 transition-colors hover:bg-secondary"
                       >
                         {booked.title}
-                      </div>
+                      </button>
                     );
                   }
                   const slot = slotsByCell.get(`${day}_${time}`);

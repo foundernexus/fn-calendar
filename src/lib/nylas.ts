@@ -64,6 +64,28 @@ export function exchangeNylasCode(code: string) {
   });
 }
 
+/** Deletes the event from the organizer's calendar. Because every attendee was
+ * added as a participant, the provider withdraws it from their calendars too
+ * and sends its own cancellation notice — there is no separate "notify" step,
+ * and no way to cancel quietly. Irreversible: recreating it would be a new
+ * event with new invites. */
+export function cancelNylasEvent(params: {
+  organizerGrantId: string;
+  nylasEventId: string;
+}) {
+  return getNylas().events.destroy({
+    identifier: params.organizerGrantId,
+    eventId: params.nylasEventId,
+    queryParams: {
+      // Must match the calendar the event was created on (see
+      // createNylasEvent, which defaults to the same) — Nylas resolves the
+      // event id within a calendar, not globally.
+      calendarId: "primary",
+      notifyParticipants: true,
+    },
+  });
+}
+
 export type AvailabilitySlot = {
   emails: string[];
   startTime: number;

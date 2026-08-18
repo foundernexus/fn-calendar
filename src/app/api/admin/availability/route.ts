@@ -304,6 +304,9 @@ export async function POST(request: Request) {
     // selected — shown on the grid as a distinct "already booked" cell
     // instead of an unexplained gray one.
     bookedSlots: bookedEvents.map((e) => ({
+      // The id is what makes a booked cell actionable — without it the grid
+      // can show a session but not cancel it.
+      id: e.id,
       startUnix: Math.floor(e.startsAt.getTime() / 1000),
       endUnix: Math.floor(e.endsAt.getTime() / 1000),
       title: e.title,

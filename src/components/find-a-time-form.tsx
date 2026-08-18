@@ -19,10 +19,12 @@ import { AddGuestDialog } from "@/components/add-guest-dialog";
 import {
   ResultsList,
   type AvailabilityResult,
+  type BookedSlot,
   type Slot,
   type SearchedParams,
 } from "@/components/results-list";
 import { CreateEventDialog } from "@/components/create-event-dialog";
+import { CancelSessionDialog } from "@/components/cancel-session-dialog";
 import type { MemberWithConnection } from "@/db/queries";
 import { TIMEZONES } from "@/lib/time";
 
@@ -80,6 +82,7 @@ export function FindATimeForm({
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AvailabilityResult | null>(null);
   const [dialogSlot, setDialogSlot] = useState<Slot | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<BookedSlot | null>(null);
   // The exact request body of the last search, replayed after a booking to
   // refresh the grid. Kept separately from `searchedParams` (which exists for
   // rendering) because the refetch has to send precisely what was searched —
@@ -389,7 +392,12 @@ export function FindATimeForm({
       </form>
 
       {result && searchedParams && (
-        <ResultsList result={result} searchedParams={searchedParams} onSelectSlot={setDialogSlot} />
+        <ResultsList
+          result={result}
+          searchedParams={searchedParams}
+          onSelectSlot={setDialogSlot}
+          onSelectBooked={setCancelTarget}
+        />
       )}
 
       {dialogSlot && searchedParams && (
@@ -409,6 +417,22 @@ export function FindATimeForm({
           }}
           onCreated={() => {
             setDialogSlot(null);
+            void refreshResultsAfterBooking();
+          }}
+        />
+      )}
+
+      {cancelTarget && searchedParams && (
+        <CancelSessionDialog
+          booked={cancelTarget}
+          timezone={searchedParams.timezone}
+          onOpenChange={(open) => {
+            if (!open) setCancelTarget(null);
+          }}
+          onCancelled={() => {
+            setCancelTarget(null);
+            // Same refetch as after booking — the cancelled session has to stop
+            // showing as a blocked cell, and its slot becomes bookable again.
             void refreshResultsAfterBooking();
           }}
         />
