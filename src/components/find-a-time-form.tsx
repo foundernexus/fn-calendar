@@ -83,6 +83,11 @@ export function FindATimeForm({
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AvailabilityResult | null>(null);
   const [dialogSlot, setDialogSlot] = useState<Slot | null>(null);
+  // The exact request body of the last search, replayed after a booking to
+  // refresh the grid. Kept separately from `searchedParams` (which exists for
+  // rendering) because the refetch has to send precisely what was searched —
+  // including durationMinutes, which the render snapshot doesn't carry.
+  const [lastSearchBody, setLastSearchBody] = useState<Record<string, unknown> | null>(null);
   // Snapshotted at search time, NOT read live from the form above — every
   // field here can change after a search completes while the grid is still
   // showing the old search's results. Without this, the grid could render
@@ -108,23 +113,25 @@ export function FindATimeForm({
       return;
     }
 
+    const body = {
+      organizerMemberId,
+      guestMemberIds,
+      startDate,
+      endDate,
+      durationMinutes,
+      workingHoursStart,
+      workingHoursEnd,
+      timezone,
+      excludeWeekends,
+    };
+
     setLoading(true);
     setResult(null);
     try {
       const res = await fetch("/api/admin/availability", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          organizerMemberId,
-          guestMemberIds,
-          startDate,
-          endDate,
-          durationMinutes,
-          workingHoursStart,
-          workingHoursEnd,
-          timezone,
-          excludeWeekends,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -132,6 +139,7 @@ export function FindATimeForm({
         return;
       }
       setResult(data);
+      setLastSearchBody(body);
       setSearchedParams({
         organizerMemberId,
         organizerName: organizer.fullName,
@@ -147,6 +155,38 @@ export function FindATimeForm({
       toast.error("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  /** Replays the last search after a booking so the just-booked slot shows as
+   * taken straight away, instead of the admin having to reload the page.
+   *
+   * Deliberately replays `lastSearchBody` rather than the live form fields —
+   * those can have been edited since the search, and re-running with them
+   * would swap the grid out for a different range or guest list than the one
+   * the admin is currently looking at. Same reasoning as the searchedParams
+   * snapshot above.
+   *
+   * Doesn't clear `result` first, so the grid stays on screen while this runs
+   * and the row just booked doesn't flash away and back. */
+  async function refreshResultsAfterBooking() {
+    if (!lastSearchBody) return;
+    try {
+      const res = await fetch("/api/admin/availability", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(lastSearchBody),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        // The booking itself already succeeded — say that, so a failed refresh
+        // doesn't read like a failed booking and prompt a duplicate attempt.
+        toast.error("Session booked, but the grid couldn't refresh. Reload to see it.");
+        return;
+      }
+      setResult(data);
+    } catch {
+      toast.error("Session booked, but the grid couldn't refresh. Reload to see it.");
     }
   }
 
@@ -346,7 +386,10 @@ export function FindATimeForm({
           onOpenChange={(open) => {
             if (!open) setDialogSlot(null);
           }}
-          onCreated={() => setDialogSlot(null)}
+          onCreated={() => {
+            setDialogSlot(null);
+            void refreshResultsAfterBooking();
+          }}
         />
       )}
     </div>
