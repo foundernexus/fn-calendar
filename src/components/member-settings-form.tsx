@@ -126,21 +126,6 @@ export function MemberSettingsForm({
   const [submitting, setSubmitting] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
 
-  /** Sum of every enabled block, in hours, rounded to one decimal. Times are
-   * "HH:mm" strings on a 24h clock and blocks can't cross midnight (see
-   * slotMatchesMemberAvailability), so plain minute arithmetic is exact —
-   * no date maths or timezone involved. */
-  const totalWeeklyHours = (() => {
-    const minutes = DISPLAY_ORDER.filter((d) => days[d].enabled)
-      .flatMap((d) => days[d].blocks)
-      .reduce((sum, b) => {
-        const [sh, sm] = b.startTime.split(":").map(Number);
-        const [eh, em] = b.endTime.split(":").map(Number);
-        return sum + Math.max(0, eh * 60 + em - (sh * 60 + sm));
-      }, 0);
-    return Math.round((minutes / 60) * 10) / 10;
-  })();
-
   function updateDay(day: number, patch: Partial<DayState>) {
     setDays((prev) => ({ ...prev, [day]: { ...prev[day], ...patch } }));
   }
@@ -256,8 +241,6 @@ export function MemberSettingsForm({
       setSubmitting(false);
     }
   }
-
-  const enabledDayCount = DISPLAY_ORDER.filter((d) => days[d].enabled).length;
 
   return (
     <form onSubmit={handleSave}>
@@ -418,12 +401,8 @@ export function MemberSettingsForm({
 
       {/* Sticky: three blocks on several days can still outgrow a short
           window, and a Save you have to hunt for is a Save people forget to
-          press. Doubles as the running total, which was previously a badge on
-          the availability card. */}
-      <div className="sticky bottom-0 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/95 px-5 py-3 shadow-card backdrop-blur">
-        <p className="text-xs text-muted-foreground">
-          {totalWeeklyHours} h across {enabledDayCount} {enabledDayCount === 1 ? "day" : "days"}
-        </p>
+          press. */}
+      <div className="sticky bottom-0 z-10 mt-5 flex justify-end rounded-xl border border-border bg-card/95 px-5 py-3 shadow-card backdrop-blur">
         <Button type="submit" disabled={submitting}>
           {submitting ? "Saving…" : "Save"}
         </Button>
