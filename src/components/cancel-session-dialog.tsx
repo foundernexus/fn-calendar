@@ -60,7 +60,13 @@ export function CancelSessionDialog({
         return;
       }
       toast.success(
-        data.alreadyCancelled ? "That session was already cancelled." : "Session cancelled."
+        data.alreadyCancelled
+          ? "That session was already cancelled."
+          : // Says the slot may lag on purpose: it's removed from our grid at
+            // once, but going free again depends on the calendar provider
+            // catching up, which takes a moment. Without this the cell looks
+            // stuck and the obvious guess is that cancelling half-failed.
+            "Session cancelled. The slot can take a minute to show as free again."
       );
       onCancelled();
     } catch {

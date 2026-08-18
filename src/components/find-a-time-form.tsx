@@ -81,6 +81,9 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
   // for it.
   const [reschedulingSession, setReschedulingSession] = useState<BookedSlot | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  // Held so it can be cleared on unmount — a refetch landing after this
+  // component is gone would set state on nothing.
+  const delayedRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   // Set by a fresh search only, never by the post-booking refetch — yanking
   // the page down while someone is reading a confirmation would be worse than
@@ -183,18 +186,25 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
     });
   }, [scrollToResults, result]);
 
-  /** Replays the last search after a booking so the just-booked slot shows as
-   * taken straight away, instead of the admin having to reload the page.
+  useEffect(
+    () => () => {
+      if (delayedRefreshRef.current) clearTimeout(delayedRefreshRef.current);
+    },
+    []
+  );
+
+  /** Replays the last search after a booking, cancellation or move, so the
+   * grid reflects it straight away instead of the admin having to reload.
    *
    * Deliberately replays `lastSearchBody` rather than the live form fields —
    * those can have been edited since the search, and re-running with them
-   * would swap the grid out for a different range or guest list than the one
+   * would swap the grid out for a different range or founder list than the one
    * the admin is currently looking at. Same reasoning as the searchedParams
    * snapshot above.
    *
    * Doesn't clear `result` first, so the grid stays on screen while this runs
-   * and the row just booked doesn't flash away and back. */
-  async function refreshResultsAfterBooking() {
+   * and the row just changed doesn't flash away and back. */
+  async function refreshResults() {
     if (!lastSearchBody) return;
     try {
       const res = await fetch("/api/admin/availability", {
@@ -204,15 +214,33 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
       });
       const data = await res.json();
       if (!res.ok) {
-        // The booking itself already succeeded — say that, so a failed refresh
-        // doesn't read like a failed booking and prompt a duplicate attempt.
-        toast.error("Session booked, but the grid couldn't refresh. Reload to see it.");
+        // Whatever the admin just did already succeeded — say so, or a failed
+        // refresh reads like a failed booking and invites a second attempt.
+        toast.error("That worked, but the grid couldn't refresh. Reload to see the latest.");
         return;
       }
       setResult(data);
     } catch {
-      toast.error("Session booked, but the grid couldn't refresh. Reload to see it.");
+      toast.error("That worked, but the grid couldn't refresh. Reload to see the latest.");
     }
+  }
+
+  /** Cancelling and moving both free up a slot, and the slot going blue again
+   * comes from Nylas reading the real calendar — NOT from our own row, which
+   * is already updated by the time the first refresh runs. The provider needs
+   * a moment to stop reporting those people as busy, so an immediate refetch
+   * reliably shows the cell as unavailable rather than free, and it silently
+   * corrects itself later.
+   *
+   * So: refresh now for the parts we own (the session stops showing as
+   * booked), then once more shortly after for the part the provider owns. */
+  function refreshResultsAfterFreeingSlot() {
+    void refreshResults();
+    if (delayedRefreshRef.current) clearTimeout(delayedRefreshRef.current);
+    delayedRefreshRef.current = setTimeout(() => {
+      delayedRefreshRef.current = null;
+      void refreshResults();
+    }, 6000);
   }
 
   /** Switches the page into "find a new time for this session" mode: loads the
@@ -484,7 +512,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
           }}
           onCreated={() => {
             setDialogSlot(null);
-            void refreshResultsAfterBooking();
+            void refreshResults();
           }}
         />
       )}
@@ -498,9 +526,9 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
           }}
           onCancelled={() => {
             setCancelTarget(null);
-            // Same refetch as after booking — the cancelled session has to stop
-            // showing as a blocked cell, and its slot becomes bookable again.
-            void refreshResultsAfterBooking();
+            // The cancelled session must stop showing as a blocked cell (ours,
+            // instant) and its slot has to go free again (the provider's, delayed).
+            void refreshResultsAfterFreeingSlot();
           }}
           onReschedule={() => startRescheduling(cancelTarget)}
         />
@@ -517,7 +545,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
           onRescheduled={() => {
             setDialogSlot(null);
             setReschedulingSession(null);
-            void refreshResultsAfterBooking();
+            void refreshResultsAfterFreeingSlot();
           }}
         />
       )}
