@@ -256,11 +256,15 @@ export function MemberSettingsForm({
 
   return (
     <form onSubmit={handleSave}>
-      {/* Profile, connection and timezone across the full width rather than in
-          a tall left column. The old split made the page longer than the
-          viewport, which is what pushed Save off-screen. */}
+      {/* Who you are and where you are on the left, the calendars you hold on
+          the right, the week itself full width below. Stacking all three made
+          the page taller than the viewport again — the thing that pushed Save
+          off-screen once already — and the first two are short enough to sit
+          side by side. Stacks again below lg, where two columns would squeeze
+          the calendar addresses. */}
+      <div className="grid items-start gap-5 lg:grid-cols-2">
       <div className="rounded-xl border border-border bg-card p-6 shadow-card">
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-2">
           <div>
             <p className="text-base font-semibold text-foreground">{fullName}</p>
             {connection ? (
@@ -320,7 +324,8 @@ export function MemberSettingsForm({
         </div>
       </div>
 
-      <CalendarList calendars={calendars} />
+        <CalendarList calendars={calendars} />
+      </div>
 
       <div className="mt-5 rounded-xl border border-border bg-card p-6 shadow-card">
         <p className="text-base font-semibold text-foreground">Weekly availability</p>
