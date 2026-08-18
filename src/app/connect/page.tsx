@@ -54,6 +54,19 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
       <div className="mt-8">
         <ConnectForm initialEmail={email} />
       </div>
+      {/* Google's OAuth verification reviewer checks that these are reachable
+       * and, in practice, that they're linked from the page the consent screen
+       * leads to — not just pasted into the Cloud Console. Both are outside
+       * proxy.ts's matcher, so they load without a session. */}
+      <p className="mt-10 text-xs text-muted-foreground">
+        <a className="underline" href="/privacy">
+          Privacy Policy
+        </a>
+        {" · "}
+        <a className="underline" href="/terms">
+          Terms of Service
+        </a>
+      </p>
     </div>
   );
 }
