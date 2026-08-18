@@ -30,6 +30,9 @@ const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [string, ...string[]]
 const bodySchema = z
   .object({
     organizerMemberId: z.number().int({ error: "Pick who's leading this session." }),
+    // Optional: plenty of sessions have no advisor. Nullish rather than
+    // required so an older client that doesn't send the field still works.
+    advisorMemberId: z.number().int().nullish(),
     guestMemberIds: z
       .array(z.number().int())
       .min(1, "Add at least one guest.")
@@ -93,7 +96,18 @@ export async function POST(request: Request) {
   // guestMemberIds (e.g. a stale selection from before they were picked as
   // lead), and counting the same person twice would desync `checkedCount`/
   // `totalSelected` from `notConnectedNames`.
-  const allSelectedIds = [...new Set([body.organizerMemberId, ...body.guestMemberIds])];
+  // The advisor joins this set rather than being handled separately, so every
+  // downstream step — connection lookup, stated availability windows,
+  // participant emails for Nylas, the weekly-cap check, notConnectedNames —
+  // treats them like any other participant with no extra branching. An
+  // advisor's calendar has to be free for the slot exactly as a guest's does.
+  const allSelectedIds = [
+    ...new Set([
+      body.organizerMemberId,
+      ...(body.advisorMemberId ? [body.advisorMemberId] : []),
+      ...body.guestMemberIds,
+    ]),
+  ];
   const [activeConnections, selectedMembers, availabilityRows] = await Promise.all([
     getActiveConnections(allSelectedIds),
     getMembersByIds(allSelectedIds),
@@ -133,6 +147,18 @@ export async function POST(request: Request) {
       totalSelected: allSelectedIds.length,
       notConnectedNames: [],
       error: "The selected session lead isn't a facilitator.",
+    });
+  }
+
+  // Same reasoning as the isFacilitator check above: the picker only offers
+  // advisors, but that's a client-side filter, not a guarantee.
+  if (body.advisorMemberId && !membersById.get(body.advisorMemberId)?.isAdvisor) {
+    return NextResponse.json({
+      slots: [],
+      checkedCount: 0,
+      totalSelected: allSelectedIds.length,
+      notConnectedNames: [],
+      error: "The selected advisor isn't marked as an advisor.",
     });
   }
 

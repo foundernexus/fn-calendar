@@ -23,6 +23,7 @@ const bodySchema = z.object({
     .max(49, "Add at most 49 guests.") // 49 + organizer = Nylas's 50-participant cap
     .refine((ids) => new Set(ids).size === ids.length, "Duplicate guest selected."),
   organizerMemberId: z.number().int({ error: "Pick an organizer." }),
+  advisorMemberId: z.number().int().nullish(),
   title: z.string().trim().min(1, "Title is required."),
   description: z.string().trim().optional(),
   meetingUrl: z.string().trim().url("Enter a valid URL.").optional().or(z.literal("")),
@@ -79,15 +80,33 @@ export async function POST(request: Request) {
     );
   }
 
+  // event_attendees is unique on (event_id, member_id), so the same person
+  // can't be both the advisor and a guest — the insert would blow up after
+  // the invites had already gone out. Reject it up front with a message that
+  // names the problem instead.
+  if (body.advisorMemberId && guestMemberIds.includes(body.advisorMemberId)) {
+    return NextResponse.json(
+      { error: "The advisor is also selected as a guest. Remove them from the guest list." },
+      { status: 400 }
+    );
+  }
+  if (body.advisorMemberId && body.advisorMemberId === body.organizerMemberId) {
+    return NextResponse.json(
+      { error: "The session lead can't also be the advisor." },
+      { status: 400 }
+    );
+  }
+
   const idempotencyKey = await computeIdempotencyKey({
     guestMemberIds,
+    advisorMemberId: body.advisorMemberId,
     startsAtUnix: body.startsAtUnix,
     durationMinutes: body.durationMinutes,
   });
 
   // No Nylas call has happened yet on this branch, so a clean JSON error is
   // safe here — nothing to warn the admin about having possibly already sent.
-  let existing, activeConnections, organizerMember, guestMembers;
+  let existing, activeConnections, organizerMember, guestMembers, advisorMember;
   try {
     // Fast-path: avoids a redundant Nylas call in the common (non-racing)
     // case. NOT the correctness guarantee — that's the unique-constraint
@@ -101,9 +120,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ event: existing, alreadyExisted: true });
     }
 
-    activeConnections = await getActiveConnections([body.organizerMemberId, ...guestMemberIds]);
+    activeConnections = await getActiveConnections([
+      body.organizerMemberId,
+      ...(body.advisorMemberId ? [body.advisorMemberId] : []),
+      ...guestMemberIds,
+    ]);
     organizerMember = await getMemberById(body.organizerMemberId);
     guestMembers = await getMembersByIds(guestMemberIds);
+    advisorMember = body.advisorMemberId ? await getMemberById(body.advisorMemberId) : null;
   } catch (err) {
     console.error("[admin/events] Pre-flight DB lookup failed", { idempotencyKey, err });
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
@@ -135,6 +159,15 @@ export async function POST(request: Request) {
   if (!organizerMember.isFacilitator) {
     return NextResponse.json(
       { error: "The selected session lead isn't a facilitator." },
+      { status: 400 }
+    );
+  }
+
+  // Mirrors the isFacilitator check above — the picker only offers advisors,
+  // but that's a client-side filter, not a guarantee.
+  if (body.advisorMemberId && !advisorMember?.isAdvisor) {
+    return NextResponse.json(
+      { error: "The selected advisor isn't marked as an advisor." },
       { status: 400 }
     );
   }
@@ -203,6 +236,16 @@ export async function POST(request: Request) {
       // owner (that was the actual bug this whole redesign started from).
       participants: [
         { email: resolvedEmail(body.organizerMemberId, organizerMember.email), name: organizerMember.fullName },
+        // The advisor gets a real invite like everyone else — their calendar
+        // was checked as free for this slot, so it has to be blocked too.
+        ...(advisorMember
+          ? [
+              {
+                email: resolvedEmail(advisorMember.id, advisorMember.email),
+                name: advisorMember.fullName,
+              },
+            ]
+          : []),
         ...guestMembers.map((m) => ({ email: resolvedEmail(m.id, m.email), name: m.fullName })),
       ],
     });
@@ -281,6 +324,19 @@ export async function POST(request: Request) {
         memberId: body.organizerMemberId,
         attendeeEmail: resolvedEmail(body.organizerMemberId, organizerMember.email),
       },
+      // role: "advisor" is what lets /advisor say "you were the advisor on
+      // this one" rather than listing it identically to sessions they merely
+      // attended. Everyone else defaults to "guest".
+      ...(advisorMember
+        ? [
+            {
+              eventId: inserted.id,
+              memberId: advisorMember.id,
+              attendeeEmail: resolvedEmail(advisorMember.id, advisorMember.email),
+              role: "advisor" as const,
+            },
+          ]
+        : []),
       ...guestMembers.map((m) => ({
         eventId: inserted.id,
         memberId: m.id,

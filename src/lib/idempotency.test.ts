@@ -31,4 +31,43 @@ describe("computeIdempotencyKey", () => {
     const b = await computeIdempotencyKey({ guestMemberIds: [3, 5], startsAtUnix: 1000, durationMinutes: 60 });
     expect(a).not.toBe(b);
   });
+
+  describe("with an advisor", () => {
+    const base = { guestMemberIds: [3, 5], startsAtUnix: 1000, durationMinutes: 30 };
+
+    it("differs when the advisor differs", async () => {
+      // The bug this guards: same founders, same slot, different advisor is a
+      // genuinely different session. Leaving the advisor out of the hash made
+      // the second booking collide with the first and get rejected.
+      const a = await computeIdempotencyKey({ ...base, advisorMemberId: 7 });
+      const b = await computeIdempotencyKey({ ...base, advisorMemberId: 8 });
+      expect(a).not.toBe(b);
+    });
+
+    it("differs from the same session booked without an advisor", async () => {
+      const withAdvisor = await computeIdempotencyKey({ ...base, advisorMemberId: 7 });
+      const without = await computeIdempotencyKey(base);
+      expect(withAdvisor).not.toBe(without);
+    });
+
+    it("is unchanged from the pre-advisor format when there is no advisor", async () => {
+      // Guarantees advisor-less bookings behave exactly as before, so existing
+      // rows keep matching and nothing silently double-books.
+      const omitted = await computeIdempotencyKey(base);
+      const explicitlyNull = await computeIdempotencyKey({ ...base, advisorMemberId: null });
+      const explicitlyUndefined = await computeIdempotencyKey({
+        ...base,
+        advisorMemberId: undefined,
+      });
+      expect(explicitlyNull).toBe(omitted);
+      expect(explicitlyUndefined).toBe(omitted);
+    });
+
+    it("treats the advisor as distinct from a guest with the same id", async () => {
+      // [3,5] + advisor 7 must not collide with [3,5,7] and no advisor.
+      const asAdvisor = await computeIdempotencyKey({ ...base, advisorMemberId: 7 });
+      const asGuest = await computeIdempotencyKey({ ...base, guestMemberIds: [3, 5, 7] });
+      expect(asAdvisor).not.toBe(asGuest);
+    });
+  });
 });

@@ -5,8 +5,7 @@ import {
   getMemberConnectionState,
   getSessionsForMember,
 } from "@/db/queries";
-import { MemberSettingsForm } from "@/components/member-settings-form";
-import { AdvisorSessionList } from "@/components/advisor-session-list";
+import { AdvisorPanel } from "@/components/advisor-panel";
 
 // Reads a live session cookie + live connection state — must never be
 // statically cached, same reasoning as /me and /admin/find-a-time.
@@ -38,38 +37,19 @@ export default async function AdvisorPage() {
 
   return (
     <div className="mx-auto max-w-3xl py-8">
-      <div>
-        <h1 className="text-xl font-bold text-foreground">Advisor settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Set when you&apos;re available for sessions and how many you&apos;ll take per week.
-          Founders are only ever offered times that work for you.
-        </p>
-      </div>
-
-      <div className="mt-5">
-        <MemberSettingsForm
-          fullName={session.member.fullName}
-          timezone={session.member.timezone}
-          weeklySessionCap={session.member.weeklySessionCap}
-          initialAvailability={availability.map((a) => ({
-            dayOfWeek: a.dayOfWeek,
-            startTime: a.startTime,
-            endTime: a.endTime,
-          }))}
-          connection={connectionState.connection}
-          needsReconnect={connectionState.needsReconnect}
-        />
-      </div>
-
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold text-foreground">Your sessions</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Sessions you&apos;ve been booked into.
-        </p>
-        <div className="mt-3">
-          <AdvisorSessionList sessions={sessions} />
-        </div>
-      </div>
+      <AdvisorPanel
+        fullName={session.member.fullName}
+        timezone={session.member.timezone}
+        weeklySessionCap={session.member.weeklySessionCap}
+        initialAvailability={availability.map((a) => ({
+          dayOfWeek: a.dayOfWeek,
+          startTime: a.startTime,
+          endTime: a.endTime,
+        }))}
+        connection={connectionState.connection}
+        needsReconnect={connectionState.needsReconnect}
+        sessions={sessions}
+      />
     </div>
   );
 }

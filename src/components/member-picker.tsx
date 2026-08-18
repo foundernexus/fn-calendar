@@ -92,6 +92,7 @@ export function MemberMultiSelect({
   value,
   onChange,
   excludeId,
+  excludeIds,
   placeholder,
 }: {
   id?: string;
@@ -101,10 +102,16 @@ export function MemberMultiSelect({
   /** The session lead, if already picked — hidden here so they can't also be
    * added as a guest (they're already invited automatically). */
   excludeId?: number | null;
+  /** Anyone else already holding a named role on this session — currently the
+   * advisor. Same reasoning as excludeId: they're invited via their own field,
+   * and event_attendees is unique per (event, member), so adding them here as
+   * well would fail the insert AFTER the invites had gone out. */
+  excludeIds?: number[];
   placeholder: string;
 }) {
   const [open, setOpen] = useState(false);
-  const selectable = members.filter((m) => m.id !== excludeId);
+  const excluded = new Set([...(excludeIds ?? []), ...(excludeId != null ? [excludeId] : [])]);
+  const selectable = members.filter((m) => !excluded.has(m.id));
   const selected = selectable.filter((m) => value.includes(m.id));
 
   function toggle(memberId: number) {

@@ -30,6 +30,9 @@ export type AvailabilityResult = {
 export type SearchedParams = {
   organizerMemberId: number;
   organizerName: string;
+  /** Null when the session has no advisor, which is the common case. */
+  advisorMemberId?: number | null;
+  advisorName?: string | null;
   guestMemberIds: number[];
   startDate: string;
   endDate: string;

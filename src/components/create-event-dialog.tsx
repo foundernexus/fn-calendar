@@ -20,6 +20,8 @@ export function CreateEventDialog({
   slot,
   organizerMemberId,
   organizerName,
+  advisorMemberId,
+  advisorName,
   guestMemberIds,
   guestNames,
   timezone,
@@ -29,6 +31,9 @@ export function CreateEventDialog({
   slot: Slot;
   organizerMemberId: number;
   organizerName: string;
+  /** Null for sessions without an advisor, which is the common case. */
+  advisorMemberId: number | null;
+  advisorName: string | null;
   guestMemberIds: number[];
   guestNames: string[];
   timezone: string;
@@ -54,6 +59,7 @@ export function CreateEventDialog({
         body: JSON.stringify({
           guestMemberIds,
           organizerMemberId,
+          advisorMemberId,
           title,
           description: description || undefined,
           meetingUrl: meetingUrl || undefined,
@@ -126,6 +132,14 @@ export function CreateEventDialog({
               </p>
               <p className="text-foreground">{guestNames.join(", ")}</p>
             </div>
+            {/* Only shown when there is one — an empty "Advisor: —" row is
+                noise on the majority of bookings. */}
+            {advisorName && (
+              <div>
+                <p className="text-xs text-muted-foreground">Advisor</p>
+                <p className="text-foreground">{advisorName}</p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button type="submit" disabled={submitting}>

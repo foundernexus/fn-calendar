@@ -67,10 +67,14 @@ export function FindATimeForm({
   // Session lead is a curated subset — connecting a calendar makes someone
   // eligible as a guest, not automatically eligible to lead a session.
   const facilitators = connectedMembers.filter((m) => m.isFacilitator);
+  // Same idea as facilitators: a curated subset, not everyone connected.
+  const advisors = connectedMembers.filter((m) => m.isAdvisor);
 
   const [organizerMemberId, setOrganizerMemberId] = useState<number | null>(
     facilitators[0]?.id ?? null
   );
+  // Optional — most sessions won't have one.
+  const [advisorMemberId, setAdvisorMemberId] = useState<number | null>(null);
   const [guestMemberIds, setGuestMemberIds] = useState<number[]>([]);
   const [startDate, setStartDate] = useState(defaultDateString(0));
   const [endDate, setEndDate] = useState(defaultDateString(14));
@@ -115,6 +119,7 @@ export function FindATimeForm({
 
     const body = {
       organizerMemberId,
+      advisorMemberId,
       guestMemberIds,
       startDate,
       endDate,
@@ -143,6 +148,8 @@ export function FindATimeForm({
       setSearchedParams({
         organizerMemberId,
         organizerName: organizer.fullName,
+        advisorMemberId,
+        advisorName: advisors.find((m) => m.id === advisorMemberId)?.fullName ?? null,
         guestMemberIds,
         startDate,
         endDate,
@@ -246,6 +253,30 @@ export function FindATimeForm({
         </div>
 
         <div className="space-y-2">
+          <Label htmlFor="advisor">Advisor (optional)</Label>
+          <MemberSelect
+            id="advisor"
+            members={advisors}
+            value={advisorMemberId}
+            onChange={(id) => {
+              setAdvisorMemberId(id);
+              // Same reasoning as the session lead: the guest multi-select
+              // hides whoever's picked here, so a stale selection would sit
+              // invisibly in state. The server rejects advisor-also-guest
+              // anyway (event_attendees is unique per member per event), but
+              // it should never get that far.
+              if (id) setGuestMemberIds((ids) => ids.filter((gid) => gid !== id));
+            }}
+            placeholder="Add an advisor to this session?"
+            emptyText="No connected advisors — mark someone as an advisor when adding them."
+          />
+          <p className="text-xs text-muted-foreground">
+            Their calendar is checked like everyone else&apos;s, and they&apos;ll see the session on
+            their advisor dashboard. Pick the same person again to clear this.
+          </p>
+        </div>
+
+        <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label htmlFor="guests">Guests</Label>
             <AddGuestDialog
@@ -259,6 +290,7 @@ export function FindATimeForm({
             value={guestMemberIds}
             onChange={setGuestMemberIds}
             excludeId={organizerMemberId}
+            excludeIds={advisorMemberId ? [advisorMemberId] : undefined}
             placeholder="Who's this session for?"
           />
           {connectedMembers.length === 0 ? (
@@ -378,6 +410,8 @@ export function FindATimeForm({
           slot={dialogSlot}
           organizerMemberId={searchedParams.organizerMemberId}
           organizerName={searchedParams.organizerName}
+          advisorMemberId={searchedParams.advisorMemberId ?? null}
+          advisorName={searchedParams.advisorName ?? null}
           guestMemberIds={searchedParams.guestMemberIds}
           guestNames={searchedParams.guestMemberIds.map(
             (id) => members.find((m) => m.id === id)?.fullName ?? `Member #${id}`
