@@ -313,10 +313,11 @@ export async function POST(request: Request) {
       startUnix: Math.floor(e.startsAt.getTime() / 1000),
       endUnix: Math.floor(e.endsAt.getTime() / 1000),
       title: e.title,
+      organizerMemberId: e.organizerMemberId,
       // Sent with the slot rather than fetched when the dialog opens: there
       // are only ever a handful of booked sessions overlapping one search, and
       // it saves a round trip at the exact moment an admin is deciding whether
-      // to cancel something.
+      // to cancel or move something.
       attendees: e.attendees,
     })),
   });

@@ -64,6 +64,41 @@ export function exchangeNylasCode(code: string) {
   });
 }
 
+/** Moves an existing event to a new time, keeping the same event and the same
+ * participants.
+ *
+ * Deliberately not "cancel the old one and create a new one". The provider
+ * sends attendees an update for a moved event rather than a cancellation
+ * followed by a fresh invite, so it stays one entry in their calendar, keeps
+ * whatever they had already RSVP'd, and doesn't read as "that session is off"
+ * to anyone skimming their inbox. */
+export function rescheduleNylasEvent(params: {
+  organizerGrantId: string;
+  nylasEventId: string;
+  startTime: number;
+  endTime: number;
+  timezone: string;
+}) {
+  return getNylas().events.update({
+    identifier: params.organizerGrantId,
+    eventId: params.nylasEventId,
+    requestBody: {
+      when: {
+        startTime: params.startTime,
+        endTime: params.endTime,
+        startTimezone: params.timezone,
+        endTimezone: params.timezone,
+      },
+    },
+    queryParams: {
+      // Must match the calendar the event was created on — same reasoning as
+      // cancelNylasEvent.
+      calendarId: "primary",
+      notifyParticipants: true,
+    },
+  });
+}
+
 /** Deletes the event from the organizer's calendar. Because every attendee was
  * added as a participant, the provider withdraws it from their calendars too
  * and sends its own cancellation notice — there is no separate "notify" step,

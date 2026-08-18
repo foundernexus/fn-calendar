@@ -1,10 +1,191 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@/db";
-import { events } from "@/db/schema";
+import { events, eventAttendees } from "@/db/schema";
 import { getActiveConnections } from "@/db/queries";
 import { requireAdminSession } from "@/lib/auth/admin";
-import { cancelNylasEvent } from "@/lib/nylas";
+import { cancelNylasEvent, rescheduleNylasEvent } from "@/lib/nylas";
+import { computeIdempotencyKey } from "@/lib/idempotency";
+import { TIMEZONES } from "@/lib/time";
+
+const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [string, ...string[]];
+
+const rescheduleSchema = z.object({
+  startsAtUnix: z.number().int().positive({ error: "Pick a valid time slot." }),
+  durationMinutes: z.union([z.literal(30), z.literal(45), z.literal(60)], {
+    error: "Duration must be 30, 45, or 60 minutes.",
+  }),
+  timezone: z.enum(TIMEZONE_VALUES, { error: "Unsupported timezone." }),
+});
+
+/** drizzle-orm wraps driver errors in `DrizzleQueryError`, which has no `code`
+ * of its own — the real Postgres error is on `.cause`. Same helper as
+ * api/admin/events. */
+function isUniqueViolation(err: unknown): boolean {
+  let e = err as { code?: unknown; cause?: unknown } | undefined;
+  for (let depth = 0; e && depth < 10; depth++) {
+    if (e.code === "23505") return true;
+    e = e.cause as typeof e;
+  }
+  return false;
+}
+
+/** Moves a booked session to a new time, keeping the same event and the same
+ * people.
+ *
+ * Not cancel-then-rebook: the provider sends attendees an update for a moved
+ * event rather than a cancellation followed by a fresh invite, so it stays one
+ * entry in their calendar and doesn't read as "that session is off" to anyone
+ * skimming their inbox.
+ *
+ * Nylas first, DB second — the same ordering as DELETE, for the same reason.
+ * If Nylas fails nothing has moved anywhere and it's safe to report a clean
+ * failure; the other order would show the new time here while everyone's
+ * calendar still held the old one, and people would turn up to the wrong
+ * slot. */
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await requireAdminSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const eventId = Number((await params).id);
+  if (!Number.isInteger(eventId) || eventId <= 0) {
+    return NextResponse.json({ error: "Invalid session id." }, { status: 400 });
+  }
+
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
+  const parsed = rescheduleSchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Invalid request." },
+      { status: 400 }
+    );
+  }
+  const body = parsed.data;
+
+  let event;
+  let attendees;
+  try {
+    [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
+    attendees = event
+      ? await db.select().from(eventAttendees).where(eq(eventAttendees.eventId, eventId))
+      : [];
+  } catch (err) {
+    console.error("[admin/events/:id] Reschedule lookup failed", { eventId, err });
+    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
+  }
+
+  if (!event) {
+    return NextResponse.json({ error: "That session no longer exists." }, { status: 404 });
+  }
+  if (event.status === "cancelled") {
+    return NextResponse.json(
+      { error: "That session was cancelled — book a new one instead of moving it." },
+      { status: 409 }
+    );
+  }
+
+  const [organizerConnection] = await getActiveConnections([event.organizerMemberId]);
+  if (!organizerConnection) {
+    return NextResponse.json(
+      {
+        error:
+          "The session lead's calendar is no longer connected, so this can't be moved automatically. Change it in their calendar directly.",
+      },
+      { status: 409 }
+    );
+  }
+
+  // The key encodes the people AND the time, so moving the session changes it.
+  // Leaving the old one in place would let the very same session be booked
+  // again at its new time without tripping the duplicate check.
+  const advisorMemberId = attendees.find((a) => a.role === "advisor")?.memberId ?? null;
+  const guestMemberIds = attendees
+    .filter((a) => a.role === "guest" && a.memberId !== event.organizerMemberId)
+    .map((a) => a.memberId);
+  const newKey = await computeIdempotencyKey({
+    guestMemberIds,
+    advisorMemberId,
+    startsAtUnix: body.startsAtUnix,
+    durationMinutes: body.durationMinutes,
+  });
+
+  if (newKey !== event.idempotencyKey) {
+    const [clash] = await db
+      .select({ id: events.id, status: events.status })
+      .from(events)
+      .where(eq(events.idempotencyKey, newKey))
+      .limit(1);
+    if (clash) {
+      return NextResponse.json(
+        { error: "These people already have a session booked at that time." },
+        { status: 409 }
+      );
+    }
+  }
+
+  const endsAtUnix = body.startsAtUnix + body.durationMinutes * 60;
+
+  try {
+    await rescheduleNylasEvent({
+      organizerGrantId: organizerConnection.nylas_grant_id,
+      nylasEventId: event.nylasEventId,
+      startTime: body.startsAtUnix,
+      endTime: endsAtUnix,
+      timezone: body.timezone,
+    });
+  } catch (err) {
+    console.error("[admin/events/:id] Nylas reschedule failed", {
+      eventId,
+      nylasEventId: event.nylasEventId,
+      err,
+    });
+    return NextResponse.json(
+      { error: "Couldn't move the event with the calendar provider. Please try again." },
+      { status: 502 }
+    );
+  }
+
+  // Past this line everyone's calendar already shows the new time — every
+  // failure below has to say so rather than implying nothing happened.
+  try {
+    const [updated] = await db
+      .update(events)
+      .set({
+        startsAt: new Date(body.startsAtUnix * 1000),
+        endsAt: new Date(endsAtUnix * 1000),
+        timezone: body.timezone,
+        idempotencyKey: newKey,
+      })
+      .where(eq(events.id, eventId))
+      .returning();
+    return NextResponse.json({ event: updated });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      console.error("[admin/events/:id] Moved in Nylas but the new key collided", {
+        eventId,
+        newKey,
+        err,
+      });
+    } else {
+      console.error("[admin/events/:id] Moved in Nylas but the DB update failed", { eventId, err });
+    }
+    return NextResponse.json(
+      {
+        error:
+          "The session was moved in everyone's calendar, but we couldn't update our record. It may still show at the old time here.",
+      },
+      { status: 500 }
+    );
+  }
+}
 
 /** Cancels a booked session: removes it from every attendee's calendar and
  * sends the provider's own cancellation notice.

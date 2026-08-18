@@ -85,6 +85,9 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
       title: events.title,
       startsAt: events.startsAt,
       endsAt: events.endsAt,
+      // Needed to reschedule: the grid has to be able to repopulate the search
+      // with exactly the people this session already has.
+      organizerMemberId: events.organizerMemberId,
     })
     .from(events)
     .leftJoin(eventAttendees, eq(eventAttendees.eventId, events.id))
@@ -97,7 +100,7 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
       )
     );
 
-  const byId = new Map<number, { id: number; title: string; startsAt: Date; endsAt: Date }>();
+  const byId = new Map<number, (typeof rows)[number]>();
   for (const row of rows) {
     if (!byId.has(row.id)) byId.set(row.id, row);
   }
@@ -111,6 +114,7 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
   const attendeeRows = await db
     .select({
       eventId: eventAttendees.eventId,
+      memberId: eventAttendees.memberId,
       fullName: members.fullName,
       // The address actually invited, which can differ from the registered one
       // when someone connected a different calendar account.
@@ -126,10 +130,13 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
       )
     );
 
-  const attendeesByEvent = new Map<number, { fullName: string; email: string; role: string }[]>();
+  const attendeesByEvent = new Map<
+    number,
+    { memberId: number; fullName: string; email: string; role: string }[]
+  >();
   for (const a of attendeeRows) {
     const list = attendeesByEvent.get(a.eventId) ?? [];
-    list.push({ fullName: a.fullName, email: a.email, role: a.role });
+    list.push({ memberId: a.memberId, fullName: a.fullName, email: a.email, role: a.role });
     attendeesByEvent.set(a.eventId, list);
   }
 

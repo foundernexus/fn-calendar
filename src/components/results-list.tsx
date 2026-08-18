@@ -1,12 +1,20 @@
 import { AvailabilityGrid } from "@/components/availability-grid";
 
 export type Slot = { startUnix: number; endUnix: number; label: string };
-export type BookedAttendee = { fullName: string; email: string; role: string };
+export type BookedAttendee = {
+  memberId: number;
+  fullName: string;
+  email: string;
+  role: string;
+};
 export type BookedSlot = {
   id: number;
   startUnix: number;
   endUnix: number;
   title: string;
+  /** Carried so rescheduling can repopulate the search with this session's own
+   * people rather than whatever happens to be selected in the form. */
+  organizerMemberId: number;
   attendees: BookedAttendee[];
 };
 

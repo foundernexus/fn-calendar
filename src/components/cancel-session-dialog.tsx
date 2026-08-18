@@ -25,11 +25,17 @@ export function CancelSessionDialog({
   timezone,
   onOpenChange,
   onCancelled,
+  onReschedule,
 }: {
   booked: BookedSlot;
   timezone: string;
   onOpenChange: (open: boolean) => void;
   onCancelled: () => void;
+  /** Switches the search above into "find a new time for this session" mode.
+   * Offered alongside cancelling because moving a session is the far more
+   * common intent, and doing it as cancel-then-rebook sends everyone a
+   * cancellation before the replacement invite lands. */
+  onReschedule: () => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
 
@@ -67,13 +73,16 @@ export function CancelSessionDialog({
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Cancel this session?</DialogTitle>
-          <DialogDescription>
-            <span className="font-medium text-foreground">{booked.title}</span>
-            <br />
-            {when}
-          </DialogDescription>
+          <DialogTitle>{booked.title}</DialogTitle>
+          <DialogDescription>{when}</DialogDescription>
         </DialogHeader>
+
+        {/* Moving comes first and cancelling is the destructive fallback —
+            the older version offered only cancelling, which pushed people
+            into cancel-then-rebook for what was really a reschedule. */}
+        <Button type="button" variant="secondary" onClick={onReschedule}>
+          Find a new time for this session
+        </Button>
 
         {/* Who this actually hits. Cancelling used to name only the session,
             so an admin confirming it had no idea from this screen how many

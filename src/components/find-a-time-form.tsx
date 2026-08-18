@@ -24,6 +24,7 @@ import {
 } from "@/components/results-list";
 import { CreateEventDialog } from "@/components/create-event-dialog";
 import { CancelSessionDialog } from "@/components/cancel-session-dialog";
+import { RescheduleSessionDialog } from "@/components/reschedule-session-dialog";
 import type { MemberWithConnection } from "@/db/queries";
 import { TIMEZONES } from "@/lib/time";
 
@@ -73,6 +74,13 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
   const [result, setResult] = useState<AvailabilityResult | null>(null);
   const [dialogSlot, setDialogSlot] = useState<Slot | null>(null);
   const [cancelTarget, setCancelTarget] = useState<BookedSlot | null>(null);
+  // The session being moved, if any. While this is set, picking a slot moves
+  // that session instead of creating a new one — the form itself is unchanged,
+  // which is the point: finding a new time is the same search, so it would be
+  // wasteful (and a second thing to keep working) to build a separate screen
+  // for it.
+  const [reschedulingSession, setReschedulingSession] = useState<BookedSlot | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   // Set by a fresh search only, never by the post-booking refetch — yanking
   // the page down while someone is reading a confirmation would be worse than
@@ -207,16 +215,60 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
     }
   }
 
+  /** Switches the page into "find a new time for this session" mode: loads the
+   * session's own people into the form, drops the results so nothing stale is
+   * clickable underneath, and puts the form back on screen. The old session
+   * stays booked and untouched until a new slot is actually confirmed —
+   * backing out costs nothing. */
+  function startRescheduling(booked: BookedSlot) {
+    setCancelTarget(null);
+    setReschedulingSession(booked);
+    setOrganizerMemberId(booked.organizerMemberId);
+    setAdvisorMemberId(booked.attendees.find((a) => a.role === "advisor")?.memberId ?? null);
+    setGuestMemberIds(
+      booked.attendees
+        .filter((a) => a.role === "guest" && a.memberId !== booked.organizerMemberId)
+        .map((a) => a.memberId)
+    );
+    setDurationMinutes(Math.round((booked.endUnix - booked.startUnix) / 60));
+    setResult(null);
+    setSearchedParams(null);
+    formRef.current?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    });
+  }
+
   return (
     <div className="space-y-8">
-      <p
-        className="text-sm text-muted-foreground"
-      >
-        {connectedMembers.length} calendar{connectedMembers.length === 1 ? "" : "s"} connected
-      </p>
+      {reschedulingSession ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/50 p-4">
+          <p className="text-sm text-foreground">
+            Finding a new time for{" "}
+            <span className="font-medium">{reschedulingSession.title}</span>.{" "}
+            <span className="text-muted-foreground">
+              Its people are loaded below — pick a slot to move it. Nothing changes until you
+              confirm.
+            </span>
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setReschedulingSession(null)}
+          >
+            Stop rescheduling
+          </Button>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {connectedMembers.length} calendar{connectedMembers.length === 1 ? "" : "s"} connected
+        </p>
+      )}
       <form
+        ref={formRef}
         onSubmit={handleSearch}
-        className="space-y-6 rounded-lg border border-border bg-card p-6 shadow-card"
+        className="scroll-mt-4 space-y-6 rounded-lg border border-border bg-card p-6 shadow-card"
       >
         <div className="space-y-2">
           <Label htmlFor="session-lead">Session lead</Label>
@@ -413,7 +465,9 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
         </div>
       )}
 
-      {dialogSlot && searchedParams && (
+      {/* Not while rescheduling — the same slot click means "move that session
+          there", handled by RescheduleSessionDialog below. */}
+      {dialogSlot && searchedParams && !reschedulingSession && (
         <CreateEventDialog
           slot={dialogSlot}
           organizerMemberId={searchedParams.organizerMemberId}
@@ -446,6 +500,23 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
             setCancelTarget(null);
             // Same refetch as after booking — the cancelled session has to stop
             // showing as a blocked cell, and its slot becomes bookable again.
+            void refreshResultsAfterBooking();
+          }}
+          onReschedule={() => startRescheduling(cancelTarget)}
+        />
+      )}
+
+      {reschedulingSession && dialogSlot && searchedParams && (
+        <RescheduleSessionDialog
+          booked={reschedulingSession}
+          slot={dialogSlot}
+          timezone={searchedParams.timezone}
+          onOpenChange={(open) => {
+            if (!open) setDialogSlot(null);
+          }}
+          onRescheduled={() => {
+            setDialogSlot(null);
+            setReschedulingSession(null);
             void refreshResultsAfterBooking();
           }}
         />
