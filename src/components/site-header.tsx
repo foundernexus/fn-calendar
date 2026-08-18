@@ -3,6 +3,7 @@ import { requireAdminSession } from "@/lib/auth/admin";
 import { requireMemberSession } from "@/lib/auth/member";
 import { getMemberByEmail, getMemberConnectionState } from "@/db/queries";
 import { SignOutControl } from "@/components/sign-out-control";
+import { AdminNav } from "@/components/admin-nav";
 import { AdminConnectCalendarButton } from "@/components/admin-connect-calendar-button";
 
 /** Server Component (not client) so it can check which session (if any) is
@@ -23,12 +24,15 @@ export async function SiteHeader() {
   // query) so AdminConnectCalendarButton can actually reflect reality instead
   // of always showing the same static label.
   let adminConnection: { provider: string; grantEmail: string } | null = null;
+  let adminNeedsReconnect = false;
   let adminHasMemberRow = false;
   if (adminSession) {
     const member = await getMemberByEmail(adminSession.email);
     adminHasMemberRow = !!member;
     if (member) {
-      adminConnection = (await getMemberConnectionState(member.id)).connection;
+      const state = await getMemberConnectionState(member.id);
+      adminConnection = state.connection;
+      adminNeedsReconnect = state.needsReconnect;
     }
   }
 
@@ -42,25 +46,22 @@ export async function SiteHeader() {
           FounderNexus
         </Link>
         {adminSession ? (
-          <div className="flex items-center gap-2">
-            <nav className="mr-2 flex items-center gap-4 text-sm">
-              <Link
-                href="/admin/find-a-time"
-                className="text-muted-foreground transition-colors hover:text-foreground"
-              >
-                Find a time
-              </Link>
-              <Link
-                href="/admin/members"
-                className="text-muted-foreground transition-colors hover:text-foreground"
-              >
-                People
-              </Link>
-            </nav>
-            {adminHasMemberRow && (
-              <AdminConnectCalendarButton connection={adminConnection} />
-            )}
-            <SignOutControl />
+          // Navigation and account controls are different kinds of thing and
+          // are separated by a rule rather than sitting in one undifferentiated
+          // row: "where can I go" on the left of it, "who am I and what's my
+          // calendar doing" on the right.
+          <div className="flex items-center gap-3">
+            <AdminNav />
+            <span className="h-5 w-px bg-border" aria-hidden />
+            <div className="flex items-center gap-2">
+              {adminHasMemberRow && (
+                <AdminConnectCalendarButton
+                  connection={adminConnection}
+                  needsReconnect={adminNeedsReconnect}
+                />
+              )}
+              <SignOutControl />
+            </div>
           </div>
         ) : memberSession ? (
           <SignOutControl />
