@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ProviderIcon } from "@/components/provider-icon";
+import { AddPersonDialog } from "@/components/add-person-dialog";
 import type { MemberWithConnection } from "@/db/queries";
 
 /** The three states an admin needs to tell apart, ordered by how much they
@@ -107,6 +108,16 @@ export function MemberDirectory({
 
   return (
     <div className="space-y-10">
+      {/* One Add button for the page rather than one per table. The tables are
+          per status AND role, so a per-table button would appear twice for the
+          same role (once under Connected, once under Waiting) — and a role
+          nobody holds yet has no table at all, so "Add advisor" would be
+          missing exactly when it's needed. The role is picked in the dialog
+          instead, which also survives adding a fourth role later. */}
+      <div className="flex items-center justify-end">
+        <AddPersonDialog connectUrl={connectUrl} onAdded={() => router.refresh()} />
+      </div>
+
       <div className="grid grid-cols-3 gap-4">
         <SummaryCard label="Connected" value={counts.connected} />
         <SummaryCard label="Waiting to connect" value={counts.pending} urgent />
@@ -177,7 +188,11 @@ export function MemberDirectory({
                           than crushing on a narrow screen. */}
                       <Table className="min-w-[40rem] table-fixed">
                         <TableHeader>
-                          <TableRow>
+                          {/* Tinted so the header reads as a header. Against an
+                              all-white card the column names sat at the same
+                              visual weight as the rows, which is what made
+                              three stacked tables hard to scan. */}
+                          <TableRow className="bg-secondary/50 hover:bg-secondary/50">
                             <TableHead className="w-[15rem]">Name</TableHead>
                             <TableHead>Email</TableHead>
                             <TableHead className="w-[6rem] text-center">Calendar</TableHead>

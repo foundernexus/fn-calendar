@@ -11,41 +11,71 @@ import {
   DialogFooter,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import type { MemberWithConnection } from "@/db/queries";
 
 type CreatedMember = { id: number; email: string; fullName: string };
 
+/** The three roles the People page groups by. Kept as one value the admin
+ * picks rather than the pair of booleans the database stores: nobody is
+ * choosing "is a facilitator AND an advisor", they're choosing which of three
+ * lists this person belongs in. The flags are derived on submit. */
+const ROLES = {
+  founder: {
+    label: "Founder",
+    hint: "Scheduled into sessions as a guest. The default.",
+    flags: { isAdvisor: false, isFacilitator: false },
+  },
+  advisor: {
+    label: "Advisor",
+    hint: "Gets their own dashboard, and is picked from the Advisor field when booking rather than the guest list.",
+    flags: { isAdvisor: true, isFacilitator: false },
+  },
+  team: {
+    label: "Team",
+    hint: "FounderNexus staff who run sessions — they can be picked as the session lead.",
+    flags: { isAdvisor: false, isFacilitator: true },
+  },
+} as const;
+
+export type PersonRole = keyof typeof ROLES;
+
 /** There's no email-invite system (deliberately out of scope — see
- * api/admin/members/route.ts) — this dialog IS the invite. It registers the
- * person so /connect recognizes their email, then hands the admin a link to
- * pass along themselves (Slack, text, whatever). The new member won't show
- * up in the guest picker until they actually connect a calendar — that list
- * only ever shows connected members — so the success state says so
- * explicitly rather than leaving the admin wondering if it worked. */
-export function AddGuestDialog({
+ * api/admin/members/route.ts), so this dialog IS the invite. It registers the
+ * person so /connect recognises their email, then hands the admin a link to
+ * pass along themselves. They won't appear in any booking picker until they
+ * actually connect a calendar, so the success state says so outright rather
+ * than leaving the admin wondering whether it worked. */
+export function AddPersonDialog({
   connectUrl,
+  defaultRole = "founder",
   onAdded,
 }: {
   connectUrl: string;
-  onAdded: (member: MemberWithConnection) => void;
+  defaultRole?: PersonRole;
+  onAdded?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [isAdvisor, setIsAdvisor] = useState(false);
+  const [role, setRole] = useState<PersonRole>(defaultRole);
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<CreatedMember | null>(null);
 
   function reset() {
     setFullName("");
     setEmail("");
-    // Deliberately NOT reset — an admin adding advisors is almost always
-    // adding several in a row, and "Add another" shouldn't silently flip them
-    // back to creating guests.
+    // Role deliberately survives — an admin adding advisors is almost always
+    // adding several in a row, and "Add another" shouldn't quietly drop them
+    // back to creating founders.
     setCreated(null);
   }
 
@@ -56,7 +86,7 @@ export function AddGuestDialog({
       const res = await fetch("/api/admin/members", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName, email, isAdvisor }),
+        body: JSON.stringify({ fullName, email, ...ROLES[role].flags }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -64,17 +94,7 @@ export function AddGuestDialog({
         return;
       }
       setCreated(data.member);
-      onAdded({
-        id: data.member.id,
-        email: data.member.email,
-        fullName: data.member.fullName,
-        connected: false,
-        needsReconnect: false,
-        isFacilitator: false,
-        isAdvisor,
-        provider: null,
-        grantEmail: null,
-      });
+      onAdded?.();
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
@@ -108,9 +128,8 @@ export function AddGuestDialog({
             <DialogHeader>
               <DialogTitle>{created.fullName} added</DialogTitle>
               <DialogDescription>
-                They&apos;re registered, but won&apos;t appear as a selectable{" "}
-                {isAdvisor ? "advisor" : "guest"} until they connect their calendar. Send them this
-                link:
+                They&apos;re registered, but won&apos;t be selectable for a session until they
+                connect their calendar. Send them this link:
               </DialogDescription>
             </DialogHeader>
             <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 p-3">
@@ -120,13 +139,7 @@ export function AddGuestDialog({
               </Button>
             </div>
             <DialogFooter>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  reset();
-                }}
-              >
+              <Button type="button" variant="secondary" onClick={reset}>
                 Add another
               </Button>
               <Button
@@ -143,7 +156,7 @@ export function AddGuestDialog({
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle>Add {isAdvisor ? "advisor" : "guest"}</DialogTitle>
+              <DialogTitle>Add person</DialogTitle>
               <DialogDescription>
                 Registers them so they can sign in at /connect. There&apos;s no email invite — you
                 pass along the link yourself.
@@ -151,9 +164,9 @@ export function AddGuestDialog({
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="guest-name">Full name</Label>
+                <Label htmlFor="person-name">Full name</Label>
                 <Input
-                  id="guest-name"
+                  id="person-name"
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
@@ -161,9 +174,9 @@ export function AddGuestDialog({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="guest-email">Email</Label>
+                <Label htmlFor="person-email">Email</Label>
                 <Input
-                  id="guest-email"
+                  id="person-email"
                   type="email"
                   required
                   value={email}
@@ -171,19 +184,31 @@ export function AddGuestDialog({
                   placeholder="jane@example.com"
                 />
               </div>
-              <div className="flex items-start gap-3 rounded-lg border border-border bg-secondary/40 p-3">
-                <Switch id="is-advisor" checked={isAdvisor} onCheckedChange={setIsAdvisor} />
-                <div className="space-y-0.5">
-                  <Label htmlFor="is-advisor">Add as advisor</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Advisors get their own dashboard after signing in, and are picked from the
-                    Advisor field when booking a session instead of the guest list.
-                  </p>
-                </div>
+              <div className="space-y-2">
+                <Label>Role</Label>
+                <Select
+                  items={Object.fromEntries(
+                    Object.entries(ROLES).map(([key, r]) => [key, r.label])
+                  )}
+                  value={role}
+                  onValueChange={(v) => v && setRole(v as PersonRole)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(ROLES).map(([key, r]) => (
+                      <SelectItem key={key} value={key}>
+                        {r.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">{ROLES[role].hint}</p>
               </div>
               <DialogFooter>
                 <Button type="submit" disabled={submitting}>
-                  {submitting ? "Adding…" : isAdvisor ? "Add advisor" : "Add guest"}
+                  {submitting ? "Adding…" : `Add ${ROLES[role].label.toLowerCase()}`}
                 </Button>
               </DialogFooter>
             </form>

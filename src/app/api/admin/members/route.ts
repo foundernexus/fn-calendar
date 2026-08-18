@@ -13,6 +13,10 @@ const bodySchema = z.object({
   // instead of the guest picker, and /connect lands them on /advisor. Defaults
   // false so the existing "add guest" call keeps its old behaviour untouched.
   isAdvisor: z.boolean().default(false),
+  // Marks them as FounderNexus staff who run sessions — gates the Session lead
+  // picker. Same defaulting reason as isAdvisor. Neither flag grants admin
+  // access; that stays ADMIN_EMAILS-only.
+  isFacilitator: z.boolean().default(false),
 });
 
 /** drizzle-orm wraps every driver error in `DrizzleQueryError`, which has no
@@ -70,6 +74,7 @@ export async function POST(request: Request) {
         email,
         fullName: parsed.data.fullName.trim(),
         isAdvisor: parsed.data.isAdvisor,
+        isFacilitator: parsed.data.isFacilitator,
       })
       .returning();
     return NextResponse.json({ member: created });

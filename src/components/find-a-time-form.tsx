@@ -15,7 +15,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MemberSelect, MemberMultiSelect } from "@/components/member-picker";
-import { AddGuestDialog } from "@/components/add-guest-dialog";
 import {
   ResultsList,
   type AvailabilityResult,
@@ -42,18 +41,7 @@ function defaultDateString(daysFromNow: number) {
   return `${year}-${month}-${day}`;
 }
 
-export function FindATimeForm({
-  members: initialMembers,
-  connectUrl,
-}: {
-  members: MemberWithConnection[];
-  connectUrl: string;
-}) {
-  // Lifted into state so a newly-added guest (AddGuestDialog) is reflected
-  // immediately without a full page reload — though since they start out not
-  // connected, they won't actually appear in connectedMembers/facilitators
-  // below until they connect a calendar themselves.
-  const [members, setMembers] = useState(initialMembers);
+export function FindATimeForm({ members }: { members: MemberWithConnection[] }) {
   const connectedMembers = members.filter((m) => m.connected);
   // Session lead is a curated subset — connecting a calendar makes someone
   // eligible as a guest, not automatically eligible to lead a session.
@@ -275,13 +263,12 @@ export function FindATimeForm({
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="guests">Guests</Label>
-            <AddGuestDialog
-              connectUrl={connectUrl}
-              onAdded={(member) => setMembers((prev) => [...prev, member])}
-            />
-          </div>
+          {/* Adding people lives on /admin/members now, not here: this page is
+              for booking, that one is for who exists and what they've
+              connected. Nothing is lost by the move — someone added here could
+              never be booked in the same sitting anyway, since they don't
+              appear in any picker until they've connected a calendar. */}
+          <Label htmlFor="guests">Guests</Label>
           <MemberMultiSelect
             id="guests"
             members={guestCandidates}
