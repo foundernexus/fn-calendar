@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, or, sql as raw } from "drizzle-orm";
+import { eq, or, and, sql as raw } from "drizzle-orm";
 import { db } from "@/db";
 import { members, events, eventAttendees, calendarConnections } from "@/db/schema";
 import { requireAdminSession, isAdminEmail } from "@/lib/auth/admin";
@@ -9,13 +9,16 @@ import { env } from "@/lib/env";
 /** Removes a member for good: revokes their calendar grant at Nylas, then
  * deletes the row (their connections and stated availability cascade with it).
  *
- * Deliberately refuses when the member has any session history. `events` and
- * `event_attendees` reference members WITHOUT `onDelete: cascade`, so the
- * delete would fail at the database anyway — but the reason matters more than
- * the constraint: those rows are the record of real meetings that really
- * happened, and quietly destroying them to tidy up a roster is not a trade an
- * admin should be able to make by clicking "Remove". Someone who has been in
- * sessions needs archiving, which is a different feature.
+ * Deliberately refuses when the member is in a CONFIRMED session. Those rows
+ * are the record of meetings that really happened, and quietly destroying them
+ * to tidy up a roster is not a trade an admin should be able to make by
+ * clicking "Remove". Someone with real session history needs archiving, which
+ * is a different feature.
+ *
+ * Cancelled sessions don't block, and are cleaned up as part of the removal —
+ * they never happened, so there's no history to protect, and blocking on them
+ * meant an admin saw an empty grid while being told the person was in two
+ * sessions they had no way to find.
  *
  * That leaves this squarely aimed at what it's for: people added by mistake,
  * duplicates, wrong addresses, and anyone who never connected at all. */
@@ -61,13 +64,23 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     );
   }
 
+  // CONFIRMED only. This guard exists to stop a roster tidy-up destroying the
+  // record of meetings that really happened — and a cancelled session never
+  // happened. Counting those too produced the worst possible message: the grid
+  // correctly showed nothing (it only renders confirmed sessions) while this
+  // insisted the person was in two, naming rows nobody could see or reach.
   let sessionCount = 0;
   try {
     const [{ count }] = await db
       .select({ count: raw<number>`count(*)::int` })
       .from(events)
       .leftJoin(eventAttendees, eq(eventAttendees.eventId, events.id))
-      .where(or(eq(events.organizerMemberId, memberId), eq(eventAttendees.memberId, memberId)));
+      .where(
+        and(
+          eq(events.status, "confirmed"),
+          or(eq(events.organizerMemberId, memberId), eq(eventAttendees.memberId, memberId))
+        )
+      );
     sessionCount = count;
   } catch (err) {
     console.error("[admin/members/:id] Session count failed", { memberId, err });
@@ -123,8 +136,23 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     console.error("[admin/members/:id] Reading connections failed", { memberId, err });
   }
 
+  // Whatever cancelled sessions they're attached to have to go first: those
+  // foreign keys carry no cascade, so the member row won't delete while they
+  // point at it. Only cancelled ones can still be here — the confirmed check
+  // above already refused otherwise.
+  //
+  // Events they ORGANISED are deleted outright, which takes their attendee
+  // rows with them: an event with no organiser is not a record of anything.
+  // For events somebody else led, only this person's own attendee row goes,
+  // so the cancellation stays visible to everyone still involved.
   try {
-    await db.delete(members).where(eq(members.id, memberId));
+    await db.batch([
+      db
+        .delete(events)
+        .where(and(eq(events.organizerMemberId, memberId), eq(events.status, "cancelled"))),
+      db.delete(eventAttendees).where(eq(eventAttendees.memberId, memberId)),
+      db.delete(members).where(eq(members.id, memberId)),
+    ]);
   } catch (err) {
     console.error("[admin/members/:id] Delete failed", { memberId, err });
     return NextResponse.json(
