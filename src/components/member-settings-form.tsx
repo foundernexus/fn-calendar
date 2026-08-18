@@ -9,7 +9,9 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { TimezoneSelect } from "@/components/timezone-select";
 import { TimeSelect } from "@/components/time-select";
+import { CalendarList } from "@/components/calendar-list";
 import { isSupportedTimezone } from "@/lib/timezones";
+import type { MemberCalendar } from "@/db/queries";
 
 type Block = { startTime: string; endTime: string };
 type DayState = { enabled: boolean; blocks: Block[] };
@@ -96,12 +98,16 @@ export function MemberSettingsForm({
   timezone: initialTimezone,
   initialAvailability,
   connection: initialConnection,
+  calendars,
   needsReconnect,
 }: {
   fullName: string;
   timezone: string | null;
   initialAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
   connection: { provider: string; grantEmail: string } | null;
+  /** Every calendar this member holds. All are checked for conflicts; the one
+   * flagged isInviteTarget receives sessions. */
+  calendars: MemberCalendar[];
   /** They were connected before, but that connection now belongs to a
    * different Nylas app (e.g. we switched Sandbox/Production tiers) and no
    * longer works — distinct from never having connected at all, so the copy
@@ -270,18 +276,26 @@ export function MemberSettingsForm({
               <p className="mt-2 text-xs text-destructive">Not connected.</p>
             )}
             {connection && (
-              <p className="mt-1 truncate text-xs text-muted-foreground">{connection.grantEmail}</p>
+              <p className="mt-1 truncate text-xs text-muted-foreground">
+                sessions go to {connection.grantEmail}
+              </p>
             )}
+            {/* Connecting and removing individual calendars live in the
+                Calendars card below, which can show all of them. What's left
+                here is the two whole-account actions: repair a broken
+                connection, or stop being scheduled at all. */}
             <div className="mt-3 flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={handleReconnect}
-                disabled={reconnecting}
-              >
-                {connection || needsReconnect ? "Reconnect" : "Connect calendar"}
-              </Button>
+              {!connection && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleReconnect}
+                  disabled={reconnecting}
+                >
+                  {needsReconnect ? "Reconnect" : "Connect calendar"}
+                </Button>
+              )}
               {(connection || needsReconnect) && (
                 <Button
                   type="button"
@@ -290,7 +304,7 @@ export function MemberSettingsForm({
                   onClick={handleDisconnect}
                   disabled={submitting}
                 >
-                  Disconnect
+                  Disconnect all
                 </Button>
               )}
             </div>
@@ -305,6 +319,8 @@ export function MemberSettingsForm({
 
         </div>
       </div>
+
+      <CalendarList calendars={calendars} />
 
       <div className="mt-5 rounded-xl border border-border bg-card p-6 shadow-card">
         <p className="text-base font-semibold text-foreground">Weekly availability</p>

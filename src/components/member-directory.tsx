@@ -280,8 +280,17 @@ export function MemberDirectory({
  * needs redoing" are different problems with different fixes and must not
  * collapse into one generic warning glyph. */
 function StatusMark({ member }: { member: MemberWithConnection }) {
-  if (member.connected && member.provider) {
-    return <ProviderIcon provider={member.provider} />;
+  if (member.connected && member.connections.length > 0) {
+    // One mark per connected calendar — a member can hold several, and all of
+    // them are checked before a slot is offered. The invite target is the one
+    // named in the Email column, so it isn't singled out again here.
+    return (
+      <span className="flex items-center gap-1">
+        {member.connections.map((c) => (
+          <ProviderIcon key={c.grantEmail} provider={c.provider} />
+        ))}
+      </span>
+    );
   }
   // The label lives on a wrapping span rather than as an SVG <title> child:
   // that gives both the hover tooltip and the accessible name without relying

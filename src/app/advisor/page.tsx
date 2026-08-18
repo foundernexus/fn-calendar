@@ -46,6 +46,7 @@ export default async function AdvisorPage() {
           endTime: a.endTime,
         }))}
         connection={connectionState.connection}
+        calendars={connectionState.calendars}
         needsReconnect={connectionState.needsReconnect}
         sessions={sessions}
       />

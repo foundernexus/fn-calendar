@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   pgEnum,
@@ -93,11 +94,31 @@ export const calendarConnections = pgTable(
       .notNull()
       .defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    // Which of this member's calendars new sessions get written to. A member
+    // can connect several (a personal Google and a work Google, say): ALL of
+    // them are checked for conflicts, but the invite has to land on exactly
+    // one, or a single session becomes three separate calendar entries that
+    // cancel independently.
+    //
+    // False everywhere is a valid state — see pickInviteConnection in
+    // db/queries.ts, which falls back to the most recently connected calendar.
+    // That keeps every existing single-calendar member working with no
+    // backfill.
+    isPrimary: boolean("is_primary").notNull().default(false),
   },
-  // Postgres doesn't auto-index FK columns, and getLatestConnections (used
-  // on nearly every page load — /connect, /me, /admin/find-a-time) filters
-  // and sorts by member_id on every call.
-  (t) => [index("calendar_connections_member_id_idx").on(t.memberId)]
+  (t) => [
+    // Postgres doesn't auto-index FK columns, and getLatestConnections (used
+    // on nearly every page load — /connect, /me, /admin/find-a-time) filters
+    // and sorts by member_id on every call.
+    index("calendar_connections_member_id_idx").on(t.memberId),
+    // At most one primary per member, enforced by the database rather than by
+    // remembering to clear the old one: a member with two calendars both
+    // claiming the invite would make which calendar receives a session depend
+    // on row order.
+    uniqueIndex("calendar_connections_one_primary_per_member")
+      .on(t.memberId)
+      .where(sql`${t.isPrimary}`),
+  ]
 );
 
 export const events = pgTable("events", {
@@ -112,6 +133,15 @@ export const events = pgTable("events", {
     .notNull()
     .references(() => members.id),
   nylasEventId: text("nylas_event_id").notNull(),
+  // The grant the event was actually created on. Nylas resolves an event id
+  // within a grant, so cancelling or moving it has to use the same one —
+  // and now that a member can hold several calendars, "the organizer's
+  // connection" is no longer a single unambiguous answer. Looking it up fresh
+  // would silently target the wrong calendar the moment they change which one
+  // receives invites, and the cancel would 404 while the meeting stayed in
+  // everyone's diary. Nullable: rows created before this column existed fall
+  // back to the lookup (see api/admin/events/[id]).
+  organizerGrantId: text("organizer_grant_id"),
   status: eventStatusEnum("status").notNull().default("confirmed"),
   // Hash of sorted guest member IDs + slot start + duration (organizer
   // intentionally excluded — same guest list + same time is always a

@@ -237,6 +237,7 @@ export type LatestConnectionRow = {
   connection_status: "connected" | "revoked";
   connected_at: Date;
   revoked_at: Date | null;
+  is_primary: boolean;
 };
 
 /** A connection is only actually usable if it's marked connected AND belongs
@@ -271,14 +272,54 @@ export async function getLatestConnections(memberIds?: number[]) {
         )})`
       : sql``;
 
+  // DISTINCT ON (member_id, grant_email), not (member_id): a member may hold
+  // several calendars, and all of them have to survive this query so every one
+  // gets checked for conflicts. Deduping by grant_email is what still collapses
+  // RECONNECTS — reconnecting the same account yields the same address, so the
+  // newest row wins — while a genuinely different account is kept as its own
+  // calendar. Deduping by member_id alone silently hid every calendar but the
+  // most recent.
   const result = await db.execute<LatestConnectionRow>(sql`
-    SELECT DISTINCT ON (member_id) *
+    SELECT DISTINCT ON (member_id, grant_email) *
     FROM ${calendarConnections}
     ${memberFilter}
-    ORDER BY member_id, connected_at DESC, id DESC
+    ORDER BY member_id, grant_email, connected_at DESC, id DESC
   `);
 
   return result.rows;
+}
+
+/** Which of a member's calendars a new session should be written to.
+ *
+ * Every connected calendar is checked for conflicts, but exactly one receives
+ * the invite: writing to all of them would produce several independent
+ * calendar entries for one session, and cancelling would then have to find and
+ * remove each. `is_primary` is the member's own choice on /me.
+ *
+ * Falls back to the most recently connected when nothing is marked — the state
+ * every member was in before this existed, so no backfill was needed. Callers
+ * pass the rows for ONE member; passing a mixed set returns a meaningless
+ * answer. */
+export function pickInviteConnection(rowsForOneMember: LatestConnectionRow[]) {
+  if (rowsForOneMember.length === 0) return undefined;
+  return (
+    rowsForOneMember.find((r) => r.is_primary) ??
+    [...rowsForOneMember].sort(
+      (a, b) => b.connected_at.getTime() - a.connected_at.getTime() || b.id - a.id
+    )[0]
+  );
+}
+
+/** Groups connections by member — the shape almost every caller now wants,
+ * since "the connection for member X" stopped being a single row. */
+export function groupConnectionsByMember(rows: LatestConnectionRow[]) {
+  const byMember = new Map<number, LatestConnectionRow[]>();
+  for (const row of rows) {
+    const list = byMember.get(row.member_id) ?? [];
+    list.push(row);
+    byMember.set(row.member_id, list);
+  }
+  return byMember;
 }
 
 /** Same as `getLatestConnections`, filtered to members whose latest connection is
@@ -294,16 +335,43 @@ export async function getActiveConnections(memberIds?: number[]) {
  * at some point but now stale (belongs to a different Nylas app than the one
  * currently configured — e.g. after switching Sandbox/Production tiers) and
  * needs reconnecting. */
+export type MemberCalendar = {
+  id: number;
+  provider: string;
+  grantEmail: string;
+  /** True for the one that receives sessions. Exactly one usable calendar
+   * carries this whenever the member has any. */
+  isInviteTarget: boolean;
+};
+
 export async function getMemberConnectionState(memberId: number): Promise<{
+  /** The calendar sessions are written to — what the header's status badge
+   * shows. Null when nothing usable is connected. */
   connection: { provider: string; grantEmail: string } | null;
+  /** All usable calendars, in connect order. Every one is checked for
+   * conflicts; only `isInviteTarget` receives the invite. */
+  calendars: MemberCalendar[];
   needsReconnect: boolean;
 }> {
-  const [row] = await getLatestConnections([memberId]);
-  if (!row) return { connection: null, needsReconnect: false };
-  if (isConnectionUsable(row)) {
-    return { connection: { provider: row.provider, grantEmail: row.grant_email }, needsReconnect: false };
-  }
-  return { connection: null, needsReconnect: row.connection_status === "connected" };
+  const rows = await getLatestConnections([memberId]);
+  const usable = rows.filter(isConnectionUsable);
+  const invite = pickInviteConnection(usable);
+
+  return {
+    connection: invite ? { provider: invite.provider, grantEmail: invite.grant_email } : null,
+    calendars: [...usable]
+      .sort((a, b) => a.connected_at.getTime() - b.connected_at.getTime() || a.id - b.id)
+      .map((r) => ({
+        id: r.id,
+        provider: r.provider,
+        grantEmail: r.grant_email,
+        isInviteTarget: r.id === invite?.id,
+      })),
+    // Same reasoning as getMembersWithConnectionStatus: only when NOTHING
+    // works, not merely because an old row is lying around.
+    needsReconnect:
+      usable.length === 0 && rows.some((r) => r.connection_status === "connected"),
+  };
 }
 
 export type MemberWithConnection = {
@@ -321,8 +389,13 @@ export type MemberWithConnection = {
    * Session lead picker. Independent of both: someone can be an advisor and a
    * facilitator, or neither. */
   isAdvisor: boolean;
+  /** The calendar that RECEIVES sessions, not "the" calendar — a member can
+   * hold several. Null when none are usable. */
   provider: string | null;
   grantEmail: string | null;
+  /** Every usable calendar this member holds, all of which are checked for
+   * conflicts. Usually one. */
+  connections: { provider: string; grantEmail: string; isInviteTarget: boolean }[];
 };
 
 /** Every member, each annotated with whether their latest connection is
@@ -333,22 +406,33 @@ export type MemberWithConnection = {
  * is a facilitator). */
 export async function getMembersWithConnectionStatus(): Promise<MemberWithConnection[]> {
   const allMembers = await db.select().from(members).orderBy(members.fullName);
-  const latest = await getLatestConnections(allMembers.map((m) => m.id));
-  const latestByMember = new Map(latest.map((row) => [row.member_id, row]));
+  const byMember = groupConnectionsByMember(
+    await getLatestConnections(allMembers.map((m) => m.id))
+  );
 
   return allMembers.map((m) => {
-    const connection = latestByMember.get(m.id);
-    const usable = !!connection && isConnectionUsable(connection);
+    const rows = byMember.get(m.id) ?? [];
+    const usable = rows.filter(isConnectionUsable);
+    const invite = pickInviteConnection(usable);
     return {
       id: m.id,
       email: m.email,
       fullName: m.fullName,
-      connected: usable,
-      needsReconnect: !!connection && connection.connection_status === "connected" && !usable,
+      connected: usable.length > 0,
+      // Only "needs reconnect" when NONE of their calendars work. Someone with
+      // a working calendar plus an old stale row is simply connected — nagging
+      // them about the stale one would be noise.
+      needsReconnect:
+        usable.length === 0 && rows.some((r) => r.connection_status === "connected"),
       isFacilitator: m.isFacilitator,
       isAdvisor: m.isAdvisor,
-      provider: usable ? connection!.provider : null,
-      grantEmail: usable ? connection!.grant_email : null,
+      provider: invite?.provider ?? null,
+      grantEmail: invite?.grant_email ?? null,
+      connections: usable.map((r) => ({
+        provider: r.provider,
+        grantEmail: r.grant_email,
+        isInviteTarget: r.id === invite?.id,
+      })),
     };
   });
 }

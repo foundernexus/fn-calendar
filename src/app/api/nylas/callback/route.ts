@@ -78,7 +78,14 @@ export async function GET(request: Request) {
     return failureRedirect(FAILURE_STATUS.expired);
   }
 
-  const statePayload = await verifyValue<{ memberId: number; redirectTo?: "admin" }>(
+  const statePayload = await verifyValue<{
+    memberId: number;
+    redirectTo?: "admin";
+    /** Set only by /api/me/calendars, which runs behind a member session — see
+     * the identity check below for why that distinction is what makes adding a
+     * second calendar safe. */
+    addCalendar?: boolean;
+  }>(
     TOKEN_PURPOSE.connectState,
     state,
     env.SESSION_SECRET
@@ -145,7 +152,17 @@ export async function GET(request: Request) {
     previouslyLinked = linked.some((row) => normalizeEmail(row.grantEmail) === signedInEmail);
   }
 
-  if (!isRegisteredEmail && !previouslyLinked) {
+  // Adding a second calendar is the one case where a brand-new, unrelated
+  // address is legitimate — a personal Google alongside a work one. It's safe
+  // only because this flag can exist nowhere but a token minted by
+  // /api/me/calendars, which sits behind requireMemberSession: the person was
+  // already proven to be this member before the flow started, and the token is
+  // HMAC-signed so the flag can't be bolted on from outside. The public
+  // sign-in path (/api/connect/start) never sets it, so the takeover it closes
+  // stays closed.
+  const addingCalendar = statePayload.addCalendar === true;
+
+  if (!isRegisteredEmail && !previouslyLinked && !addingCalendar) {
     console.warn("[nylas/callback] identity check failed — signed-in account is not this member", {
       memberId: statePayload.memberId,
       expectedEmail: targetMember.email,

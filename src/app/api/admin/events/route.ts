@@ -5,6 +5,8 @@ import { db } from "@/db";
 import { events, eventAttendees } from "@/db/schema";
 import {
   getActiveConnections,
+  groupConnectionsByMember,
+  pickInviteConnection,
   getMemberById,
   getMembersByIds,
 } from "@/db/queries";
@@ -132,8 +134,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
   }
 
-  const connectionByMemberId = new Map(activeConnections.map((c) => [c.member_id, c]));
-  const organizerConnection = connectionByMemberId.get(body.organizerMemberId);
+  const connectionsByMemberId = groupConnectionsByMember(activeConnections);
+  // A member can hold several calendars, all of which were checked for
+  // conflicts — but the invite goes to exactly one, the one they nominated on
+  // /me. Sending to all of them would land the same session in their diary
+  // several times over as independent entries that cancel separately.
+  const inviteConnection = (memberId: number) =>
+    pickInviteConnection(connectionsByMemberId.get(memberId) ?? []);
+  const organizerConnection = inviteConnection(body.organizerMemberId);
   // The availability check ran against each connected calendar's grant_email
   // (see availability/route.ts) — a member's registered address can differ
   // from the one they actually connected, so inviting the registered address
@@ -142,7 +150,7 @@ export async function POST(request: Request) {
   // create-event time (a guest who disconnected between search and booking
   // — still invited, per the existing "unconnected doesn't block" decision).
   function resolvedEmail(memberId: number, registeredEmail: string) {
-    return connectionByMemberId.get(memberId)?.grant_email ?? registeredEmail;
+    return inviteConnection(memberId)?.grant_email ?? registeredEmail;
   }
 
   if (!organizerConnection || !organizerMember) {
@@ -231,6 +239,12 @@ export async function POST(request: Request) {
         meetingUrl: body.meetingUrl || null,
         organizerMemberId: body.organizerMemberId,
         nylasEventId: nylasEvent.id,
+        // Recorded, not re-derived later: Nylas resolves an event id within a
+        // grant, and the organizer may hold several calendars or change which
+        // one receives invites. Cancelling or moving has to go back to the
+        // grant this was actually created on, or it 404s at the provider while
+        // the meeting sits in everyone's diary.
+        organizerGrantId: organizerConnection.nylas_grant_id,
         idempotencyKey,
       })
       .returning();

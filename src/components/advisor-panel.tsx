@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { MemberSettingsForm } from "@/components/member-settings-form";
 import { AdvisorSessionList } from "@/components/advisor-session-list";
-import type { MemberSession } from "@/db/queries";
+import type { MemberSession, MemberCalendar } from "@/db/queries";
 
 type Tab = "availability" | "sessions";
 
@@ -17,6 +17,7 @@ export function AdvisorPanel({
   timezone,
   initialAvailability,
   connection,
+  calendars,
   needsReconnect,
   sessions,
 }: {
@@ -24,6 +25,7 @@ export function AdvisorPanel({
   timezone: string | null;
   initialAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
   connection: { provider: string; grantEmail: string } | null;
+  calendars: MemberCalendar[];
   needsReconnect: boolean;
   sessions: MemberSession[];
 }) {
@@ -93,6 +95,7 @@ export function AdvisorPanel({
             timezone={timezone}
             initialAvailability={initialAvailability}
             connection={connection}
+            calendars={calendars}
             needsReconnect={needsReconnect}
             // Advisors are the scarce side of the marketplace — capping how
             // many sessions they'll take is the point. Founders don't get this.

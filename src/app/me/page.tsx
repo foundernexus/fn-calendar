@@ -37,6 +37,7 @@ export default async function MePage() {
             endTime: a.endTime,
           }))}
           connection={connectionState.connection}
+          calendars={connectionState.calendars}
           needsReconnect={connectionState.needsReconnect}
         />
       </div>

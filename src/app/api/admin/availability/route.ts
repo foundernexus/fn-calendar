@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   getActiveConnections,
+  groupConnectionsByMember,
   getMembersByIds,
   getMemberAvailabilityForMembers,
   getBookedEventsOverlapping,
@@ -110,7 +111,10 @@ export async function POST(request: Request) {
     getMembersByIds(allSelectedIds),
     getMemberAvailabilityForMembers(allSelectedIds),
   ]);
-  const connectionByMemberId = new Map(activeConnections.map((c) => [c.member_id, c]));
+  // Grouped, not one-per-member: someone can hold a personal and a work
+  // calendar, and a slot is only genuinely free if they're free in ALL of them.
+  const connectionsByMemberId = groupConnectionsByMember(activeConnections);
+  const isConnected = (id: number) => (connectionsByMemberId.get(id)?.length ?? 0) > 0;
   const membersById = new Map(selectedMembers.map((m) => [m.id, m]));
 
   // Every selected member's (organizer + guests) own stated weekly windows,
@@ -123,8 +127,7 @@ export async function POST(request: Request) {
     availabilityByMemberId.set(row.memberId, list);
   }
 
-  const organizerConnection = connectionByMemberId.get(body.organizerMemberId);
-  if (!organizerConnection) {
+  if (!isConnected(body.organizerMemberId)) {
     return NextResponse.json({
       slots: [],
       checkedCount: 0,
@@ -160,24 +163,23 @@ export async function POST(request: Request) {
   }
 
   const notConnectedNames = allSelectedIds
-    .filter((id) => !connectionByMemberId.has(id))
+    .filter((id) => !isConnected(id))
     .map((id) => membersById.get(id)?.fullName ?? `Unknown member #${id}`);
 
-  // checkedCount/totalSelected count people (member IDs), not calendars —
-  // keep this in the same unit as allSelectedIds/notConnectedNames above, or
-  // two members sharing a connected account (deduped below by grant_email
-  // for the actual Nylas call) would silently desync the two numbers shown
-  // in the UI.
-  const checkedCount = allSelectedIds.filter((id) => connectionByMemberId.has(id)).length;
+  // checkedCount/totalSelected count PEOPLE, not calendars — someone with two
+  // connected calendars is still one person, and reporting "checked 4 of 3
+  // people" because one of them holds two accounts would be nonsense.
+  const checkedCount = allSelectedIds.filter(isConnected).length;
 
-  // Dedupe by grant_email, not member ID — two members could theoretically
-  // share a connected account, and Nylas's participants list shouldn't carry
-  // the same email twice.
+  // Every calendar of every selected member, deduped by address. Nylas's
+  // collective availability requires ALL participants to be free, which is
+  // exactly the rule wanted here: a member with a personal and a work calendar
+  // is only offered when both are clear. Deduping also covers two members who
+  // happen to share an account, which would otherwise appear twice.
   const participantEmails = [
     ...new Set(
       allSelectedIds
-        .map((id) => connectionByMemberId.get(id))
-        .filter((c) => c !== undefined)
+        .flatMap((id) => connectionsByMemberId.get(id) ?? [])
         .map((c) => c.grant_email)
     ),
   ];

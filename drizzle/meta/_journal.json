@@ -50,6 +50,13 @@
       "when": 1787022746382,
       "tag": "0006_parallel_elektra",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787089076029,
+      "tag": "0007_strange_prism",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { events, eventAttendees } from "@/db/schema";
-import { getActiveConnections } from "@/db/queries";
+import { getActiveConnections, groupConnectionsByMember, pickInviteConnection } from "@/db/queries";
 import { requireAdminSession } from "@/lib/auth/admin";
 import { cancelNylasEvent, rescheduleNylasEvent } from "@/lib/nylas";
 import { computeIdempotencyKey } from "@/lib/idempotency";
@@ -29,6 +29,29 @@ function isUniqueViolation(err: unknown): boolean {
     e = e.cause as typeof e;
   }
   return false;
+}
+
+/** The grant this event actually lives on. Nylas resolves an event id within a
+ * grant, so cancelling or moving it MUST use the one it was created on — and
+ * now that a member can hold several calendars, re-deriving "the organizer's
+ * connection" would silently target the wrong one the moment they change which
+ * calendar receives invites.
+ *
+ * `events.organizer_grant_id` is recorded at creation and is the answer.
+ * Rows created before that column existed fall back to the lookup, which is
+ * exactly the old behaviour and correct for anyone with a single calendar.
+ * Returns null when nothing usable is connected — the caller must say so
+ * rather than guessing, since we genuinely cannot reach the calendar. */
+async function resolveOrganizerGrantId(event: {
+  organizerGrantId: string | null;
+  organizerMemberId: number;
+}) {
+  if (event.organizerGrantId) return event.organizerGrantId;
+  const rows = await getActiveConnections([event.organizerMemberId]);
+  const fallback = pickInviteConnection(
+    groupConnectionsByMember(rows).get(event.organizerMemberId) ?? []
+  );
+  return fallback?.nylas_grant_id ?? null;
 }
 
 /** Moves a booked session to a new time, keeping the same event and the same
@@ -92,8 +115,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     );
   }
 
-  const [organizerConnection] = await getActiveConnections([event.organizerMemberId]);
-  if (!organizerConnection) {
+  const organizerGrantId = await resolveOrganizerGrantId(event);
+  if (!organizerGrantId) {
     return NextResponse.json(
       {
         error:
@@ -135,7 +158,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   try {
     await rescheduleNylasEvent({
-      organizerGrantId: organizerConnection.nylas_grant_id,
+      organizerGrantId,
       nylasEventId: event.nylasEventId,
       startTime: body.startsAtUnix,
       endTime: endsAtUnix,
@@ -228,12 +251,12 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     return NextResponse.json({ event, alreadyCancelled: true });
   }
 
-  // Deleting from the provider requires the grant the event was created on —
-  // the organizer's. If they've since disconnected we genuinely cannot remove
-  // it from anyone's calendar, and saying so is better than marking it
-  // cancelled here while it quietly stays in everyone's calendar.
-  const [organizerConnection] = await getActiveConnections([event.organizerMemberId]);
-  if (!organizerConnection) {
+  // Deleting from the provider requires the grant the event was created on.
+  // If the lead has since disconnected we genuinely cannot remove it from
+  // anyone's calendar, and saying so is better than marking it cancelled here
+  // while it quietly stays in everyone's calendar.
+  const organizerGrantId = await resolveOrganizerGrantId(event);
+  if (!organizerGrantId) {
     return NextResponse.json(
       {
         error:
@@ -245,7 +268,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
   try {
     await cancelNylasEvent({
-      organizerGrantId: organizerConnection.nylas_grant_id,
+      organizerGrantId,
       nylasEventId: event.nylasEventId,
     });
   } catch (err) {
