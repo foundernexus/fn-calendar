@@ -98,7 +98,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
       return;
     }
     if (guestMemberIds.length === 0) {
-      toast.error("Add at least one guest.");
+      toast.error("Add at least one founder.");
       return;
     }
 
@@ -268,7 +268,12 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
               connected. Nothing is lost by the move — someone added here could
               never be booked in the same sitting anyway, since they don't
               appear in any picker until they've connected a calendar. */}
-          <Label htmlFor="guests">Guests</Label>
+          {/* "Founders", matching the People page's grouping and the language
+              everyone here actually uses. Slightly loose: this list is
+              "connected and not an advisor", so a Team member could appear in
+              it if they're attending rather than leading. That's rare enough
+              to be worth the plainer word. */}
+          <Label htmlFor="guests">Founders</Label>
           <MemberMultiSelect
             id="guests"
             members={guestCandidates}
@@ -290,8 +295,12 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
             // just be empty with the reassuring "only connected people can be
             // selected" note below it, which reads like a bug.
             <p className="text-sm text-destructive">
-              Everyone who&apos;s connected is marked as an advisor — add them through the advisor
-              field above, or add a guest who isn&apos;t an advisor.
+              Everyone who&apos;s connected is marked as an advisor — pick them in the advisor field
+              above, or add a founder on the{" "}
+              <Link href="/admin/members" className="underline">
+                People page
+              </Link>
+              .
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">

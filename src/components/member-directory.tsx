@@ -52,7 +52,11 @@ function roleOf(m: MemberWithConnection): Role {
   return "founder";
 }
 
-const ROLE_ORDER: Role[] = ["advisor", "team", "founder"];
+// Team, then advisors, then founders. Founders is by far the longest list, so
+// putting it last means the two short groups are always visible without
+// scrolling past it — and it reads as FounderNexus outward, which is how
+// people describe the org anyway.
+const ROLE_ORDER: Role[] = ["team", "advisor", "founder"];
 const ROLE_LABELS: Record<Role, { one: string; many: string }> = {
   advisor: { one: "Advisor", many: "Advisors" },
   team: { one: "Team", many: "Team" },

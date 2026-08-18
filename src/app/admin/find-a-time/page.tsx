@@ -19,9 +19,12 @@ export default async function FindATimePage() {
   return (
     <div className="py-10">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Find a time</h1>
+        {/* Label only — the route stays /admin/find-a-time. "Schedule" also
+            covers the second half of what this page does (booking the thing),
+            where "Find a time" only named the search. */}
+        <h1 className="text-2xl font-bold text-foreground">Schedule</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Pick the session lead and guests, and see when everyone&apos;s free.
+          Pick who&apos;s in the session, see when everyone&apos;s free, and book it.
         </p>
       </div>
       <div className="mt-8">
