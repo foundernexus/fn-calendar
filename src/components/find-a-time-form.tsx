@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -55,10 +55,6 @@ export function FindATimeForm({
   // below until they connect a calendar themselves.
   const [members, setMembers] = useState(initialMembers);
   const connectedMembers = members.filter((m) => m.connected);
-  // Previously connected under a different Nylas app (e.g. we switched
-  // Sandbox/Production tiers) — their old connection no longer works, but
-  // they shouldn't look identical to someone who's simply never connected.
-  const needsReconnectMembers = members.filter((m) => m.needsReconnect);
   // Session lead is a curated subset — connecting a calendar makes someone
   // eligible as a guest, not automatically eligible to lead a session.
   const facilitators = connectedMembers.filter((m) => m.isFacilitator);
@@ -83,6 +79,11 @@ export function FindATimeForm({
   const [result, setResult] = useState<AvailabilityResult | null>(null);
   const [dialogSlot, setDialogSlot] = useState<Slot | null>(null);
   const [cancelTarget, setCancelTarget] = useState<BookedSlot | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  // Set by a fresh search only, never by the post-booking refetch — yanking
+  // the page down while someone is reading a confirmation would be worse than
+  // the problem this solves.
+  const [scrollToResults, setScrollToResults] = useState(false);
   // The exact request body of the last search, replayed after a booking to
   // refresh the grid. Kept separately from `searchedParams` (which exists for
   // rendering) because the refetch has to send precisely what was searched —
@@ -140,6 +141,7 @@ export function FindATimeForm({
         return;
       }
       setResult(data);
+      setScrollToResults(true);
       setLastSearchBody(body);
       setSearchedParams({
         organizerMemberId,
@@ -160,6 +162,24 @@ export function FindATimeForm({
       setLoading(false);
     }
   }
+
+  // The grid renders below a tall form, so on most screens a completed search
+  // leaves it off-screen — and someone using this for the first time has no
+  // reason to suspect there's anything down there. Runs in an effect rather
+  // than straight after setResult because the grid doesn't exist in the DOM
+  // until React has rendered the new state.
+  useEffect(() => {
+    if (!scrollToResults || !result) return;
+    setScrollToResults(false);
+    resultsRef.current?.scrollIntoView({
+      // Honour the OS "reduce motion" setting — a long smooth scroll is
+      // exactly the kind of movement people turn that on to avoid.
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "start",
+    });
+  }, [scrollToResults, result]);
 
   /** Replays the last search after a booking so the just-booked slot shows as
    * taken straight away, instead of the admin having to reload the page.
@@ -200,20 +220,6 @@ export function FindATimeForm({
       >
         {connectedMembers.length} calendar{connectedMembers.length === 1 ? "" : "s"} connected
       </p>
-      {needsReconnectMembers.length > 0 && (
-        <div className="rounded-lg border border-border bg-secondary p-4 text-sm text-secondary-foreground">
-          <p className="font-medium">
-            {needsReconnectMembers.length === 1
-              ? "1 member needs to reconnect their calendar"
-              : `${needsReconnectMembers.length} members need to reconnect their calendars`}
-          </p>
-          <p className="mt-1 text-muted-foreground">
-            {needsReconnectMembers.map((m) => m.fullName).join(", ")} — connected under a
-            previous setup that&apos;s no longer active, so they&apos;re excluded from the
-            pickers below until they reconnect on their own /me page.
-          </p>
-        </div>
-      )}
       <form
         onSubmit={handleSearch}
         className="space-y-6 rounded-lg border border-border bg-card p-6 shadow-card"
@@ -392,12 +398,14 @@ export function FindATimeForm({
       </form>
 
       {result && searchedParams && (
+        <div ref={resultsRef} className="scroll-mt-4">
         <ResultsList
           result={result}
           searchedParams={searchedParams}
           onSelectSlot={setDialogSlot}
           onSelectBooked={setCancelTarget}
         />
+        </div>
       )}
 
       {dialogSlot && searchedParams && (
