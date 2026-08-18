@@ -14,11 +14,20 @@ function getNylas() {
 }
 
 /**
- * Builds the Nylas Hosted Auth URL. `provider` is deliberately omitted — Nylas's
- * own hosted login page then shows a picker (Google / Microsoft / iCloud,
- * whatever's configured on the app) instead of forcing one provider. iCloud's
- * Apple-required app-specific password is collected on that same Nylas-hosted
- * page — no custom form needed on our side.
+ * Builds the Nylas Hosted Auth URL, pinned to Google.
+ *
+ * Naming a `provider` skips Nylas's hosted login screen and redirects straight
+ * to Google's consent page. Leaving it unset routes members through that
+ * screen first, which carries the Nylas logo and cannot be rebranded without
+ * upgrading to an annual Nylas contract (dashboard → Hosted authentication →
+ * Branding: the toggle is locked). Founders should not be shown a vendor's
+ * logo on the way into FounderNexus's own tool.
+ *
+ * Nothing is lost by pinning it: Google is the only connector configured on
+ * the production app, so the picker's other options lead to an error anyway.
+ * If Microsoft or iCloud is ever enabled, this must become a real choice again
+ * — take the provider as a parameter, and update the copy on /connect, which
+ * deliberately promises Google only.
  */
 export function buildHostedAuthUrl(params: {
   loginHint: string;
@@ -27,6 +36,7 @@ export function buildHostedAuthUrl(params: {
   return getNylas().auth.urlForOAuth2({
     clientId: env.NYLAS_CLIENT_ID,
     redirectUri: env.NYLAS_CALLBACK_URI,
+    provider: "google",
     loginHint: params.loginHint,
     state: params.state,
   });
