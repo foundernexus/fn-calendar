@@ -43,6 +43,20 @@ export async function SiteHeader() {
         </Link>
         {adminSession ? (
           <div className="flex items-center gap-2">
+            <nav className="mr-2 flex items-center gap-4 text-sm">
+              <Link
+                href="/admin/find-a-time"
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Find a time
+              </Link>
+              <Link
+                href="/admin/members"
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Members
+              </Link>
+            </nav>
             {adminHasMemberRow && (
               <AdminConnectCalendarButton connection={adminConnection} />
             )}
