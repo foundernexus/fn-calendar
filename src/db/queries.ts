@@ -235,10 +235,24 @@ export type LatestConnectionRow = {
   grant_email: string;
   nylas_client_id: string | null;
   connection_status: "connected" | "revoked";
-  connected_at: Date;
-  revoked_at: Date | null;
+  /** A STRING in practice, despite the name. These rows come from
+   * `db.execute()` with raw SQL, which hands back whatever the neon HTTP
+   * driver produced without drizzle's column parsing — timestamps arrive as
+   * ISO strings. This was typed `Date` for a long time and nobody noticed,
+   * because the value was only ever used inside SQL ORDER BY; the first code
+   * to call a Date method on it crashed /me. Go through connectedAtMs. */
+  connected_at: string | Date;
+  revoked_at: string | Date | null;
   is_primary: boolean;
 };
+
+/** Comparable timestamp for a connection row, whichever shape the driver
+ * handed back. */
+export function connectedAtMs(row: LatestConnectionRow) {
+  return row.connected_at instanceof Date
+    ? row.connected_at.getTime()
+    : new Date(row.connected_at).getTime();
+}
 
 /** A connection is only actually usable if it's marked connected AND belongs
  * to the Nylas app we're currently configured against — grants don't carry
@@ -305,7 +319,7 @@ export function pickInviteConnection(rowsForOneMember: LatestConnectionRow[]) {
   return (
     rowsForOneMember.find((r) => r.is_primary) ??
     [...rowsForOneMember].sort(
-      (a, b) => b.connected_at.getTime() - a.connected_at.getTime() || b.id - a.id
+      (a, b) => connectedAtMs(b) - connectedAtMs(a) || b.id - a.id
     )[0]
   );
 }
@@ -360,7 +374,7 @@ export async function getMemberConnectionState(memberId: number): Promise<{
   return {
     connection: invite ? { provider: invite.provider, grantEmail: invite.grant_email } : null,
     calendars: [...usable]
-      .sort((a, b) => a.connected_at.getTime() - b.connected_at.getTime() || a.id - b.id)
+      .sort((a, b) => connectedAtMs(a) - connectedAtMs(b) || a.id - b.id)
       .map((r) => ({
         id: r.id,
         provider: r.provider,
