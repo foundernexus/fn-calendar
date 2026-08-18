@@ -82,7 +82,7 @@ export function ResultsList({
       {result.slots.length === 0 && (result.bookedSlots?.length ?? 0) === 0 ? (
         <p className="mt-4 text-sm text-foreground">
           {result.filteredByPreferences
-            ? "Everyone's calendar overlaps at some point in this range, but it all falls outside someone's stated availability, or a guest is already at their weekly session limit. Try adjusting the working hours, a different date range, or ask them to update their preferences on /me."
+            ? "Everyone's calendar overlaps at some point in this range, but it all falls outside someone's stated availability, or the advisor is already at their weekly session limit. Try adjusting the working hours, a different date range, or ask them to update their preferences on /me."
             : "No overlapping free time found in this range."}
         </p>
       ) : (

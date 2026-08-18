@@ -209,18 +209,23 @@ export function weekStartDateString(dateStr: string) {
   return addDaysToDateString(dateStr, -dayOfWeek(dateStr));
 }
 
-/** True if booking a guest into `slot` would NOT push them over their own
- * stated weekly session cap (set on /me) — checked against the week
- * containing the slot's start, in the guest's OWN timezone (same
+/** True if booking an advisor into `slot` would NOT push them over their own
+ * stated weekly session cap (set on /advisor) — checked against the week
+ * containing the slot's start, in the advisor's OWN timezone (same
  * own-timezone reasoning as slotMatchesMemberAvailability: "this week" means
- * the week where THEY are, not the admin's search zone). Only ever applied
- * to guests, never the session lead — a facilitator's job is running
- * multiple sessions a week, so capping them by the same field would block
- * their normal workload the moment they set a cap on their own /me page.
+ * the week where THEY are, not the admin's search zone).
  *
- * A guest with no timezone set has never saved anything on /me — same
- * "never engaged = unrestricted" fallback as the availability check, rather
- * than blocking everyone by default the moment this shipped. */
+ * Only ever applied to advisors. The cap answers "how many of these am I
+ * willing to sit in a week", which is a question only an advisor has:
+ * founders are scheduled as often as their own calendar allows, and the
+ * session lead is running these for a living — capping either by this field
+ * would block normal work. Advisors are also the only people the cap control
+ * is shown to, so this is the one reading where the setting and its effect
+ * line up.
+ *
+ * An advisor with no timezone set has never saved anything on /advisor —
+ * same "never engaged = unrestricted" fallback as the availability check,
+ * rather than blocking everyone by default the moment this shipped. */
 export function slotWithinWeeklyCap(
   slot: { startUnix: number },
   memberTimezone: string | null,

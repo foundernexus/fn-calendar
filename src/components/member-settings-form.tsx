@@ -317,7 +317,8 @@ export function MemberSettingsForm({
             <div>
               <Label htmlFor="weekly-cap">Sessions per week</Label>
               <p className="mt-1 text-xs text-muted-foreground">
-                The most you&apos;ll take on in a given week.
+                The most you&apos;ll take on in a given week. Once you&apos;ve hit it, no more
+                times are offered for you until the next week starts.
               </p>
               <Input
                 id="weekly-cap"

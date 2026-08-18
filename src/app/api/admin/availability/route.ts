@@ -222,8 +222,11 @@ export async function POST(request: Request) {
       // else in that same week. 7 days guarantees the full week either side
       // is covered regardless of which weekday startDate/endDate land on, or
       // timezone-driven shifts in exactly where a guest's week starts.
+      // Advisor only — the weekly cap is an advisor's answer to "how many of
+      // these am I willing to sit in a week". Founders have no cap, so there
+      // is nothing to count for them.
       getConfirmedEventsForMembers(
-        body.guestMemberIds,
+        body.advisorMemberId ? [body.advisorMemberId] : [],
         new Date((startTime - 7 * 86_400) * 1000),
         new Date((endTime + 7 * 86_400) * 1000)
       ),
@@ -245,10 +248,9 @@ export async function POST(request: Request) {
     );
   }
 
-  // Every guest's already-booked CONFIRMED sessions, bucketed into weeks (in
+  // The advisor's already-booked CONFIRMED sessions, bucketed into weeks (in
   // their OWN timezone) — see slotWithinWeeklyCap for how this is checked
-  // against each candidate slot below. Guests only, never the organizer —
-  // see slotWithinWeeklyCap's own comment for why.
+  // against each candidate slot below. Empty when the session has no advisor.
   const confirmedCountByMemberAndWeek = new Map<number, Map<string, number>>();
   for (const row of confirmedEvents) {
     const memberTimezone = membersById.get(row.memberId)?.timezone;
@@ -261,11 +263,13 @@ export async function POST(request: Request) {
   }
 
   // Nylas only knows about real calendar free/busy — it has no idea a member
-  // set "Mondays 2-5pm only" on /me, or that a guest is already at their
-  // weekly session cap. Every selected member (organizer AND guests) must
-  // individually clear their own stated availability window, checked in
-  // each member's own timezone; guests must additionally still have room
-  // under their own weekly cap for the week the slot falls in.
+  // set "Mondays 2-5pm only" on /me, or that an advisor is already at their
+  // weekly session cap. Every selected member (organizer, advisor AND
+  // founders) must individually clear their own stated availability window,
+  // checked in each member's own timezone; the advisor must additionally
+  // still have room under their own weekly cap for the week the slot falls
+  // in. Founders have no cap — see the advisor-only reasoning in
+  // api/admin/events.
   const availableSlots = slots.filter(
     (slot) =>
       allSelectedIds.every((id) =>
@@ -275,14 +279,13 @@ export async function POST(request: Request) {
           availabilityByMemberId.get(id) ?? []
         )
       ) &&
-      body.guestMemberIds.every((id) =>
+      (!body.advisorMemberId ||
         slotWithinWeeklyCap(
           { startUnix: slot.startTime },
-          membersById.get(id)?.timezone ?? null,
-          membersById.get(id)?.weeklySessionCap ?? Infinity,
-          confirmedCountByMemberAndWeek.get(id) ?? new Map()
-        )
-      )
+          membersById.get(body.advisorMemberId)?.timezone ?? null,
+          membersById.get(body.advisorMemberId)?.weeklySessionCap ?? Infinity,
+          confirmedCountByMemberAndWeek.get(body.advisorMemberId) ?? new Map()
+        ))
   );
 
   return NextResponse.json({

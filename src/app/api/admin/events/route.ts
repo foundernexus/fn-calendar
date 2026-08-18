@@ -177,46 +177,48 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "One or more selected guests no longer exist." }, { status: 400 });
   }
 
-  // Re-check each guest's weekly session cap here too, not just at search
+  // Re-check the advisor's weekly session cap here too, not just at search
   // time — a slot picked from a stale grid, or a race with another admin
-  // booking the same guest elsewhere, could otherwise push someone over
-  // their own stated limit. Never applied to the organizer — see
-  // slotWithinWeeklyCap's own comment for why. ±8 days is comfortably wider
-  // than any single week bucketed in any timezone around this one instant.
-  const confirmedEvents = await getConfirmedEventsForMembers(
-    guestMemberIds,
-    new Date((body.startsAtUnix - 8 * 86_400) * 1000),
-    new Date((body.startsAtUnix + 8 * 86_400) * 1000)
-  );
-  const guestMembersById = new Map(guestMembers.map((m) => [m.id, m]));
-  const confirmedCountByGuestAndWeek = new Map<number, Map<string, number>>();
-  for (const row of confirmedEvents) {
-    const memberTimezone = guestMembersById.get(row.memberId)?.timezone;
-    if (!memberTimezone) continue;
-    const { date } = zonedDateTimeParts(Math.floor(row.startsAt.getTime() / 1000), memberTimezone);
-    const weekStart = weekStartDateString(date);
-    const weekMap = confirmedCountByGuestAndWeek.get(row.memberId) ?? new Map<string, number>();
-    weekMap.set(weekStart, (weekMap.get(weekStart) ?? 0) + 1);
-    confirmedCountByGuestAndWeek.set(row.memberId, weekMap);
-  }
-  const overCapNames = guestMemberIds
-    .filter((id) => {
-      const guest = guestMembersById.get(id);
-      return !slotWithinWeeklyCap(
-        { startUnix: body.startsAtUnix },
-        guest?.timezone ?? null,
-        guest?.weeklySessionCap ?? Infinity,
-        confirmedCountByGuestAndWeek.get(id) ?? new Map()
-      );
-    })
-    .map((id) => guestMembersById.get(id)?.fullName ?? `Member #${id}`);
-  if (overCapNames.length > 0) {
-    return NextResponse.json(
-      {
-        error: `${overCapNames.join(", ")} ${overCapNames.length === 1 ? "is" : "are"} already at their weekly session limit for this week.`,
-      },
-      { status: 400 }
+  // booking the same advisor elsewhere, could otherwise push them past their
+  // own stated limit. ±8 days is comfortably wider than any single week
+  // bucketed in any timezone around this one instant.
+  //
+  // Advisors only, and deliberately so. The cap answers "how many of these am
+  // I willing to sit in a week", which is a question only advisors have —
+  // founders are scheduled as often as their calendar allows, and the cap is
+  // neither shown to them nor applied. It is never applied to the organizer
+  // either; see slotWithinWeeklyCap's own comment for why.
+  if (advisorMember) {
+    const confirmedEvents = await getConfirmedEventsForMembers(
+      [advisorMember.id],
+      new Date((body.startsAtUnix - 8 * 86_400) * 1000),
+      new Date((body.startsAtUnix + 8 * 86_400) * 1000)
     );
+    const countByWeek = new Map<string, number>();
+    if (advisorMember.timezone) {
+      for (const row of confirmedEvents) {
+        const { date } = zonedDateTimeParts(
+          Math.floor(row.startsAt.getTime() / 1000),
+          advisorMember.timezone
+        );
+        const weekStart = weekStartDateString(date);
+        countByWeek.set(weekStart, (countByWeek.get(weekStart) ?? 0) + 1);
+      }
+    }
+    const withinCap = slotWithinWeeklyCap(
+      { startUnix: body.startsAtUnix },
+      advisorMember.timezone ?? null,
+      advisorMember.weeklySessionCap ?? Infinity,
+      countByWeek
+    );
+    if (!withinCap) {
+      return NextResponse.json(
+        {
+          error: `${advisorMember.fullName} is already at their weekly session limit for this week.`,
+        },
+        { status: 400 }
+      );
+    }
   }
 
   const endsAtUnix = body.startsAtUnix + body.durationMinutes * 60;
