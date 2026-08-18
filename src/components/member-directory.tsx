@@ -1,9 +1,9 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { AlertTriangle, Clock, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,13 +21,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ProviderIcon } from "@/components/provider-icon";
 import type { MemberWithConnection } from "@/db/queries";
-
-const PROVIDER_LABELS: Record<string, string> = {
-  google: "Google",
-  microsoft: "Microsoft",
-  icloud: "iCloud",
-};
 
 /** The three states an admin needs to tell apart, ordered by how much they
  * need doing something about. `pending` is the whole reason this page exists:
@@ -64,12 +59,7 @@ const ROLE_LABELS: Record<Role, { one: string; many: string }> = {
   founder: { one: "Founder", many: "Founders" },
 };
 
-const SECTIONS: {
-  status: Status;
-  title: string;
-  hint: string;
-  urgent: boolean;
-}[] = [
+const SECTIONS: { status: Status; title: string; hint: string; urgent: boolean }[] = [
   {
     status: "reconnect",
     title: "Need to reconnect",
@@ -116,7 +106,7 @@ export function MemberDirectory({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <div className="grid grid-cols-3 gap-4">
         <SummaryCard label="Connected" value={counts.connected} />
         <SummaryCard label="Waiting to connect" value={counts.pending} urgent />
@@ -161,81 +151,82 @@ export function MemberDirectory({
               )}
             </div>
 
-            <div className="mt-3 overflow-x-auto rounded-lg border border-border bg-card shadow-card">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Calendar</TableHead>
-                    <TableHead className="w-0" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {ROLE_ORDER.map((role) => {
-                    const inGroup = inSection.filter((m) => roleOf(m) === role);
-                    if (inGroup.length === 0) return null;
-                    const label = ROLE_LABELS[role];
+            {/* One table per role rather than one table with group rows in it:
+                the roles are separate lists an admin reads separately ("which
+                advisors am I waiting on"), and giving each its own card makes
+                that boundary something you see instead of something you parse. */}
+            <div className="mt-4 space-y-5">
+              {ROLE_ORDER.map((role) => {
+                const inGroup = inSection.filter((m) => roleOf(m) === role);
+                if (inGroup.length === 0) return null;
+                const label = ROLE_LABELS[role];
 
-                    return (
-                      <Fragment key={role}>
-                        <TableRow className="hover:bg-transparent">
-                          <TableCell
-                            colSpan={4}
-                            className="bg-secondary/40 py-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase"
-                          >
-                            {inGroup.length === 1 ? label.one : label.many} · {inGroup.length}
-                          </TableCell>
-                        </TableRow>
-                        {[...inGroup]
-                          .sort((a, b) => a.fullName.localeCompare(b.fullName))
-                          .map((m) => (
-                            <TableRow key={m.id}>
-                              <TableCell className="font-medium text-foreground">
-                                {m.fullName}
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {m.email}
-                                {/* Only shown when it differs — a member can sign
-                                    in with a personal calendar that isn't their
-                                    registered address, and their invites go to
-                                    whichever one is named here. */}
-                                {m.grantEmail && m.grantEmail !== m.email && (
-                                  <span className="block text-xs">
-                                    invites go to {m.grantEmail}
-                                  </span>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                {m.connected ? (
-                                  <Badge variant="secondary">
-                                    {m.provider
-                                      ? (PROVIDER_LABELS[m.provider] ?? m.provider)
-                                      : "Connected"}
-                                  </Badge>
-                                ) : m.needsReconnect ? (
-                                  <Badge variant="destructive">Needs reconnect</Badge>
-                                ) : (
-                                  <Badge variant="destructive">Waiting</Badge>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setRemoving(m)}
-                                >
-                                  Remove
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                      </Fragment>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                return (
+                  <div key={role}>
+                    <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                      {inGroup.length === 1 ? label.one : label.many}
+                      <span className="ml-1.5 normal-case opacity-60">{inGroup.length}</span>
+                    </p>
+                    <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-card">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead className="w-24 text-center">Calendar</TableHead>
+                            <TableHead className="w-12" />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {[...inGroup]
+                            .sort((a, b) => a.fullName.localeCompare(b.fullName))
+                            .map((m) => (
+                              <TableRow key={m.id}>
+                                <TableCell className="font-medium text-foreground">
+                                  {m.fullName}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {m.email}
+                                  {/* Only shown when it differs — a member can
+                                      sign in with a personal calendar that isn't
+                                      their registered address, and their invites
+                                      go to whichever one is named here. */}
+                                  {m.grantEmail && m.grantEmail !== m.email && (
+                                    <span className="block text-xs">
+                                      invites go to {m.grantEmail}
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  {/* No status word here: the section heading
+                                      above already says which state every row in
+                                      this table is in, so repeating it per row
+                                      would be noise. What the heading can't
+                                      carry is WHICH calendar — that's the mark. */}
+                                  <div className="flex justify-center">
+                                    <StatusMark member={m} />
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    title={`Remove ${m.fullName}`}
+                                    onClick={() => setRemoving(m)}
+                                  >
+                                    <Trash2 className="text-muted-foreground" />
+                                    <span className="sr-only">Remove {m.fullName}</span>
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
         );
@@ -252,6 +243,31 @@ export function MemberDirectory({
         />
       )}
     </div>
+  );
+}
+
+/** Connected members get their provider's mark; the two problem states get an
+ * icon with a title, since "waiting for a first connection" and "connected but
+ * needs redoing" are different problems with different fixes and must not
+ * collapse into one generic warning glyph. */
+function StatusMark({ member }: { member: MemberWithConnection }) {
+  if (member.connected && member.provider) {
+    return <ProviderIcon provider={member.provider} />;
+  }
+  // The label lives on a wrapping span rather than as an SVG <title> child:
+  // that gives both the hover tooltip and the accessible name without relying
+  // on the icon library forwarding children into its <svg>.
+  if (member.needsReconnect) {
+    return (
+      <span title="Needs to reconnect" role="img" aria-label="Needs to reconnect">
+        <AlertTriangle className="size-4 text-destructive" aria-hidden />
+      </span>
+    );
+  }
+  return (
+    <span title="Hasn't connected yet" role="img" aria-label="Hasn't connected yet">
+      <Clock className="size-4 text-muted-foreground" aria-hidden />
+    </span>
   );
 }
 
@@ -316,12 +332,7 @@ function RemoveMemberDialog({
           <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
             Keep them
           </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={handleRemove}
-            disabled={submitting}
-          >
+          <Button type="button" variant="destructive" onClick={handleRemove} disabled={submitting}>
             {submitting ? "Removing…" : "Remove"}
           </Button>
         </DialogFooter>
