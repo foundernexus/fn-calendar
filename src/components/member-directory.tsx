@@ -1,9 +1,18 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -88,6 +97,9 @@ export function MemberDirectory({
   members: MemberWithConnection[];
   connectUrl: string;
 }) {
+  const router = useRouter();
+  const [removing, setRemoving] = useState<MemberWithConnection | null>(null);
+
   const counts = {
     connected: members.filter((m) => statusOf(m) === "connected").length,
     pending: members.filter((m) => statusOf(m) === "pending").length,
@@ -156,6 +168,7 @@ export function MemberDirectory({
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Calendar</TableHead>
+                    <TableHead className="w-0" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -168,7 +181,7 @@ export function MemberDirectory({
                       <Fragment key={role}>
                         <TableRow className="hover:bg-transparent">
                           <TableCell
-                            colSpan={3}
+                            colSpan={4}
                             className="bg-secondary/40 py-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase"
                           >
                             {inGroup.length === 1 ? label.one : label.many} · {inGroup.length}
@@ -206,6 +219,16 @@ export function MemberDirectory({
                                   <Badge variant="destructive">Waiting</Badge>
                                 )}
                               </TableCell>
+                              <TableCell className="text-right">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setRemoving(m)}
+                                >
+                                  Remove
+                                </Button>
+                              </TableCell>
                             </TableRow>
                           ))}
                       </Fragment>
@@ -217,7 +240,93 @@ export function MemberDirectory({
           </section>
         );
       })}
+
+      {removing && (
+        <RemoveMemberDialog
+          member={removing}
+          onOpenChange={() => setRemoving(null)}
+          onRemoved={() => {
+            setRemoving(null);
+            router.refresh();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/** Confirmation before removing a member. Two-step on purpose: it revokes
+ * their calendar grant at Nylas as well as deleting the row, so there is no
+ * undo — getting them back means adding them again and asking them to
+ * reconnect. */
+function RemoveMemberDialog({
+  member,
+  onOpenChange,
+  onRemoved,
+}: {
+  member: MemberWithConnection;
+  onOpenChange: (open: boolean) => void;
+  onRemoved: () => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleRemove() {
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/admin/members/${member.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Something went wrong. Please try again.");
+        setSubmitting(false);
+        return;
+      }
+      if (data.grantRevokeFailed) {
+        toast.warning(
+          `${member.fullName} was removed, but their calendar grant couldn't be revoked — clear it in the Nylas dashboard.`
+        );
+      } else {
+        toast.success(`${member.fullName} was removed.`);
+      }
+      onRemoved();
+    } catch {
+      toast.error("Something went wrong. Please try again.");
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Remove this member?</DialogTitle>
+          <DialogDescription>
+            <span className="font-medium text-foreground">{member.fullName}</span>
+            <br />
+            {member.email}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+          {member.connected
+            ? "This also revokes their calendar access, so we stop reading their availability straight away. It can't be undone — they'd have to be added again and reconnect."
+            : "They'll be removed from the roster. It can't be undone, but you can add them again at any time."}
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
+            Keep them
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleRemove}
+            disabled={submitting}
+          >
+            {submitting ? "Removing…" : "Remove"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

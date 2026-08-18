@@ -86,6 +86,20 @@ export function cancelNylasEvent(params: {
   });
 }
 
+/** Revokes a grant at Nylas, ending its access to that calendar for good.
+ *
+ * Deleting our own `calendar_connections` row is NOT enough on its own: the
+ * grant lives on Nylas's side, keeps its calendar token, and keeps counting
+ * against the plan's connected-calendar allowance. Anything that removes a
+ * member for good has to do both.
+ *
+ * Throws like any other Nylas call — callers decide whether a failure should
+ * block what they're doing. A grant that's already gone (deleted by hand in
+ * the dashboard) 404s, which is a success for our purposes. */
+export function revokeNylasGrant(grantId: string) {
+  return getNylas().grants.destroy({ grantId });
+}
+
 export type AvailabilitySlot = {
   emails: string[];
   startTime: number;
