@@ -262,9 +262,15 @@ export function MemberSettingsForm({
           off-screen once already — and the first two are short enough to sit
           side by side. Stacks again below lg, where two columns would squeeze
           the calendar addresses. */}
-      <div className="grid items-start gap-5 lg:grid-cols-2">
+      {/* No items-start: the cards stretch to a shared height. Left to size
+          themselves they end up visibly uneven, which reads as broken rather
+          than deliberate. */}
+      <div className="grid gap-5 lg:grid-cols-2">
       <div className="rounded-xl border border-border bg-card p-6 shadow-card">
-        <div className="grid gap-6 sm:grid-cols-2">
+        {/* Stacked, not two columns inside a column: the timezone select was
+            cramped beside the name, and the taller card sits closer to the
+            calendars beside it. */}
+        <div className="space-y-6">
           <div>
             <p className="text-base font-semibold text-foreground">{fullName}</p>
             {connection ? (
