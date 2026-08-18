@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getMemberByEmail } from "@/db/queries";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
-import { isAdminEmail } from "@/lib/auth/admin";
+import { hasAdminAccess } from "@/lib/auth/admin";
 import { buildHostedAuthUrl, CALENDAR_PROVIDERS } from "@/lib/nylas";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
@@ -40,7 +40,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
   }
 
-  if (isAdminEmail(parsed.data.email, env.ADMIN_EMAILS)) {
+  // hasAdminAccess, not isAdminEmail: staff marked as Team on the People page
+  // hold admin too, and have to be routed down the admin branch or they'd land
+  // on /me with no way to reach Schedule or People.
+  if (await hasAdminAccess(parsed.data.email)) {
     const member = await getMemberByEmail(parsed.data.email);
     if (!member) {
       return NextResponse.json(

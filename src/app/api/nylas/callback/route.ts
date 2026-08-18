@@ -10,7 +10,7 @@ import {
   MEMBER_COOKIE_NAME,
   MEMBER_SESSION_TTL_SECONDS,
 } from "@/lib/auth/session";
-import { isAdminEmail, setAdminSessionCookie } from "@/lib/auth/admin";
+import { hasAdminAccess, setAdminSessionCookie } from "@/lib/auth/admin";
 import { exchangeNylasCode } from "@/lib/nylas";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
@@ -180,7 +180,7 @@ export async function GET(request: Request) {
     // linked to the account is enough to manage your own settings, not to
     // hold admin. Re-checked against the live allowlist too, in case they
     // were removed while this 10-minute flow was in flight.
-    if (!isRegisteredEmail || !isAdminEmail(targetMember.email, env.ADMIN_EMAILS)) {
+    if (!isRegisteredEmail || !(await hasAdminAccess(targetMember.email))) {
       console.warn("[nylas/callback] admin verification failed", {
         memberId: statePayload.memberId,
         expectedEmail: targetMember.email,

@@ -5,7 +5,6 @@ import {
   ADMIN_COOKIE_NAME,
   MEMBER_COOKIE_NAME,
 } from "@/lib/auth/session";
-import { isAdminEmail } from "@/lib/auth/admin";
 import { env } from "@/lib/env";
 
 export const config = {
@@ -51,16 +50,16 @@ async function handleAdminRoute(req: NextRequest) {
     ? await verifyValue<{ email: string }>(TOKEN_PURPOSE.adminSession, cookie, env.SESSION_SECRET)
     : null;
 
-  // Re-check the live allowlist, not just the signed cookie — removing
-  // someone from ADMIN_EMAILS should take effect on their next request, not
-  // after their cookie's 8h TTL expires.
-  if (session && !isAdminEmail(session.email, env.ADMIN_EMAILS)) {
-    if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    return NextResponse.redirect(new URL("/connect", req.url));
-  }
-
+  // Deliberately only checks that a valid, unexpired admin cookie exists —
+  // NOT whether that person still holds admin. Admin can now come from the
+  // Team flag on the People page as well as ADMIN_EMAILS (see hasAdminAccess),
+  // and answering that needs a database read, which middleware runs on every
+  // single request and shouldn't.
+  //
+  // The live check lives in requireAdminSession instead, which every admin
+  // page and every admin route handler calls first. Someone whose access was
+  // just revoked still gets past this line and is then turned away there —
+  // they reach no data either way.
   if (!session) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

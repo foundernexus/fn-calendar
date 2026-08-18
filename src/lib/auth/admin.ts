@@ -9,15 +9,38 @@ import {
   ADMIN_SESSION_TTL_SECONDS,
 } from "@/lib/auth/session";
 import { env } from "@/lib/env";
+import { getMemberByEmail } from "@/db/queries";
 
 /** Checks `email` against the ADMIN_EMAILS allowlist (comma-separated env var).
- * This — not `members.role` — is the actual admin authorization mechanism. */
+ * One of the two ways to hold admin — see hasAdminAccess for the other. */
 export function isAdminEmail(email: string, adminEmailsEnv: string) {
   const allowlist = adminEmailsEnv
     .split(",")
     .map((e) => normalizeEmail(e))
     .filter(Boolean);
   return allowlist.includes(normalizeEmail(email));
+}
+
+/** The authoritative "may this person use the admin area" question.
+ *
+ * Two ways in, and the second is deliberate: FounderNexus staff marked as Team
+ * on the People page get the admin area too. Being Team means running sessions,
+ * and running sessions IS the admin area — Schedule and People are the whole
+ * tool. Gating that behind a Vercel env var meant every new colleague needed a
+ * deploy, and that var is write-only, which is how Karin was silently dropped
+ * from it once already.
+ *
+ * The consequence is real and worth stating: marking someone Team gives them
+ * everything an admin can do, including removing people and cancelling any
+ * session. `members.role` remains unused for authorization.
+ *
+ * ADMIN_EMAILS stays as the bootstrap. Someone has to be able to reach the
+ * People page to mark the first colleague as Team, and that can't itself
+ * depend on being marked Team. */
+export async function hasAdminAccess(email: string) {
+  if (isAdminEmail(email, env.ADMIN_EMAILS)) return true;
+  const member = await getMemberByEmail(email);
+  return !!member?.isFacilitator;
 }
 
 /** Re-checks the admin session cookie from inside a Server Component or Route
@@ -36,10 +59,16 @@ export async function requireAdminSession() {
     env.SESSION_SECRET
   );
   if (!session) return null;
-  // Re-checking against the live allowlist (not just trusting the signed
-  // cookie) means removing someone from ADMIN_EMAILS takes effect on their
-  // very next request, not after their cookie's 8h TTL expires.
-  if (!isAdminEmail(session.email, env.ADMIN_EMAILS)) return null;
+  // Re-checked live on every request rather than trusted from the signed
+  // cookie: removing someone from ADMIN_EMAILS, or clearing their Team flag on
+  // the People page, takes effect on their very next request instead of
+  // whenever their 8h cookie happens to expire.
+  //
+  // This is now the ONLY place that live check happens — proxy.ts can't do it,
+  // since answering it needs a database read and middleware runs on every
+  // request. That's why this function is called at the top of every admin page
+  // and every admin route handler, not merely as belt-and-braces.
+  if (!(await hasAdminAccess(session.email))) return null;
   return session;
 }
 

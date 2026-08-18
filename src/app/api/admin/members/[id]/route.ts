@@ -44,9 +44,13 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     return NextResponse.json({ alreadyRemoved: true });
   }
 
-  // Removing an admin's own member row leaves them unable to sign in at all:
-  // /api/connect/start requires an admin to have a member row to verify their
-  // calendar against, so this would lock them out with a confusing message.
+  // Deliberately isAdminEmail, not hasAdminAccess. Removing someone whose
+  // admin comes from the Team flag is fine — the flag lives on the row being
+  // deleted, so they simply stop being staff, which is exactly what removing
+  // them means. Removing someone on the ADMIN_EMAILS allowlist is different:
+  // the allowlist is an env var that outlives the row, leaving them still an
+  // admin but with no member row to verify a calendar against, so sign-in
+  // fails with a message that explains nothing.
   if (isAdminEmail(member.email, env.ADMIN_EMAILS)) {
     return NextResponse.json(
       {
