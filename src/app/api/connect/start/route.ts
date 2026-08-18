@@ -3,16 +3,14 @@ import { z } from "zod";
 import { getMemberByEmail } from "@/db/queries";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
 import { isAdminEmail } from "@/lib/auth/admin";
-import { buildHostedAuthUrl, CALENDAR_PROVIDERS } from "@/lib/nylas";
+import { buildHostedAuthUrl } from "@/lib/nylas";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 
-// `provider` defaults to google rather than being required, so any older
-// client still in a member's open tab keeps working instead of 400-ing.
-const bodySchema = z.object({
-  email: z.string().email(),
-  provider: z.enum(CALENDAR_PROVIDERS).default("google"),
-});
+// No `provider` — this path deliberately hands off to Nylas's hosted picker
+// so members choose Google or Microsoft there. Any extra keys a stale open
+// tab posts are ignored rather than rejected.
+const bodySchema = z.object({ email: z.string().email() });
 
 const STATE_TTL_SECONDS = 60 * 10; // 10 minutes — just long enough for the OAuth round trip
 
@@ -61,7 +59,6 @@ export async function POST(request: Request) {
     const url = buildHostedAuthUrl({
       loginHint: normalizeEmail(member.email),
       state,
-      provider: parsed.data.provider,
     });
     return NextResponse.json({ url });
   }
@@ -83,7 +80,6 @@ export async function POST(request: Request) {
   const url = buildHostedAuthUrl({
     loginHint: normalizeEmail(member.email),
     state,
-    provider: parsed.data.provider,
   });
 
   return NextResponse.json({ url });

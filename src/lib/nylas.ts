@@ -30,25 +30,33 @@ export function asCalendarProvider(value: string | null | undefined): CalendarPr
 }
 
 /**
- * Builds the Nylas Hosted Auth URL for a specific provider.
+ * Builds the Nylas Hosted Auth URL.
  *
- * `provider` is always passed, never omitted. Leaving it unset routes members
- * through Nylas's own hosted login screen first, which carries the Nylas logo
- * and cannot be rebranded without upgrading to an annual Nylas contract
- * (dashboard → Hosted authentication → Branding: the toggle is locked).
- * Naming the provider skips that screen entirely and goes straight to
- * Google/Microsoft — so we render our own two buttons on /connect instead,
- * and founders never see a vendor's logo on the way into FounderNexus's tool.
+ * `provider` is OPTIONAL and deliberately omitted on the main sign-in path
+ * (/api/connect/start). Omitting it routes members through Nylas's own hosted
+ * login screen, which shows a Google/Microsoft picker under Nylas branding.
+ * Passing it skips that screen and goes straight to the provider.
+ *
+ * We went the other way on 2026-08-17 and came back: the Nylas screen is the
+ * flow the team wants for now. Note it does NOT affect Google's "hasn't
+ * verified this app" interstitial — that comes from our own unverified OAuth
+ * client and appears either way, for anyone outside the foundernexus.com
+ * Workspace. Only Google verification removes it.
+ *
+ * Repair flows (/api/me/reconnect, /api/admin/connect-calendar) still pass a
+ * provider: they exist to fix one specific broken connection, and a picker
+ * there lets someone pick the wrong provider and end up with a second,
+ * unrelated calendar instead of the repair they came for.
  */
 export function buildHostedAuthUrl(params: {
   loginHint: string;
   state: string;
-  provider: CalendarProvider;
+  provider?: CalendarProvider;
 }) {
   return getNylas().auth.urlForOAuth2({
     clientId: env.NYLAS_CLIENT_ID,
     redirectUri: env.NYLAS_CALLBACK_URI,
-    provider: params.provider,
+    ...(params.provider ? { provider: params.provider } : {}),
     loginHint: params.loginHint,
     state: params.state,
   });
