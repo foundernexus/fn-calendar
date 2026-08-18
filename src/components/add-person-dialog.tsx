@@ -33,12 +33,12 @@ type CreatedMember = { id: number; email: string; fullName: string };
 const ROLES = {
   founder: {
     label: "Founder",
-    hint: "Scheduled into sessions as a guest. The default.",
+    hint: "Scheduled into sessions as a participant. The default.",
     flags: { isAdvisor: false, isFacilitator: false },
   },
   advisor: {
     label: "Advisor",
-    hint: "Gets their own dashboard, and is picked from the Advisor field when booking rather than the guest list.",
+    hint: "Gets their own dashboard, and is picked from the Advisor field when booking rather than the founder list.",
     flags: { isAdvisor: true, isFacilitator: false },
   },
   team: {

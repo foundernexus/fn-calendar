@@ -19,9 +19,9 @@ const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [string, ...string[]]
 const bodySchema = z.object({
   guestMemberIds: z
     .array(z.number().int())
-    .min(1, "Add at least one guest.")
-    .max(49, "Add at most 49 guests.") // 49 + organizer = Nylas's 50-participant cap
-    .refine((ids) => new Set(ids).size === ids.length, "Duplicate guest selected."),
+    .min(1, "Add at least one founder.")
+    .max(49, "Add at most 49 founders.") // 49 + organizer = Nylas's 50-participant cap
+    .refine((ids) => new Set(ids).size === ids.length, "Duplicate founder selected."),
   organizerMemberId: z.number().int({ error: "Pick an organizer." }),
   advisorMemberId: z.number().int().nullish(),
   title: z.string().trim().min(1, "Title is required."),
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
   const guestMemberIds = body.guestMemberIds.filter((id) => id !== body.organizerMemberId);
   if (guestMemberIds.length === 0) {
     return NextResponse.json(
-      { error: "The session lead can't be the only guest — add at least one other person." },
+      { error: "The session lead can't be the only person — add at least one founder." },
       { status: 400 }
     );
   }
@@ -86,7 +86,7 @@ export async function POST(request: Request) {
   // names the problem instead.
   if (body.advisorMemberId && guestMemberIds.includes(body.advisorMemberId)) {
     return NextResponse.json(
-      { error: "The advisor is also selected as a guest. Remove them from the guest list." },
+      { error: "The advisor is also selected as a founder. Remove them from the founder list." },
       { status: 400 }
     );
   }
@@ -174,7 +174,7 @@ export async function POST(request: Request) {
 
   const missingIds = guestMemberIds.filter((id) => !guestMembers.some((m) => m.id === id));
   if (missingIds.length > 0) {
-    return NextResponse.json({ error: "One or more selected guests no longer exist." }, { status: 400 });
+    return NextResponse.json({ error: "One or more selected founders no longer exist." }, { status: 400 });
   }
 
   // Re-check the advisor's weekly session cap here too, not just at search

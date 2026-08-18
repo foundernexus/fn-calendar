@@ -35,9 +35,9 @@ const bodySchema = z
     advisorMemberId: z.number().int().nullish(),
     guestMemberIds: z
       .array(z.number().int())
-      .min(1, "Add at least one guest.")
-      .max(49, "Add at most 49 guests.") // 49 + organizer = Nylas's 50-participant cap
-      .refine((ids) => new Set(ids).size === ids.length, "Duplicate guest selected."),
+      .min(1, "Add at least one founder.")
+      .max(49, "Add at most 49 founders.") // 49 + organizer = Nylas's 50-participant cap
+      .refine((ids) => new Set(ids).size === ids.length, "Duplicate founder selected."),
     startDate: z.string().refine(isValidDateString, "Invalid start date."),
     endDate: z.string().refine(isValidDateString, "Invalid end date."),
     durationMinutes: z.union([z.literal(30), z.literal(45), z.literal(60)]),

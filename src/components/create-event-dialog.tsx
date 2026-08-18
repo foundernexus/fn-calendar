@@ -128,7 +128,7 @@ export function CreateEventDialog({
             </div>
             <div>
               <p className="text-xs text-muted-foreground">
-                Guest{guestNames.length === 1 ? "" : "s"}
+                Founder{guestNames.length === 1 ? "" : "s"}
               </p>
               <p className="text-foreground">{guestNames.join(", ")}</p>
             </div>
