@@ -104,9 +104,18 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
   return [...byId.values()];
 }
 
+export type SessionAttendee = {
+  memberId: number;
+  fullName: string;
+  email: string;
+  role: "guest" | "advisor";
+  responseStatus: "noreply" | "yes" | "no" | "maybe";
+};
+
 export type MemberSession = {
   id: number;
   title: string;
+  description: string | null;
   startsAt: Date;
   endsAt: Date;
   timezone: string;
@@ -114,7 +123,8 @@ export type MemberSession = {
   status: "confirmed" | "cancelled";
   role: "guest" | "advisor";
   organizerName: string;
-  attendeeCount: number;
+  organizerEmail: string;
+  attendees: SessionAttendee[];
 };
 
 /** Every session this member is an attendee of, newest first — the list behind
@@ -127,10 +137,11 @@ export type MemberSession = {
  * vanish from the list. */
 export async function getSessionsForMember(memberId: number): Promise<MemberSession[]> {
   const organizer = alias(members, "organizer");
-  return db
+  const rows = await db
     .select({
       id: events.id,
       title: events.title,
+      description: events.description,
       startsAt: events.startsAt,
       endsAt: events.endsAt,
       timezone: events.timezone,
@@ -138,15 +149,62 @@ export async function getSessionsForMember(memberId: number): Promise<MemberSess
       status: events.status,
       role: eventAttendees.role,
       organizerName: organizer.fullName,
-      // Aliased subquery, not a GROUP BY over the join — grouping here would
-      // mean listing every selected column in the GROUP BY clause for no gain.
-      attendeeCount: sql<number>`(select count(*)::int from event_attendees ea where ea.event_id = ${events.id})`,
+      organizerEmail: organizer.email,
     })
     .from(eventAttendees)
     .innerJoin(events, eq(eventAttendees.eventId, events.id))
     .innerJoin(organizer, eq(events.organizerMemberId, organizer.id))
     .where(eq(eventAttendees.memberId, memberId))
     .orderBy(desc(events.startsAt));
+
+  if (rows.length === 0) return [];
+
+  // One query for every attendee of every session, grouped in memory, rather
+  // than a per-session query. An advisor with fifty past sessions would
+  // otherwise fire fifty round trips to render one page.
+  const attendeeRows = await db
+    .select({
+      eventId: eventAttendees.eventId,
+      memberId: eventAttendees.memberId,
+      fullName: members.fullName,
+      // The address actually invited, which can differ from the registered
+      // one when someone connected a different calendar account.
+      email: eventAttendees.attendeeEmail,
+      role: eventAttendees.role,
+      responseStatus: eventAttendees.responseStatus,
+    })
+    .from(eventAttendees)
+    .innerJoin(members, eq(eventAttendees.memberId, members.id))
+    .where(
+      inArray(
+        eventAttendees.eventId,
+        rows.map((r) => r.id)
+      )
+    );
+
+  const attendeesByEvent = new Map<number, SessionAttendee[]>();
+  for (const a of attendeeRows) {
+    const list = attendeesByEvent.get(a.eventId) ?? [];
+    list.push({
+      memberId: a.memberId,
+      fullName: a.fullName,
+      email: a.email,
+      role: a.role,
+      responseStatus: a.responseStatus,
+    });
+    attendeesByEvent.set(a.eventId, list);
+  }
+
+  return rows.map((r) => ({
+    ...r,
+    // Advisors first, then alphabetical — the advisor is the one role worth
+    // spotting at a glance in a long attendee list.
+    attendees: (attendeesByEvent.get(r.id) ?? []).sort(
+      (a, b) =>
+        (a.role === "advisor" ? 0 : 1) - (b.role === "advisor" ? 0 : 1) ||
+        a.fullName.localeCompare(b.fullName)
+    ),
+  }));
 }
 
 export type LatestConnectionRow = {

@@ -1,54 +1,150 @@
+"use client";
+
+import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import type { MemberSession } from "@/db/queries";
+import type { MemberSession, SessionAttendee } from "@/db/queries";
 
 /** Formats in the SESSION's timezone, not the viewer's. The event row carries
- * the zone it was booked in, and an advisor comparing what they see here
- * against the invite in their calendar client should read the same wall-clock
- * time in both places. */
-function formatSlot(session: MemberSession) {
+ * the zone it was booked in, and an advisor comparing this against the invite
+ * in their calendar client should read the same wall-clock time in both. */
+function formatParts(session: MemberSession) {
   const date = new Intl.DateTimeFormat("en-US", {
-    weekday: "short",
+    weekday: "long",
     day: "numeric",
-    month: "short",
+    month: "long",
     timeZone: session.timezone,
   }).format(session.startsAt);
-  const time = new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: session.timezone,
-    timeZoneName: "short",
-  });
   const start = new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
     timeZone: session.timezone,
   }).format(session.startsAt);
-  return `${date}, ${start} – ${time.format(session.endsAt)}`;
+  const end = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: session.timezone,
+    timeZoneName: "short",
+  }).format(session.endsAt);
+  const minutes = Math.round((session.endsAt.getTime() - session.startsAt.getTime()) / 60000);
+  return { date, time: `${start} – ${end}`, minutes };
+}
+
+const RESPONSE_LABELS: Record<SessionAttendee["responseStatus"], string> = {
+  yes: "Accepted",
+  no: "Declined",
+  maybe: "Maybe",
+  noreply: "No reply yet",
+};
+
+function AttendeeRow({ attendee }: { attendee: SessionAttendee }) {
+  return (
+    <li className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2">
+      <div className="min-w-0">
+        <span className="text-sm text-foreground">{attendee.fullName}</span>
+        {attendee.role === "advisor" && (
+          <span className="ml-2 text-xs text-muted-foreground">(advisor)</span>
+        )}
+        <p className="text-xs text-muted-foreground">{attendee.email}</p>
+      </div>
+      <span className="shrink-0 text-xs text-muted-foreground">
+        {RESPONSE_LABELS[attendee.responseStatus]}
+      </span>
+    </li>
+  );
 }
 
 function SessionRow({ session }: { session: MemberSession }) {
+  const [open, setOpen] = useState(false);
   const cancelled = session.status === "cancelled";
+  const { date, time, minutes } = formatParts(session);
+
   return (
-    <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-4 first:pt-0 last:pb-0">
-      <div className="min-w-0">
-        <p
-          className={`text-sm font-medium ${
-            cancelled ? "text-muted-foreground line-through" : "text-foreground"
-          }`}
-        >
-          {session.title}
-        </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {formatSlot(session)} · led by {session.organizerName} ·{" "}
-          {session.attendeeCount} {session.attendeeCount === 1 ? "participant" : "participants"}
-        </p>
-      </div>
-      <div className="flex shrink-0 items-center gap-1.5">
-        {session.role === "advisor" && (
-          <Badge className="bg-accent text-accent-foreground">Advisor</Badge>
-        )}
-        {cancelled && <Badge className="bg-secondary text-secondary-foreground">Cancelled</Badge>}
-      </div>
+    <li className="py-1 first:pt-0 last:pb-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-start justify-between gap-4 rounded-lg px-2 py-3 text-left transition-colors hover:bg-secondary/60"
+      >
+        <div className="min-w-0">
+          <p
+            className={`text-sm font-medium ${
+              cancelled ? "text-muted-foreground line-through" : "text-foreground"
+            }`}
+          >
+            {session.title}
+          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {date} · {time} · {session.attendees.length}{" "}
+            {session.attendees.length === 1 ? "participant" : "participants"}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {session.role === "advisor" && (
+            <Badge className="bg-accent text-accent-foreground">Advisor</Badge>
+          )}
+          {cancelled && <Badge className="bg-secondary text-secondary-foreground">Cancelled</Badge>}
+          <ChevronDown
+            className={`size-4 text-muted-foreground transition-transform ${
+              open ? "rotate-180" : ""
+            }`}
+          />
+        </div>
+      </button>
+
+      {open && (
+        <div className="mt-1 space-y-4 rounded-lg bg-secondary/40 px-4 py-4 text-sm">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <p className="text-xs text-muted-foreground">When</p>
+              <p className="text-foreground">{date}</p>
+              <p className="text-foreground">
+                {time} · {minutes} min
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Session lead</p>
+              <p className="text-foreground">{session.organizerName}</p>
+              <p className="text-xs text-muted-foreground">{session.organizerEmail}</p>
+            </div>
+          </div>
+
+          {session.description && (
+            <div>
+              <p className="text-xs text-muted-foreground">Description</p>
+              {/* whitespace-pre-line: the admin types this into a textarea, so
+                  their line breaks are meaningful. */}
+              <p className="whitespace-pre-line text-foreground">{session.description}</p>
+            </div>
+          )}
+
+          {session.meetingUrl && (
+            <div>
+              <p className="text-xs text-muted-foreground">Meeting link</p>
+              <a
+                href={session.meetingUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="break-all text-primary underline"
+              >
+                {session.meetingUrl}
+              </a>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs text-muted-foreground">
+              Who&apos;s coming ({session.attendees.length})
+            </p>
+            <ul className="mt-1 divide-y divide-border">
+              {session.attendees.map((a) => (
+                <AttendeeRow key={a.memberId} attendee={a} />
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </li>
   );
 }
