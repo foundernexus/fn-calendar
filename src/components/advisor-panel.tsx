@@ -97,6 +97,9 @@ export function AdvisorPanel({
             initialAvailability={initialAvailability}
             connection={connection}
             needsReconnect={needsReconnect}
+            // Advisors are the scarce side of the marketplace — capping how
+            // many sessions they'll take is the point. Founders don't get this.
+            showSessionCap
           />
         ) : (
           <AdvisorSessionList sessions={sessions} />

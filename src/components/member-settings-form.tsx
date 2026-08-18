@@ -82,12 +82,19 @@ export function MemberSettingsForm({
   initialAvailability,
   connection: initialConnection,
   needsReconnect,
+  showSessionCap = false,
 }: {
   fullName: string;
   timezone: string | null;
   weeklySessionCap: number;
   initialAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
   connection: { provider: string; grantEmail: string } | null;
+  /** Advisors only. A founder being booked into sessions has no reason to cap
+   * themselves — the number exists so a scarce advisor isn't over-booked, and
+   * offering it to everyone invited people to throttle their own invitations
+   * for no reason. Members keep whatever value is already stored and it's
+   * still submitted unchanged; it's simply not theirs to edit. */
+  showSessionCap?: boolean;
   /** They were connected before, but that connection now belongs to a
    * different Nylas app (e.g. we switched Sandbox/Production tiers) and no
    * longer works — distinct from never having connected at all, so the copy
@@ -250,29 +257,31 @@ export function MemberSettingsForm({
     }
   }
 
+  const enabledDayCount = DISPLAY_ORDER.filter((d) => days[d].enabled).length;
+
   return (
     <form onSubmit={handleSave}>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[340px_1fr]">
-        {/* Left: identity, connection, timezone, cap — one consolidated card */}
-        <div className="space-y-6 rounded-xl border border-border bg-card p-6 shadow-card">
+      {/* Profile, connection and timezone across the full width rather than in
+          a tall left column. The old split made the page longer than the
+          viewport, which is what pushed Save off-screen. */}
+      <div className="rounded-xl border border-border bg-card p-6 shadow-card">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <p className="text-base font-semibold text-foreground">{fullName}</p>
             {connection ? (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <Badge className="bg-accent text-accent-foreground">Connected</Badge>
                 <span className="text-xs text-muted-foreground">
-                  {providerLabel(connection.provider)} — {connection.grantEmail}
+                  {providerLabel(connection.provider)}
                 </span>
               </div>
             ) : needsReconnect ? (
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <Badge className="bg-secondary text-secondary-foreground">Needs reconnect</Badge>
-                <span className="text-xs text-muted-foreground">
-                  Your calendar connection is out of date — reconnect below.
-                </span>
-              </div>
+              <Badge className="mt-2 bg-secondary text-secondary-foreground">Needs reconnect</Badge>
             ) : (
               <p className="mt-2 text-xs text-destructive">Not connected.</p>
+            )}
+            {connection && (
+              <p className="mt-1 truncate text-xs text-muted-foreground">{connection.grantEmail}</p>
             )}
             <div className="mt-3 flex gap-2">
               <Button
@@ -298,48 +307,40 @@ export function MemberSettingsForm({
             </div>
           </div>
 
-          <div className="border-t border-border pt-5">
+          <div>
             <Label htmlFor="timezone">Your timezone</Label>
             <div className="mt-2">
               <TimezoneSelect id="timezone" value={timezone} onChange={setTimezone} />
             </div>
           </div>
 
-          <div className="border-t border-border pt-5">
-            <Label htmlFor="weekly-cap">Sessions per week</Label>
-            <p className="mt-1 text-xs text-muted-foreground">
-              The most sessions you&apos;re willing to take on in a given week.
-            </p>
-            <Input
-              id="weekly-cap"
-              type="number"
-              min={0}
-              max={50}
-              value={weeklySessionCap}
-              onChange={(e) => setWeeklySessionCap(Number(e.target.value))}
-              className="mt-2 w-24"
-            />
-          </div>
-        </div>
-
-        {/* Right: weekly availability */}
-        <div className="rounded-xl border border-border bg-card p-6 shadow-card">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
+          {showSessionCap && (
             <div>
-              <p className="text-base font-semibold text-foreground">Weekly availability</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                The hours you&apos;re open to sessions. Your calendar is still checked on top of
-                this — these are the outer bounds, not a promise you&apos;re free.
+              <Label htmlFor="weekly-cap">Sessions per week</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                The most you&apos;ll take on in a given week.
               </p>
+              <Input
+                id="weekly-cap"
+                type="number"
+                min={0}
+                max={50}
+                value={weeklySessionCap}
+                onChange={(e) => setWeeklySessionCap(Number(e.target.value))}
+                className="mt-2 w-24"
+              />
             </div>
-            {/* A running total is the one number that tells you at a glance
-                whether you've set something unreasonable, and it's invisible
-                when the days are read one row at a time. */}
-            <span className="shrink-0 rounded-full bg-secondary px-3 py-1 text-xs text-secondary-foreground">
-              {totalWeeklyHours} h / week
-            </span>
-          </div>
-          <div className="mt-4 divide-y divide-border">
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-border bg-card p-6 shadow-card">
+        <p className="text-base font-semibold text-foreground">Weekly availability</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          The hours you&apos;re open to sessions. Your calendar is still checked on top of this —
+          these are the outer bounds, not a promise you&apos;re free.
+        </p>
+        <div className="mt-4 divide-y divide-border">
             {DISPLAY_ORDER.map((day) => {
               const d = days[day];
               return (
@@ -361,7 +362,9 @@ export function MemberSettingsForm({
                   </span>
                   {d.enabled ? (
                     <div className="flex flex-col items-start gap-2">
-                      {d.blocks.map((block, index) => (
+                      {d.blocks.map((block, index) => {
+                        const isLast = index === d.blocks.length - 1;
+                        return (
                         <div key={index} className="flex items-center gap-2">
                           <TimeSelect
                             value={block.startTime}
@@ -385,19 +388,24 @@ export function MemberSettingsForm({
                               ✕
                             </Button>
                           )}
+                          {/* Inline on the last row rather than on a line of
+                              its own below. A one-block day is then a single
+                              row, which roughly halves the height of the card
+                              — the reason Save was falling off-screen. */}
+                          {isLast && d.blocks.length < MAX_BLOCKS_PER_DAY && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-muted-foreground"
+                              onClick={() => addBlock(day)}
+                            >
+                              + Add block
+                            </Button>
+                          )}
                         </div>
-                      ))}
-                      {d.blocks.length < MAX_BLOCKS_PER_DAY && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="px-0 text-muted-foreground"
-                          onClick={() => addBlock(day)}
-                        >
-                          + Add block
-                        </Button>
-                      )}
+                        );
+                      })}
                     </div>
                   ) : (
                     <span className="mt-1.5 block text-sm text-muted-foreground">Unavailable</span>
@@ -405,11 +413,17 @@ export function MemberSettingsForm({
                 </div>
               );
             })}
-          </div>
         </div>
       </div>
 
-      <div className="mt-5 flex justify-end">
+      {/* Sticky: three blocks on several days can still outgrow a short
+          window, and a Save you have to hunt for is a Save people forget to
+          press. Doubles as the running total, which was previously a badge on
+          the availability card. */}
+      <div className="sticky bottom-0 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/95 px-5 py-3 shadow-card backdrop-blur">
+        <p className="text-xs text-muted-foreground">
+          {totalWeeklyHours} h across {enabledDayCount} {enabledDayCount === 1 ? "day" : "days"}
+        </p>
         <Button type="submit" disabled={submitting}>
           {submitting ? "Saving…" : "Save"}
         </Button>
