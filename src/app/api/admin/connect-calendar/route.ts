@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { getMemberByEmail } from "@/db/queries";
+import { getMemberByEmail, getLatestConnections } from "@/db/queries";
 import { requireAdminSession } from "@/lib/auth/admin";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
-import { buildHostedAuthUrl } from "@/lib/nylas";
+import { asCalendarProvider, buildHostedAuthUrl } from "@/lib/nylas";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 
@@ -34,9 +34,14 @@ export async function POST() {
     env.SESSION_SECRET,
     STATE_TTL_SECONDS
   );
+  // Same reasoning as /api/me/reconnect: reuse the provider already on file
+  // so an admin repairing a broken connection isn't switched to a different
+  // calendar account behind their back.
+  const [existing] = await getLatestConnections([member.id]);
   const url = buildHostedAuthUrl({
     loginHint: normalizeEmail(member.email),
     state,
+    provider: asCalendarProvider(existing?.provider),
   });
 
   return NextResponse.json({ url });

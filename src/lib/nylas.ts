@@ -13,30 +13,42 @@ function getNylas() {
   return _nylas;
 }
 
+/** The calendar providers /connect offers. Both are configured as connectors
+ * on the production Nylas app; anything else would fail at the token exchange. */
+export const CALENDAR_PROVIDERS = ["google", "microsoft"] as const;
+export type CalendarProvider = (typeof CALENDAR_PROVIDERS)[number];
+
+/** Narrows a stored `calendar_connections.provider` back to something we can
+ * re-authenticate against. That column is free text straight from Nylas, so it
+ * can hold values we no longer offer (e.g. "icloud" from an older connector,
+ * or "unknown" when the exchange didn't report one). Falling back to google
+ * keeps a reconnect working rather than 500-ing on a stale row. */
+export function asCalendarProvider(value: string | null | undefined): CalendarProvider {
+  return CALENDAR_PROVIDERS.includes(value as CalendarProvider)
+    ? (value as CalendarProvider)
+    : "google";
+}
+
 /**
- * Builds the Nylas Hosted Auth URL, pinned to Google.
+ * Builds the Nylas Hosted Auth URL for a specific provider.
  *
- * Naming a `provider` skips Nylas's hosted login screen and redirects straight
- * to Google's consent page. Leaving it unset routes members through that
- * screen first, which carries the Nylas logo and cannot be rebranded without
- * upgrading to an annual Nylas contract (dashboard → Hosted authentication →
- * Branding: the toggle is locked). Founders should not be shown a vendor's
- * logo on the way into FounderNexus's own tool.
- *
- * Nothing is lost by pinning it: Google is the only connector configured on
- * the production app, so the picker's other options lead to an error anyway.
- * If Microsoft or iCloud is ever enabled, this must become a real choice again
- * — take the provider as a parameter, and update the copy on /connect, which
- * deliberately promises Google only.
+ * `provider` is always passed, never omitted. Leaving it unset routes members
+ * through Nylas's own hosted login screen first, which carries the Nylas logo
+ * and cannot be rebranded without upgrading to an annual Nylas contract
+ * (dashboard → Hosted authentication → Branding: the toggle is locked).
+ * Naming the provider skips that screen entirely and goes straight to
+ * Google/Microsoft — so we render our own two buttons on /connect instead,
+ * and founders never see a vendor's logo on the way into FounderNexus's tool.
  */
 export function buildHostedAuthUrl(params: {
   loginHint: string;
   state: string;
+  provider: CalendarProvider;
 }) {
   return getNylas().auth.urlForOAuth2({
     clientId: env.NYLAS_CLIENT_ID,
     redirectUri: env.NYLAS_CALLBACK_URI,
-    provider: "google",
+    provider: params.provider,
     loginHint: params.loginHint,
     state: params.state,
   });

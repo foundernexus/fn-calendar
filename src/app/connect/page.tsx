@@ -42,9 +42,8 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
     <div className="mx-auto max-w-md py-16">
       <h1 className="text-2xl font-bold text-foreground">Sign in</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        Enter your email to get started. If you haven&apos;t connected your Google
-        Calendar yet, you&apos;ll do that next. We only ever ask to read your
-        calendar and add events — never your email or contacts.
+        Enter your email, then pick the calendar you use. We only ever ask to
+        read your calendar and add events — never your email or contacts.
       </p>
       {errorMessage && (
         <p className="mt-6 rounded-md border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
