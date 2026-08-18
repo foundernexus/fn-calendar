@@ -101,7 +101,39 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
   for (const row of rows) {
     if (!byId.has(row.id)) byId.set(row.id, row);
   }
-  return [...byId.values()];
+  const found = [...byId.values()];
+  if (found.length === 0) return [];
+
+  // Attendees are fetched separately rather than read off the join above: that
+  // join is filtered to the members being searched for, so it only ever sees
+  // the attendees who matched — which is exactly the wrong list when the point
+  // is showing an admin everyone a session would affect before they cancel it.
+  const attendeeRows = await db
+    .select({
+      eventId: eventAttendees.eventId,
+      fullName: members.fullName,
+      // The address actually invited, which can differ from the registered one
+      // when someone connected a different calendar account.
+      email: eventAttendees.attendeeEmail,
+      role: eventAttendees.role,
+    })
+    .from(eventAttendees)
+    .innerJoin(members, eq(eventAttendees.memberId, members.id))
+    .where(
+      inArray(
+        eventAttendees.eventId,
+        found.map((e) => e.id)
+      )
+    );
+
+  const attendeesByEvent = new Map<number, { fullName: string; email: string; role: string }[]>();
+  for (const a of attendeeRows) {
+    const list = attendeesByEvent.get(a.eventId) ?? [];
+    list.push({ fullName: a.fullName, email: a.email, role: a.role });
+    attendeesByEvent.set(a.eventId, list);
+  }
+
+  return found.map((e) => ({ ...e, attendees: attendeesByEvent.get(e.id) ?? [] }));
 }
 
 /** No responseStatus: the column exists but nothing ever updates it (see

@@ -104,25 +104,66 @@ export async function GET(request: Request) {
     return failureRedirect(FAILURE_STATUS.provider);
   }
 
-  // Admin login is only ever granted here, never on the bare email POSTed to
-  // /api/connect/start — typing a string isn't proof of owning that inbox.
-  // The Google/Microsoft account actually signed into during this OAuth round
-  // trip must match the admin's registered email exactly, and they must
-  // still be on the live ADMIN_EMAILS allowlist (in case they were removed
-  // while this 10-minute flow was in flight). On any mismatch, bail out
-  // BEFORE touching calendar_connections — an attacker who requested this
-  // flow for someone else's memberId but authenticated with their own
-  // account must not silently overwrite that person's real connection.
+  // Whoever finished this OAuth round trip has to actually own the account
+  // we're about to bind to statePayload.memberId. NOTHING before this point
+  // establishes that: /api/connect/start is public and takes a bare email, so
+  // anyone who knows a registered address can start a flow carrying that
+  // member's id and then authenticate as themselves. loginHint is a hint, not
+  // a constraint.
+  //
+  // Without this the callback would hand them a session as that member and
+  // overwrite that member's calendar_connections row — and because invites
+  // resolve to grant_email, every future invite for the victim would be
+  // delivered to the attacker's inbox while their availability was read from
+  // the attacker's calendar.
+  //
+  // This check existed, but lived INSIDE the `redirectTo === "admin"` branch,
+  // so it only ever ran for admins. Everything below it must stay below it.
+  const targetMember = await getMemberById(statePayload.memberId);
+  if (!targetMember) {
+    console.warn("[nylas/callback] state token names a member that no longer exists", {
+      memberId: statePayload.memberId,
+    });
+    return failureRedirect(FAILURE_STATUS.denied);
+  }
+
+  const signedInEmail = normalizeEmail(exchanged.email);
+  const isRegisteredEmail = signedInEmail === normalizeEmail(targetMember.email);
+
+  // A member may legitimately hold a calendar under a different address than
+  // the one they're registered with — a personal Gmail against a work address,
+  // say. That stays allowed, but only for an account ALREADY linked to this
+  // member: the FIRST binding must prove ownership of the registered address,
+  // and that is what closes the takeover. An attacker has no way to create
+  // that first link, so there is nothing here for them to match against.
+  let previouslyLinked = false;
+  if (!isRegisteredEmail) {
+    const linked = await db
+      .select({ grantEmail: calendarConnections.grantEmail })
+      .from(calendarConnections)
+      .where(eq(calendarConnections.memberId, targetMember.id));
+    previouslyLinked = linked.some((row) => normalizeEmail(row.grantEmail) === signedInEmail);
+  }
+
+  if (!isRegisteredEmail && !previouslyLinked) {
+    console.warn("[nylas/callback] identity check failed — signed-in account is not this member", {
+      memberId: statePayload.memberId,
+      expectedEmail: targetMember.email,
+      actualEmail: exchanged.email,
+    });
+    return failureRedirect(FAILURE_STATUS.denied);
+  }
+
   let grantAdminSession = false;
   if (statePayload.redirectTo === "admin") {
-    const targetMember = await getMemberById(statePayload.memberId);
-    const emailMatches =
-      !!targetMember && normalizeEmail(exchanged.email) === normalizeEmail(targetMember.email);
-    const stillAdmin = !!targetMember && isAdminEmail(targetMember.email, env.ADMIN_EMAILS);
-    if (!emailMatches || !stillAdmin) {
+    // Admin sessions demand the registered address itself — a side calendar
+    // linked to the account is enough to manage your own settings, not to
+    // hold admin. Re-checked against the live allowlist too, in case they
+    // were removed while this 10-minute flow was in flight.
+    if (!isRegisteredEmail || !isAdminEmail(targetMember.email, env.ADMIN_EMAILS)) {
       console.warn("[nylas/callback] admin verification failed", {
         memberId: statePayload.memberId,
-        expectedEmail: targetMember?.email,
+        expectedEmail: targetMember.email,
         actualEmail: exchanged.email,
       });
       return failureRedirect(FAILURE_STATUS.denied);

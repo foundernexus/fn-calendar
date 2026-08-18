@@ -84,7 +84,19 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   try {
     const [updated] = await db
       .update(events)
-      .set({ status: "cancelled" })
+      .set({
+        status: "cancelled",
+        // Releases the idempotency key so the same people can be booked into
+        // the same slot again. That column is UNIQUE, so a cancelled row went
+        // on owning its key forever: rebooking the identical session computed
+        // the identical hash, the pre-flight check in api/admin/events found
+        // the cancelled row, and the request returned 200 with
+        // alreadyExisted — a green "no duplicate created" toast for a booking
+        // that never happened, with no event and no invites. Suffixing with
+        // the row id keeps the column unique and leaves the original key
+        // readable for anyone tracing what was cancelled.
+        idempotencyKey: `${event.idempotencyKey}|cancelled:${event.id}`,
+      })
       .where(eq(events.id, eventId))
       .returning();
     return NextResponse.json({ event: updated, alreadyCancelled: false });

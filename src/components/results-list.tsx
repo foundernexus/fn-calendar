@@ -1,7 +1,14 @@
 import { AvailabilityGrid } from "@/components/availability-grid";
 
 export type Slot = { startUnix: number; endUnix: number; label: string };
-export type BookedSlot = { id: number; startUnix: number; endUnix: number; title: string };
+export type BookedAttendee = { fullName: string; email: string; role: string };
+export type BookedSlot = {
+  id: number;
+  startUnix: number;
+  endUnix: number;
+  title: string;
+  attendees: BookedAttendee[];
+};
 
 export type AvailabilityResult = {
   slots: Slot[];

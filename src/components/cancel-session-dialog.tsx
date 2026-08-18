@@ -75,6 +75,28 @@ export function CancelSessionDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {/* Who this actually hits. Cancelling used to name only the session,
+            so an admin confirming it had no idea from this screen how many
+            people were about to get a cancellation email, or who. */}
+        {booked.attendees.length > 0 && (
+          <div className="rounded-lg border border-border bg-secondary/40 p-3">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              {booked.attendees.length} invited
+            </p>
+            <ul className="mt-2 space-y-1">
+              {booked.attendees.map((a) => (
+                <li key={a.email} className="text-sm text-foreground">
+                  {a.fullName}
+                  {a.role === "advisor" && (
+                    <span className="ml-2 text-xs text-muted-foreground">(advisor)</span>
+                  )}
+                  <span className="block text-xs text-muted-foreground">{a.email}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
           This removes the session from everyone&apos;s calendar and sends them a cancellation
           email straight away. It can&apos;t be undone — rebooking would create a new session and
