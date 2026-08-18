@@ -9,6 +9,10 @@ import { normalizeEmail } from "@/lib/email";
 const bodySchema = z.object({
   fullName: z.string().trim().min(1, "Enter a name.").max(200),
   email: z.string().trim().email("Enter a valid email address."),
+  // Marks them as an advisor: they show up in find-a-time's Advisor picker
+  // instead of the guest picker, and /connect lands them on /advisor. Defaults
+  // false so the existing "add guest" call keeps its old behaviour untouched.
+  isAdvisor: z.boolean().default(false),
 });
 
 /** drizzle-orm wraps every driver error in `DrizzleQueryError`, which has no
@@ -62,7 +66,11 @@ export async function POST(request: Request) {
   try {
     const [created] = await db
       .insert(members)
-      .values({ email, fullName: parsed.data.fullName.trim() })
+      .values({
+        email,
+        fullName: parsed.data.fullName.trim(),
+        isAdvisor: parsed.data.isAdvisor,
+      })
       .returning();
     return NextResponse.json({ member: created });
   } catch (err) {

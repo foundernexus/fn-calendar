@@ -11,7 +11,16 @@ import { TimezoneSelect } from "@/components/timezone-select";
 import { TimeSelect } from "@/components/time-select";
 import { isSupportedTimezone } from "@/lib/timezones";
 
-type DayState = { enabled: boolean; startTime: string; endTime: string };
+type Block = { startTime: string; endTime: string };
+type DayState = { enabled: boolean; blocks: Block[] };
+
+/** Mirrors MAX_BLOCKS_PER_DAY in api/me/route.ts — the server rejects more, so
+ * the "Add block" button has to stop offering them at the same number. */
+const MAX_BLOCKS_PER_DAY = 3;
+const DEFAULT_BLOCK: Block = { startTime: "09:00", endTime: "17:00" };
+/** Offered as the second block, since split days are nearly always a lunch
+ * break — saves the member fiddling with two dropdowns to get the common case. */
+const DEFAULT_SECOND_BLOCK: Block = { startTime: "14:00", endTime: "17:00" };
 
 // Display order is Monday-first (matches the reference UI); storage/wire
 // format stays 0=Sunday..6=Saturday everywhere else in this codebase (see
@@ -46,13 +55,22 @@ function providerLabel(provider: string) {
 }
 
 function defaultDays(initial: { dayOfWeek: number; startTime: string; endTime: string }[]) {
-  const byDay = new Map(initial.map((d) => [d.dayOfWeek, d]));
+  const byDay = new Map<number, Block[]>();
+  for (const row of initial) {
+    const list = byDay.get(row.dayOfWeek) ?? [];
+    list.push({ startTime: row.startTime, endTime: row.endTime });
+    byDay.set(row.dayOfWeek, list);
+  }
+
   const days: Record<number, DayState> = {};
   for (let d = 0; d < 7; d++) {
     const existing = byDay.get(d);
-    days[d] = existing
-      ? { enabled: true, startTime: existing.startTime, endTime: existing.endTime }
-      : { enabled: false, startTime: "09:00", endTime: "17:00" };
+    days[d] = existing?.length
+      ? // Sorted because the rows come back in insertion order, and a member
+        // who added an early-morning block second would otherwise see their
+        // day listed out of order.
+        { enabled: true, blocks: [...existing].sort((a, b) => a.startTime.localeCompare(b.startTime)) }
+      : { enabled: false, blocks: [{ ...DEFAULT_BLOCK }] };
   }
   return days;
 }
@@ -105,21 +123,60 @@ export function MemberSettingsForm({
     setDays((prev) => ({ ...prev, [day]: { ...prev[day], ...patch } }));
   }
 
+  function updateBlock(day: number, index: number, patch: Partial<Block>) {
+    setDays((prev) => ({
+      ...prev,
+      [day]: {
+        ...prev[day],
+        blocks: prev[day].blocks.map((b, i) => (i === index ? { ...b, ...patch } : b)),
+      },
+    }));
+  }
+
+  function addBlock(day: number) {
+    setDays((prev) => ({
+      ...prev,
+      [day]: { ...prev[day], blocks: [...prev[day].blocks, { ...DEFAULT_SECOND_BLOCK }] },
+    }));
+  }
+
+  function removeBlock(day: number, index: number) {
+    setDays((prev) => ({
+      ...prev,
+      [day]: { ...prev[day], blocks: prev[day].blocks.filter((_, i) => i !== index) },
+    }));
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!timezone) {
       toast.error("Pick your timezone.");
       return;
     }
-    const availability = DISPLAY_ORDER.filter((d) => days[d].enabled).map((d) => ({
-      dayOfWeek: d,
-      startTime: days[d].startTime,
-      endTime: days[d].endTime,
-    }));
+    const availability = DISPLAY_ORDER.filter((d) => days[d].enabled).flatMap((d) =>
+      days[d].blocks.map((b) => ({
+        dayOfWeek: d,
+        startTime: b.startTime,
+        endTime: b.endTime,
+      }))
+    );
+
+    // Same two rules the server enforces, checked here first so the member
+    // gets a message naming the day instead of a rejected save.
     for (const a of availability) {
       if (a.endTime <= a.startTime) {
         toast.error(`${DAY_LABELS_FULL[a.dayOfWeek]}: end time must be after start time.`);
         return;
+      }
+    }
+    for (const day of DISPLAY_ORDER) {
+      if (!days[day].enabled) continue;
+      const sorted = [...days[day].blocks].sort((a, b) => a.startTime.localeCompare(b.startTime));
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i].startTime < sorted[i - 1].endTime) {
+          toast.error(`${DAY_LABELS_FULL[day]}: time blocks overlap.`);
+          return;
+        }
       }
     }
 
@@ -259,27 +316,56 @@ export function MemberSettingsForm({
               return (
                 <div
                   key={day}
-                  className="grid grid-cols-[auto_2.75rem_1fr] items-center gap-3 py-2 first:pt-0 last:pb-0"
+                  className="grid grid-cols-[auto_2.75rem_1fr] items-start gap-3 py-2 first:pt-0 last:pb-0"
                 >
                   <Switch
+                    className="mt-1"
                     checked={d.enabled}
                     onCheckedChange={(checked) => updateDay(day, { enabled: checked })}
                   />
-                  <span className="text-sm text-foreground">{DAY_LABELS[day]}</span>
+                  <span className="mt-1.5 text-sm text-foreground">{DAY_LABELS[day]}</span>
                   {d.enabled ? (
-                    <div className="flex items-center gap-2 justify-self-start">
-                      <TimeSelect
-                        value={d.startTime}
-                        onChange={(startTime) => updateDay(day, { startTime })}
-                      />
-                      <span className="text-muted-foreground">–</span>
-                      <TimeSelect
-                        value={d.endTime}
-                        onChange={(endTime) => updateDay(day, { endTime })}
-                      />
+                    <div className="flex flex-col items-start gap-2">
+                      {d.blocks.map((block, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                          <TimeSelect
+                            value={block.startTime}
+                            onChange={(startTime) => updateBlock(day, index, { startTime })}
+                          />
+                          <span className="text-muted-foreground">–</span>
+                          <TimeSelect
+                            value={block.endTime}
+                            onChange={(endTime) => updateBlock(day, index, { endTime })}
+                          />
+                          {/* Never offer to remove the last block — an enabled
+                              day with zero blocks would silently save as "off". */}
+                          {d.blocks.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Remove this time block on ${DAY_LABELS_FULL[day]}`}
+                              onClick={() => removeBlock(day, index)}
+                            >
+                              ✕
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                      {d.blocks.length < MAX_BLOCKS_PER_DAY && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="px-0 text-muted-foreground"
+                          onClick={() => addBlock(day)}
+                        >
+                          + Add block
+                        </Button>
+                      )}
                     </div>
                   ) : (
-                    <span className="text-sm text-muted-foreground">Unavailable</span>
+                    <span className="mt-1.5 block text-sm text-muted-foreground">Unavailable</span>
                   )}
                 </div>
               );

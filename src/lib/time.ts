@@ -165,8 +165,9 @@ export type AvailabilityWindow = { dayOfWeek: number; startTime: string; endTime
  * rejected for every day below, same as anyone who left just one day off.
  * Not "no rows = unrestricted," only "never saved at all = unrestricted."
  *
- * Windows themselves can't cross midnight (the /me form only accepts a
- * single startTime < endTime range per day), so a slot that spans local
+ * Windows themselves can't cross midnight (the /me form only accepts
+ * startTime < endTime ranges, of which a day may now have several), so a
+ * slot that spans local
  * midnight in the member's zone can never fit inside one — rejecting it is
  * mathematically correct, not just conservative. Known limitation this
  * implies: for a member in a timezone far from the admin's search zone (the
@@ -186,10 +187,18 @@ export function slotMatchesMemberAvailability(
   const end = zonedDateTimeParts(slot.endUnix, memberTimezone);
   if (start.date !== end.date) return false;
 
-  const window = windows.find((w) => w.dayOfWeek === dayOfWeek(start.date));
-  if (!window) return false;
-
-  return start.time >= window.startTime && end.time <= window.endTime;
+  // A member can set several blocks for one day (e.g. 09:00–12:00 and
+  // 14:00–17:00), so the slot has to fit inside ANY one of them — `.some`,
+  // not `.find`. This used to take only the first matching window, which
+  // meant a second block saved fine and was then silently ignored by every
+  // search.
+  //
+  // Fitting entirely within ONE block is the requirement, not covering the
+  // union: a slot spanning 11:30–14:30 crosses the member's lunch break and
+  // must be rejected even though both ends land inside some block.
+  return windows
+    .filter((w) => w.dayOfWeek === dayOfWeek(start.date))
+    .some((w) => start.time >= w.startTime && end.time <= w.endTime);
 }
 
 /** "YYYY-MM-DD" -> the Sunday that starts its week (0=Sunday..6=Saturday,

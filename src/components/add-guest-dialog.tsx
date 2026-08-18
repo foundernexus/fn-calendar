@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import type { MemberWithConnection } from "@/db/queries";
 
 type CreatedMember = { id: number; email: string; fullName: string };
@@ -35,12 +36,16 @@ export function AddGuestDialog({
   const [open, setOpen] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
+  const [isAdvisor, setIsAdvisor] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<CreatedMember | null>(null);
 
   function reset() {
     setFullName("");
     setEmail("");
+    // Deliberately NOT reset — an admin adding advisors is almost always
+    // adding several in a row, and "Add another" shouldn't silently flip them
+    // back to creating guests.
     setCreated(null);
   }
 
@@ -51,7 +56,7 @@ export function AddGuestDialog({
       const res = await fetch("/api/admin/members", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName, email }),
+        body: JSON.stringify({ fullName, email, isAdvisor }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -66,6 +71,7 @@ export function AddGuestDialog({
         connected: false,
         needsReconnect: false,
         isFacilitator: false,
+        isAdvisor,
         provider: null,
         grantEmail: null,
       });
@@ -94,7 +100,7 @@ export function AddGuestDialog({
       }}
     >
       <DialogTrigger render={<Button type="button" variant="secondary" size="sm" />}>
-        + Add guest
+        + Add person
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         {created ? (
@@ -102,8 +108,9 @@ export function AddGuestDialog({
             <DialogHeader>
               <DialogTitle>{created.fullName} added</DialogTitle>
               <DialogDescription>
-                They&apos;re registered, but won&apos;t appear as a selectable guest until they
-                connect their calendar. Send them this link:
+                They&apos;re registered, but won&apos;t appear as a selectable{" "}
+                {isAdvisor ? "advisor" : "guest"} until they connect their calendar. Send them this
+                link:
               </DialogDescription>
             </DialogHeader>
             <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 p-3">
@@ -136,7 +143,7 @@ export function AddGuestDialog({
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle>Add guest</DialogTitle>
+              <DialogTitle>Add {isAdvisor ? "advisor" : "guest"}</DialogTitle>
               <DialogDescription>
                 Registers them so they can sign in at /connect. There&apos;s no email invite — you
                 pass along the link yourself.
@@ -164,9 +171,19 @@ export function AddGuestDialog({
                   placeholder="jane@example.com"
                 />
               </div>
+              <div className="flex items-start gap-3 rounded-lg border border-border bg-secondary/40 p-3">
+                <Switch id="is-advisor" checked={isAdvisor} onCheckedChange={setIsAdvisor} />
+                <div className="space-y-0.5">
+                  <Label htmlFor="is-advisor">Add as advisor</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Advisors get their own dashboard after signing in, and are picked from the
+                    Advisor field when booking a session instead of the guest list.
+                  </p>
+                </div>
+              </div>
               <DialogFooter>
                 <Button type="submit" disabled={submitting}>
-                  {submitting ? "Adding…" : "Add guest"}
+                  {submitting ? "Adding…" : isAdvisor ? "Add advisor" : "Add guest"}
                 </Button>
               </DialogFooter>
             </form>

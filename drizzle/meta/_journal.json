@@ -43,6 +43,13 @@
       "when": 1786590281450,
       "tag": "0005_first_celestials",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787022746382,
+      "tag": "0006_parallel_elektra",
+      "breakpoints": true
     }
   ]
 }

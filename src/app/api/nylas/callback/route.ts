@@ -194,7 +194,19 @@ export async function GET(request: Request) {
     env.SESSION_SECRET,
     MEMBER_SESSION_TTL_SECONDS
   );
-  const destination = statePayload.redirectTo === "admin" ? "/admin/find-a-time" : "/me";
+  // Admins go to the dashboard they came for; advisors get their own panel;
+  // everyone else lands on member settings. The advisor check is a DB read
+  // rather than something carried in the state token, because the token is
+  // minted at /api/connect/start before we know anything about them beyond
+  // their email — and because an admin promoting someone to advisor should
+  // take effect on their next sign-in, not whenever a stale token expires.
+  let destination = "/me";
+  if (statePayload.redirectTo === "admin") {
+    destination = "/admin/find-a-time";
+  } else {
+    const member = await getMemberById(statePayload.memberId);
+    if (member?.isAdvisor) destination = "/advisor";
+  }
   const response = NextResponse.redirect(new URL(destination, env.APP_URL));
   response.cookies.set(MEMBER_COOKIE_NAME, memberSessionToken, {
     httpOnly: true,

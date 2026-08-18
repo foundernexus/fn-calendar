@@ -1,4 +1,5 @@
-import { eq, inArray, and, or, gte, lte, lt, gt, sql } from "drizzle-orm";
+import { eq, inArray, and, or, gte, lte, lt, gt, sql, desc } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "./index";
 import { calendarConnections, members, memberAvailability, events, eventAttendees } from "./schema";
 import { normalizeEmail } from "@/lib/email";
@@ -103,6 +104,51 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
   return [...byId.values()];
 }
 
+export type MemberSession = {
+  id: number;
+  title: string;
+  startsAt: Date;
+  endsAt: Date;
+  timezone: string;
+  meetingUrl: string | null;
+  status: "confirmed" | "cancelled";
+  role: "guest" | "advisor";
+  organizerName: string;
+  attendeeCount: number;
+};
+
+/** Every session this member is an attendee of, newest first — the list behind
+ * /advisor's "Your sessions". Driven off event_attendees rather than events so
+ * `role` comes along: the same person can be the advisor on one session and an
+ * ordinary guest on another, and the panel needs to say which.
+ *
+ * Deliberately includes cancelled sessions. Somebody who cleared their morning
+ * for a session needs to see that it was called off, not have it silently
+ * vanish from the list. */
+export async function getSessionsForMember(memberId: number): Promise<MemberSession[]> {
+  const organizer = alias(members, "organizer");
+  return db
+    .select({
+      id: events.id,
+      title: events.title,
+      startsAt: events.startsAt,
+      endsAt: events.endsAt,
+      timezone: events.timezone,
+      meetingUrl: events.meetingUrl,
+      status: events.status,
+      role: eventAttendees.role,
+      organizerName: organizer.fullName,
+      // Aliased subquery, not a GROUP BY over the join — grouping here would
+      // mean listing every selected column in the GROUP BY clause for no gain.
+      attendeeCount: sql<number>`(select count(*)::int from event_attendees ea where ea.event_id = ${events.id})`,
+    })
+    .from(eventAttendees)
+    .innerJoin(events, eq(eventAttendees.eventId, events.id))
+    .innerJoin(organizer, eq(events.organizerMemberId, organizer.id))
+    .where(eq(eventAttendees.memberId, memberId))
+    .orderBy(desc(events.startsAt));
+}
+
 export type LatestConnectionRow = {
   id: number;
   member_id: number;
@@ -193,6 +239,10 @@ export type MemberWithConnection = {
   // fresh reconnect, as opposed to never having connected at all.
   needsReconnect: boolean;
   isFacilitator: boolean;
+  /** Gates the Advisor picker in find-a-time, the way isFacilitator gates the
+   * Session lead picker. Independent of both: someone can be an advisor and a
+   * facilitator, or neither. */
+  isAdvisor: boolean;
   provider: string | null;
   grantEmail: string | null;
 };
@@ -218,6 +268,7 @@ export async function getMembersWithConnectionStatus(): Promise<MemberWithConnec
       connected: usable,
       needsReconnect: !!connection && connection.connection_status === "connected" && !usable,
       isFacilitator: m.isFacilitator,
+      isAdvisor: m.isAdvisor,
       provider: usable ? connection!.provider : null,
       grantEmail: usable ? connection!.grant_email : null,
     };

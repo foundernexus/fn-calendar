@@ -175,6 +175,55 @@ describe("slotMatchesMemberAvailability", () => {
     );
   });
 
+  describe("with several blocks on one day", () => {
+    // 09:00–12:00 and 14:00–17:00 — a lunch break, the reason the single-block
+    // limit was lifted.
+    const mondaySplit = [
+      { dayOfWeek: 1, startTime: "09:00", endTime: "12:00" },
+      { dayOfWeek: 1, startTime: "14:00", endTime: "17:00" },
+    ];
+    const slot = (start: string, end: string) => ({
+      startUnix: zonedDateTimeToUnix("2026-08-17", start, "America/Los_Angeles"),
+      endUnix: zonedDateTimeToUnix("2026-08-17", end, "America/Los_Angeles"),
+    });
+
+    it("allows a slot inside the FIRST block", () => {
+      expect(
+        slotMatchesMemberAvailability(slot("10:00", "11:00"), "America/Los_Angeles", mondaySplit)
+      ).toBe(true);
+    });
+
+    it("allows a slot inside the SECOND block", () => {
+      // The regression guard for this whole feature: the old implementation
+      // used windows.find(), which stopped at the 09:00–12:00 block and
+      // silently reported false for every afternoon slot.
+      expect(
+        slotMatchesMemberAvailability(slot("15:00", "16:00"), "America/Los_Angeles", mondaySplit)
+      ).toBe(true);
+    });
+
+    it("rejects a slot sitting in the gap between blocks", () => {
+      expect(
+        slotMatchesMemberAvailability(slot("12:30", "13:30"), "America/Los_Angeles", mondaySplit)
+      ).toBe(false);
+    });
+
+    it("rejects a slot that spans the gap, even though both ends are inside a block", () => {
+      // 11:30–14:30 starts inside block one and ends inside block two, but runs
+      // straight through the member's lunch. Fitting within ONE block is the
+      // requirement, not being covered by the union of them.
+      expect(
+        slotMatchesMemberAvailability(slot("11:30", "14:30"), "America/Los_Angeles", mondaySplit)
+      ).toBe(false);
+    });
+
+    it("still rejects a slot outside every block on that day", () => {
+      expect(
+        slotMatchesMemberAvailability(slot("07:00", "08:00"), "America/Los_Angeles", mondaySplit)
+      ).toBe(false);
+    });
+  });
+
   it("is unrestricted when the member has never set a timezone (never touched /me)", () => {
     expect(slotMatchesMemberAvailability(mondaySlot, null, [])).toBe(true);
     // Even a slot on a day they'd otherwise be "off" is allowed, since they

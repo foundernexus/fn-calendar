@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, and, notInArray, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { members, memberAvailability } from "@/db/schema";
@@ -18,16 +18,49 @@ const dayEntrySchema = z
     path: ["endTime"],
   });
 
+/** A day can hold several blocks — e.g. 09:00–12:00 and 14:00–17:00 around
+ * lunch. Capped so one member can't write unbounded rows, and because the
+ * settings UI stops offering "add block" at the same limit. */
+const MAX_BLOCKS_PER_DAY = 3;
+
 const bodySchema = z.object({
   timezone: z.string().refine(isSupportedTimezone, "Unsupported timezone."),
   weeklySessionCap: z.number().int().min(0).max(50),
   availability: z
     .array(dayEntrySchema)
-    .max(7)
-    .refine(
-      (days) => new Set(days.map((d) => d.dayOfWeek)).size === days.length,
-      "Duplicate day."
-    ),
+    .max(7 * MAX_BLOCKS_PER_DAY)
+    .superRefine((days, ctx) => {
+      const byDay = new Map<number, typeof days>();
+      for (const d of days) {
+        const list = byDay.get(d.dayOfWeek) ?? [];
+        list.push(d);
+        byDay.set(d.dayOfWeek, list);
+      }
+
+      for (const [dayOfWeek, blocks] of byDay) {
+        if (blocks.length > MAX_BLOCKS_PER_DAY) {
+          ctx.addIssue({
+            code: "custom",
+            message: `At most ${MAX_BLOCKS_PER_DAY} time blocks per day.`,
+          });
+          continue;
+        }
+        // Overlapping blocks aren't just untidy — slotMatchesMemberAvailability
+        // asks whether a slot fits inside ANY block, so overlaps silently widen
+        // availability in ways the member can't see on the form.
+        const sorted = [...blocks].sort((a, b) => a.startTime.localeCompare(b.startTime));
+        for (let i = 1; i < sorted.length; i++) {
+          if (sorted[i].startTime < sorted[i - 1].endTime) {
+            ctx.addIssue({
+              code: "custom",
+              message: `Overlapping time blocks on the same day (${sorted[i - 1].startTime}–${sorted[i - 1].endTime} and ${sorted[i].startTime}–${sorted[i].endTime}).`,
+              path: [dayOfWeek],
+            });
+            break;
+          }
+        }
+      }
+    }),
 });
 
 export async function PATCH(request: Request) {
@@ -52,7 +85,6 @@ export async function PATCH(request: Request) {
   }
   const body = parsed.data;
   const memberId = session.memberId;
-  const enabledDays = body.availability.map((d) => d.dayOfWeek);
 
   try {
     await db
@@ -60,45 +92,35 @@ export async function PATCH(request: Request) {
       .set({ timezone: body.timezone, weeklySessionCap: body.weeklySessionCap })
       .where(eq(members.id, memberId));
 
-    // Upsert enabled days before deleting now-disabled ones — with no
-    // multi-statement transaction available (Neon HTTP driver), if the
-    // delete step below fails, the worst case is a day that should be off
-    // staying on with stale times, not any lost data. The reverse order
-    // risks the opposite: a day the member just re-enabled being deleted
-    // right back out from under them.
+    // Replace this member's blocks wholesale rather than upserting per day.
+    // Now that a day can hold several blocks there's no longer a unique
+    // (member, day) key to upsert against, and "which of today's three rows
+    // does this one replace?" has no good answer — the form always submits
+    // the complete set, so deleting and re-inserting is both simpler and
+    // exactly right.
+    //
+    // db.batch() runs these in a single Neon transaction, so a failure can't
+    // leave the member with their availability deleted and nothing written
+    // back. Deleting and inserting as two separate awaits could.
+    const deleteExisting = db
+      .delete(memberAvailability)
+      .where(eq(memberAvailability.memberId, memberId));
+
     if (body.availability.length > 0) {
-      await db
-        .insert(memberAvailability)
-        .values(
+      await db.batch([
+        deleteExisting,
+        db.insert(memberAvailability).values(
           body.availability.map((d) => ({
             memberId,
             dayOfWeek: d.dayOfWeek,
             startTime: d.startTime,
             endTime: d.endTime,
           }))
-        )
-        .onConflictDoUpdate({
-          target: [memberAvailability.memberId, memberAvailability.dayOfWeek],
-          set: {
-            startTime: sql`excluded.start_time`,
-            endTime: sql`excluded.end_time`,
-          },
-        });
-    }
-
-    if (enabledDays.length > 0) {
-      await db
-        .delete(memberAvailability)
-        .where(
-          and(
-            eq(memberAvailability.memberId, memberId),
-            notInArray(memberAvailability.dayOfWeek, enabledDays)
-          )
-        );
+        ),
+      ]);
     } else {
-      // notInArray(..., []) would generate an invalid/no-op "NOT IN ()" —
-      // every day is off, so every row for this member should go.
-      await db.delete(memberAvailability).where(eq(memberAvailability.memberId, memberId));
+      // Every day off — nothing to insert, so no transaction needed.
+      await deleteExisting;
     }
   } catch (err) {
     console.error("[api/me] Save failed", { memberId, err });

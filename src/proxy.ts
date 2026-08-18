@@ -9,7 +9,16 @@ import { isAdminEmail } from "@/lib/auth/admin";
 import { env } from "@/lib/env";
 
 export const config = {
-  matcher: ["/admin/:path*", "/api/admin/:path*", "/me/:path*", "/api/me/:path*"],
+  matcher: [
+    "/admin/:path*",
+    "/api/admin/:path*",
+    "/me/:path*",
+    "/api/me/:path*",
+    // /advisor needs the same member session as /me — the advisor-only check
+    // (isAdvisor) happens in the page itself, since it needs a DB read that
+    // this cookie-only middleware deliberately avoids.
+    "/advisor/:path*",
+  ],
 };
 
 // /api/admin/login no longer exists (deleted — same bare-email vulnerability
@@ -21,7 +30,11 @@ const PUBLIC_PATHS = new Set(["/admin/login"]);
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  if (pathname.startsWith("/me") || pathname.startsWith("/api/me")) {
+  if (
+    pathname.startsWith("/me") ||
+    pathname.startsWith("/api/me") ||
+    pathname.startsWith("/advisor")
+  ) {
     return handleMemberRoute(req);
   }
   return handleAdminRoute(req);

@@ -26,6 +26,13 @@ export const attendeeResponseEnum = pgEnum("attendee_response_status", [
   "maybe",
 ]);
 
+// What someone was IN a given session, as opposed to what they are in general
+// (`members.isAdvisor`). The same person can be the advisor on one session and
+// an ordinary guest on another, so this can't live on `members` — it mirrors
+// the existing split between `isFacilitator` (who may lead) and
+// `events.organizerMemberId` (who actually led).
+export const attendeeRoleEnum = pgEnum("attendee_role", ["guest", "advisor"]);
+
 // `role` is descriptive metadata only — it does NOT grant /admin access.
 // Admin access is purely the ADMIN_EMAILS env allowlist + signed session cookie.
 export const members = pgTable("members", {
@@ -38,6 +45,11 @@ export const members = pgTable("members", {
   // member eligible as a guest). A curated, small set of people actually run
   // sessions; everyone else who connects is a guest-only participant.
   isFacilitator: boolean("is_facilitator").notNull().default(false),
+  // Gates who appears in find-a-time's Advisor picker, exactly as
+  // `isFacilitator` gates the Session lead picker. Also decides where /connect
+  // lands them afterwards: advisors go to /advisor, everyone else to /me.
+  // Like `role`, this grants no admin access — that stays ADMIN_EMAILS-only.
+  isAdvisor: boolean("is_advisor").notNull().default(false),
   // Nullable — no guessed default for a global membership. Null means the
   // member has never saved their /me settings yet; the client suggests the
   // browser-detected zone in that case but writes nothing until they save.
@@ -116,6 +128,7 @@ export const eventAttendees = pgTable(
       .notNull()
       .references(() => members.id),
     attendeeEmail: text("attendee_email").notNull(),
+    role: attendeeRoleEnum("role").notNull().default("guest"),
     responseStatus: attendeeResponseEnum("response_status")
       .notNull()
       .default("noreply"),
@@ -147,5 +160,12 @@ export const memberAvailability = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [uniqueIndex("member_availability_member_day_unique").on(t.memberId, t.dayOfWeek)]
+  // Deliberately NOT unique on (member_id, day_of_week): a member can have
+  // several blocks in one day, e.g. 09:00–12:00 and 14:00–17:00 around lunch.
+  // Non-overlap and start<end are enforced in api/me/route.ts, not here —
+  // Postgres can't express "no two ranges for this member on this day
+  // overlap" without an exclusion constraint over a range type, which would
+  // mean storing these as ranges rather than the "HH:mm" text the rest of the
+  // app compares against.
+  (t) => [index("member_availability_member_day_idx").on(t.memberId, t.dayOfWeek)]
 );
