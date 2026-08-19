@@ -83,13 +83,6 @@ export function CancelSessionDialog({
           <DialogDescription>{when}</DialogDescription>
         </DialogHeader>
 
-        {/* Moving comes first and cancelling is the destructive fallback —
-            the older version offered only cancelling, which pushed people
-            into cancel-then-rebook for what was really a reschedule. */}
-        <Button type="button" variant="secondary" onClick={onReschedule}>
-          Find a new time for this session
-        </Button>
-
         {/* Who this actually hits. Cancelling used to name only the session,
             so an admin confirming it had no idea from this screen how many
             people were about to get a cancellation email, or who. */}
@@ -118,9 +111,19 @@ export function CancelSessionDialog({
           new invites.
         </div>
 
+        {/* Three choices in one row, ordered by how much they cost you: do
+            nothing, move it, end it. Rescheduling sits in the middle rather
+            than above the attendee list, where it read as the headline action
+            — but it stays offered next to Cancel on purpose, because the whole
+            reason it exists is that admins were cancelling and rebooking for
+            what was really a reschedule, which sends everyone a cancellation
+            and then a fresh invite. */}
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
             Keep it
+          </Button>
+          <Button type="button" variant="secondary" onClick={onReschedule}>
+            Reschedule
           </Button>
           <Button
             type="button"
