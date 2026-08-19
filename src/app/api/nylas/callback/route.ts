@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { calendarConnections } from "@/db/schema";
-import { getMemberById } from "@/db/queries";
+import { getMemberById, getActiveConnections, pickInviteConnection } from "@/db/queries";
 import {
   signValue,
   verifyValue,
@@ -225,6 +225,12 @@ export async function GET(request: Request) {
     );
   }
 
+  // Whether this member already had a usable calendar BEFORE this one, and
+  // which of them was receiving sessions. Read now, because the upsert below
+  // changes the answer.
+  const priorUsable = await getActiveConnections([statePayload.memberId]);
+  const priorTarget = pickInviteConnection(priorUsable);
+
   // Upsert on nylas_grant_id: Nylas's loginHint auto-reauths an existing grant,
   // so a member reconnecting after a local "disconnect" likely gets back the
   // SAME grant ID — a plain insert would hit the unique constraint. Resetting
@@ -255,6 +261,37 @@ export async function GET(request: Request) {
         revokedAt: null,
       },
     });
+
+  // Pin which calendar receives sessions, the first time there's anything to
+  // pin. Without this the answer came from pickInviteConnection's fallback
+  // ordering, which meant connecting a second calendar silently moved
+  // everyone's invites onto it — you set out to add a calendar and quietly
+  // changed where your meetings land.
+  //
+  // Someone who already had a target keeps it: whatever they were using
+  // before is written down explicitly so nothing can shift it later. Someone
+  // connecting for the very first time gets this one.
+  if (!priorUsable.some((r) => r.is_primary)) {
+    const pinned = priorTarget
+      ? db
+          .update(calendarConnections)
+          .set({ isPrimary: true })
+          .where(eq(calendarConnections.id, priorTarget.id))
+      : db
+          .update(calendarConnections)
+          .set({ isPrimary: true })
+          .where(eq(calendarConnections.nylasGrantId, exchanged.grantId));
+    try {
+      await pinned;
+    } catch (err) {
+      // Not fatal: the fallback still returns a sensible, stable answer, and
+      // the member can set it themselves on /me.
+      console.error("[nylas/callback] Couldn't pin the invite calendar", {
+        memberId: statePayload.memberId,
+        err,
+      });
+    }
+  }
 
   // A successful connection doubles as login (see /me) — sign a member
   // session and send them straight to their settings page instead of back

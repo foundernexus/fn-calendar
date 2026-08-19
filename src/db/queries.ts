@@ -310,17 +310,21 @@ export async function getLatestConnections(memberIds?: number[]) {
  * calendar entries for one session, and cancelling would then have to find and
  * remove each. `is_primary` is the member's own choice on /me.
  *
- * Falls back to the most recently connected when nothing is marked — the state
- * every member was in before this existed, so no backfill was needed. Callers
- * pass the rows for ONE member; passing a mixed set returns a meaningless
+ * The fallback for members who never chose is the OLDEST connection, not the
+ * newest. Newest looks natural and is wrong twice over: connecting a second
+ * calendar would silently move everyone's invites to it, and even reconnecting
+ * an existing one would, since that resets connected_at. Oldest doesn't move
+ * when calendars are added or repaired. In practice the fallback rarely
+ * matters — the callback pins a choice the first time someone connects — but
+ * it has to be stable for the rows that predate that.
+ *
+ * Callers pass the rows for ONE member; a mixed set returns a meaningless
  * answer. */
 export function pickInviteConnection(rowsForOneMember: LatestConnectionRow[]) {
   if (rowsForOneMember.length === 0) return undefined;
   return (
     rowsForOneMember.find((r) => r.is_primary) ??
-    [...rowsForOneMember].sort(
-      (a, b) => connectedAtMs(b) - connectedAtMs(a) || b.id - a.id
-    )[0]
+    [...rowsForOneMember].sort((a, b) => connectedAtMs(a) - connectedAtMs(b) || a.id - b.id)[0]
   );
 }
 
