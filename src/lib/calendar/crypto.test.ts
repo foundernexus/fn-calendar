@@ -24,11 +24,13 @@ describe("token encryption", () => {
   });
 
   it("refuses a tampered ciphertext instead of returning rubbish", () => {
-    const encrypted = encryptToken(TOKEN);
-    const parts = encrypted.split(".");
-    // Flip the last character of the ciphertext.
-    const last = parts[3];
-    parts[3] = last.slice(0, -1) + (last.endsWith("A") ? "B" : "A");
+    const parts = encryptToken(TOKEN).split(".");
+    // Flip a bit in the decoded bytes rather than editing the base64 text:
+    // changing the final character is not a reliable tamper, because its
+    // trailing bits can decode to the same byte.
+    const bytes = Buffer.from(parts[3], "base64url");
+    bytes[0] ^= 0xff;
+    parts[3] = bytes.toString("base64url");
     // GCM authentication is what makes this throw. Without it a corrupted row
     // would decrypt to a token-shaped string and fail later against the
     // provider, where the real cause is invisible.
