@@ -90,6 +90,28 @@ export function ConnectForm({ initialEmail }: { initialEmail?: string }) {
           </button>
         ))}
       </div>
+
+      {/* Google names the OAuth redirect host — api.us.nylas.com — wherever our
+          own branding would otherwise appear, because that branding only shows
+          once Google has verified the app. So members are told to continue to
+          "nylas.com", by a screen that also warns the app is unverified, and
+          the honest reaction to that is to stop.
+          Warned here rather than in the invite message: the invite is read once
+          and days earlier, this is read in the second it matters. Google-only
+          on purpose — Microsoft consent shows our own Azure app registration
+          and says nothing about Nylas. */}
+      <div className="rounded-lg border border-border bg-secondary/40 p-3 text-xs leading-relaxed text-muted-foreground">
+        <p className="font-medium text-foreground">Google will mention “nylas.com”. That’s us.</p>
+        <p className="mt-1">
+          Nylas is the calendar service behind this scheduler — like Stripe for payments. Google
+          shows their name, and a note that we&apos;re not verified yet, until our review with
+          Google finishes. Choose <span className="text-foreground">Advanced</span> →{" "}
+          <span className="text-foreground">Continue</span>.
+        </p>
+        <p className="mt-1">
+          You&apos;re granting calendar access only — no email, no files, no contacts.
+        </p>
+      </div>
     </form>
   );
 }

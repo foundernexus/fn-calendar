@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { getMembersWithConnectionStatus } from "@/db/queries";
 import { FindATimeForm } from "@/components/find-a-time-form";
 import { requireAdminSession } from "@/lib/auth/admin";
+import { OnboardingGuide } from "@/components/onboarding-guide";
+import { buildAdminSteps } from "@/lib/onboarding";
 
 // Authenticated (gated by proxy.ts) and reads live connection state — must
 // never be statically cached. Without this, Next tries to prerender it at
@@ -18,6 +20,7 @@ export default async function FindATimePage() {
 
   return (
     <div className="py-10">
+      <OnboardingGuide steps={buildAdminSteps({ people: members })} storageKey="admin" />
       <div>
         {/* Label only — the route stays /admin/find-a-time. "Schedule" also
             covers the second half of what this page does (booking the thing),

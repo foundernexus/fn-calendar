@@ -6,6 +6,8 @@ import {
   getSessionsForMember,
 } from "@/db/queries";
 import { AdvisorPanel } from "@/components/advisor-panel";
+import { OnboardingGuide } from "@/components/onboarding-guide";
+import { buildMemberSteps } from "@/lib/onboarding";
 
 // Reads a live session cookie + live connection state — must never be
 // statically cached, same reasoning as /me and /admin/find-a-time.
@@ -35,8 +37,17 @@ export default async function AdvisorPage() {
     getSessionsForMember(session.memberId),
   ]);
 
+  const steps = buildMemberSteps({
+    calendars: connectionState.calendars,
+    hasSavedAvailability: session.member.timezone !== null,
+    isAdvisor: true,
+  });
+
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
+      {/* Its own storage key: an advisor gets one extra step, and dismissing
+          the founder guide shouldn't hide it. */}
+      <OnboardingGuide steps={steps} storageKey="advisor" />
       <AdvisorPanel
         fullName={session.member.fullName}
         timezone={session.member.timezone}
