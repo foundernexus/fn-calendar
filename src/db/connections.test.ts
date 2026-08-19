@@ -13,11 +13,16 @@ function row(
   over: Partial<LatestConnectionRow> & { id: number; member_id: number }
 ): LatestConnectionRow {
   return {
-    nylas_grant_id: `grant-${over.id}`,
+    nylas_grant_id: null,
     provider: "google",
     grant_email: `cal${over.id}@example.com`,
-    nylas_client_id: "test-nylas-client-id",
+    nylas_client_id: null,
     connection_status: "connected",
+    // Present by default, since a connection without one is now the unusual
+    // case: it means a leftover row from the Nylas era.
+    refresh_token_encrypted: `encrypted-${over.id}`,
+    access_token_encrypted: null,
+    access_token_expires_at: null,
     connected_at: "2026-01-01T00:00:00.000Z",
     revoked_at: null,
     is_primary: false,

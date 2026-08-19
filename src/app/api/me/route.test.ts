@@ -16,13 +16,15 @@ import { getMemberConnectionState } from "@/db/queries";
 
 let harness: TestDb;
 
-const revokeNylasGrant = vi.fn(async () => ({}));
-vi.mock("@/lib/nylas", () => ({
-  revokeNylasGrant: () => revokeNylasGrant(),
-  buildHostedAuthUrl: () => "https://example.test/auth",
-  asCalendarProvider: (v: string) => (v === "microsoft" ? "microsoft" : "google"),
-  CALENDAR_PROVIDERS: ["google", "microsoft"],
-}));
+const revokeNylasGrant = vi.fn(async () => ({ revokedAtProvider: true }));
+vi.mock("@/lib/calendar", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/calendar")>("@/lib/calendar");
+  return {
+    ...actual,
+    revokeToken: () => revokeNylasGrant(),
+    buildAuthUrl: () => "https://example.test/auth",
+  };
+});
 
 beforeAll(async () => {
   harness = await createTestDb();
@@ -33,7 +35,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await harness.reset();
   vi.clearAllMocks();
-  revokeNylasGrant.mockResolvedValue({});
+  revokeNylasGrant.mockResolvedValue({ revokedAtProvider: true });
   vi.resetModules();
   await reinstallTestDb();
 });
@@ -271,7 +273,7 @@ describe("connection state", () => {
       memberId: member.id,
       grantEmail: "m@example.com",
       grantId: "g-old",
-      clientId: "retired-app",
+      refreshToken: null,
       connectedAt: new Date("2026-03-01T00:00:00Z"),
     });
     await seedConnection({
@@ -296,7 +298,7 @@ describe("connection state", () => {
       memberId: member.id,
       grantEmail: "m@example.com",
       grantId: "g-stale",
-      clientId: "retired-app",
+      refreshToken: null,
     });
 
     const state = await getMemberConnectionState(member.id);
@@ -320,7 +322,7 @@ describe("connection state", () => {
       memberId: member.id,
       grantEmail: "broken@example.com",
       grantId: "g-broken",
-      clientId: "retired-app",
+      refreshToken: null,
     });
 
     const state = await getMemberConnectionState(member.id);

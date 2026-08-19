@@ -2,10 +2,17 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { events, eventAttendees } from "@/db/schema";
+import { events, eventAttendees, calendarConnections } from "@/db/schema";
 import { getActiveConnections, groupConnectionsByMember, pickInviteConnection } from "@/db/queries";
 import { requireAdminSession } from "@/lib/auth/admin";
+// Nylas stays imported purely as the bridge for sessions booked before the
+// switch — see resolveEventTarget. It goes when the last of them has passed.
 import { cancelNylasEvent, rescheduleNylasEvent } from "@/lib/nylas";
+import {
+  moveSessionEvent,
+  cancelSessionEvent,
+  type EventConnection,
+} from "@/lib/calendar/events";
 import { computeIdempotencyKey } from "@/lib/idempotency";
 import { TIMEZONES } from "@/lib/time";
 
@@ -52,6 +59,45 @@ async function resolveOrganizerGrantId(event: {
     groupConnectionsByMember(rows).get(event.organizerMemberId) ?? []
   );
   return fallback?.nylas_grant_id ?? null;
+}
+
+type EventTarget =
+  | { kind: "direct"; connection: EventConnection; eventId: string }
+  | { kind: "nylas"; grantId: string; eventId: string };
+
+/** How to reach this event at the provider.
+ *
+ * The bridge across the switch away from Nylas. Sessions booked before it still
+ * carry a Nylas event id and can only be moved or cancelled through Nylas;
+ * sessions booked after carry a provider event id and the connection they were
+ * created on. Both stay fully manageable, so nothing booked during the
+ * changeover is stranded in people's calendars with no way to call it off.
+ *
+ * Direct is checked first: an event could in principle carry both, and the
+ * newer path is the one we want. Returns null when neither can be reached, so
+ * callers refuse rather than reporting a cancellation that didn't happen. */
+async function resolveEventTarget(event: {
+  providerEventId: string | null;
+  organizerConnectionId: number | null;
+  nylasEventId: string | null;
+  organizerGrantId: string | null;
+  organizerMemberId: number;
+}): Promise<EventTarget | null> {
+  if (event.providerEventId && event.organizerConnectionId) {
+    const [connection] = await db
+      .select()
+      .from(calendarConnections)
+      .where(eq(calendarConnections.id, event.organizerConnectionId))
+      .limit(1);
+    if (connection?.refreshTokenEncrypted) {
+      return { kind: "direct", connection, eventId: event.providerEventId };
+    }
+  }
+  if (event.nylasEventId) {
+    const grantId = await resolveOrganizerGrantId(event);
+    if (grantId) return { kind: "nylas", grantId, eventId: event.nylasEventId };
+  }
+  return null;
 }
 
 /** Moves a booked session to a new time, keeping the same event and the same
@@ -115,8 +161,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     );
   }
 
-  const organizerGrantId = await resolveOrganizerGrantId(event);
-  if (!organizerGrantId) {
+  const target = await resolveEventTarget(event);
+  if (!target) {
     return NextResponse.json(
       {
         error:
@@ -156,32 +202,30 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const endsAtUnix = body.startsAtUnix + body.durationMinutes * 60;
 
-  // nylasEventId became nullable when the switch to talking to Google and
-  // Microsoft directly began. Until the cutover this route still speaks Nylas,
-  // so an event without one cannot be moved here — and saying so beats moving
-  // nothing while reporting success.
-  if (!event.nylasEventId) {
-    return NextResponse.json(
-      {
-        error:
-          "That session was booked through a calendar connection that's no longer available. Cancel it and book it again.",
-      },
-      { status: 409 }
-    );
-  }
-
   try {
-    await rescheduleNylasEvent({
-      organizerGrantId,
-      nylasEventId: event.nylasEventId,
-      startTime: body.startsAtUnix,
-      endTime: endsAtUnix,
-      timezone: body.timezone,
-    });
+    if (target.kind === "direct") {
+      await moveSessionEvent({
+        connection: target.connection,
+        providerEventId: target.eventId,
+        startTime: body.startsAtUnix,
+        endTime: endsAtUnix,
+        timezone: body.timezone,
+      });
+    } else {
+      // Booked before the switch — still reachable only through Nylas.
+      await rescheduleNylasEvent({
+        organizerGrantId: target.grantId,
+        nylasEventId: target.eventId,
+        startTime: body.startsAtUnix,
+        endTime: endsAtUnix,
+        timezone: body.timezone,
+      });
+    }
   } catch (err) {
-    console.error("[admin/events/:id] Nylas reschedule failed", {
+    console.error("[admin/events/:id] Reschedule failed", {
       eventId,
-      nylasEventId: event.nylasEventId,
+      via: target.kind,
+      providerEventId: target.eventId,
       err,
     });
     return NextResponse.json(
@@ -265,12 +309,12 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     return NextResponse.json({ event, alreadyCancelled: true });
   }
 
-  // Deleting from the provider requires the grant the event was created on.
-  // If the lead has since disconnected we genuinely cannot remove it from
-  // anyone's calendar, and saying so is better than marking it cancelled here
-  // while it quietly stays in everyone's calendar.
-  const organizerGrantId = await resolveOrganizerGrantId(event);
-  if (!organizerGrantId) {
+  // Removing it from everyone's calendar requires whichever connection the
+  // event was created on. If that's gone we genuinely cannot withdraw the
+  // invites, and saying so is better than marking it cancelled here while it
+  // quietly stays in everyone's calendar.
+  const target = await resolveEventTarget(event);
+  if (!target) {
     return NextResponse.json(
       {
         error:
@@ -280,28 +324,18 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     );
   }
 
-  // Same nullable-column guard as the reschedule path above. Cancelling is the
-  // more dangerous one to fudge: marking our row cancelled while the invite
-  // stays in everyone's calendar is worse than refusing.
-  if (!event.nylasEventId) {
-    return NextResponse.json(
-      {
-        error:
-          "That session was booked through a calendar connection that's no longer available, so it can't be cancelled automatically. Remove it from the calendar directly.",
-      },
-      { status: 409 }
-    );
-  }
-
   try {
-    await cancelNylasEvent({
-      organizerGrantId,
-      nylasEventId: event.nylasEventId,
-    });
+    if (target.kind === "direct") {
+      await cancelSessionEvent({ connection: target.connection, providerEventId: target.eventId });
+    } else {
+      // Booked before the switch — still reachable only through Nylas.
+      await cancelNylasEvent({ organizerGrantId: target.grantId, nylasEventId: target.eventId });
+    }
   } catch (err) {
-    console.error("[admin/events/:id] Nylas cancellation failed", {
+    console.error("[admin/events/:id] Cancellation failed", {
       eventId,
-      nylasEventId: event.nylasEventId,
+      via: target.kind,
+      providerEventId: target.eventId,
       err,
     });
     return NextResponse.json(

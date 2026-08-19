@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import { db } from "@/db";
 import { members, calendarConnections, events, eventAttendees } from "@/db/schema";
+import { encryptToken } from "@/lib/calendar/crypto";
 import {
   signValue,
   TOKEN_PURPOSE,
@@ -109,7 +110,12 @@ export async function seedConnection(over: {
   status?: "connected" | "revoked";
   isPrimary?: boolean;
   connectedAt?: Date;
+  /** Pass null for a leftover row from the Nylas era — no refresh token, so
+   * isConnectionUsable rejects it and the member reads as "needs reconnect".
+   * Defaults to present, because that is now the normal case. */
+  refreshToken?: string | null;
 }) {
+  const refreshToken = over.refreshToken === undefined ? "seeded-refresh-token" : over.refreshToken;
   const [row] = await db
     .insert(calendarConnections)
     .values({
@@ -117,9 +123,10 @@ export async function seedConnection(over: {
       nylasGrantId: over.grantId ?? `grant-${over.grantEmail}`,
       provider: over.provider ?? "google",
       grantEmail: over.grantEmail,
-      // Defaults to the CURRENT app, so a seeded connection is usable unless a
-      // test deliberately says otherwise.
       nylasClientId: over.clientId === undefined ? TEST_CLIENT_ID : over.clientId,
+      // Encrypted for real rather than stubbed, so anything that decrypts it
+      // exercises the same path production does.
+      refreshTokenEncrypted: refreshToken === null ? null : encryptToken(refreshToken),
       connectionStatus: over.status ?? "connected",
       isPrimary: over.isPrimary ?? false,
       ...(over.connectedAt ? { connectedAt: over.connectedAt } : {}),

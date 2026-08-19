@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getMemberByEmail } from "@/db/queries";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
 import { hasAdminAccess } from "@/lib/auth/admin";
-import { buildHostedAuthUrl, CALENDAR_PROVIDERS } from "@/lib/nylas";
+import { buildAuthUrl, CALENDAR_PROVIDERS } from "@/lib/calendar";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
       env.SESSION_SECRET,
       STATE_TTL_SECONDS
     );
-    const url = buildHostedAuthUrl({
+    const url = buildAuthUrl({
       loginHint: normalizeEmail(member.email),
       state,
       provider: parsed.data.provider,
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
     env.SESSION_SECRET,
     STATE_TTL_SECONDS
   );
-  const url = buildHostedAuthUrl({
+  const url = buildAuthUrl({
     loginHint: normalizeEmail(member.email),
     state,
     provider: parsed.data.provider,

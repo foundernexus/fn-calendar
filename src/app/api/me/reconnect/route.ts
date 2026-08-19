@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireMemberSession } from "@/lib/auth/member";
 import { getLatestConnections, pickInviteConnection } from "@/db/queries";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
-import { asCalendarProvider, buildHostedAuthUrl } from "@/lib/nylas";
+import { asCalendarProvider, buildAuthUrl } from "@/lib/calendar";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 
@@ -33,7 +33,7 @@ export async function POST() {
   // taking the first would pick whichever address sorts alphabetically first
   // and could send someone with both Google and Microsoft to the wrong one.
   const existing = pickInviteConnection(await getLatestConnections([session.memberId]));
-  const url = buildHostedAuthUrl({
+  const url = buildAuthUrl({
     // The address of the calendar being REPAIRED, not the registered one.
     // Those differ whenever someone connected a personal account against a
     // work address, and hinting the registered address sent them to a

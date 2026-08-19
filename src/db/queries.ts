@@ -230,11 +230,19 @@ export async function getSessionsForMember(memberId: number): Promise<MemberSess
 export type LatestConnectionRow = {
   id: number;
   member_id: number;
-  nylas_grant_id: string;
+  nylas_grant_id: string | null;
   provider: string;
   grant_email: string;
   nylas_client_id: string | null;
   connection_status: "connected" | "revoked";
+  /** Encrypted OAuth credentials, since we talk to Google and Microsoft
+   * directly. Null on rows created through Nylas, which is what makes those
+   * rows read as needing a reconnect. */
+  refresh_token_encrypted: string | null;
+  access_token_encrypted: string | null;
+  /** A STRING in practice, like connected_at below — same raw-SQL reason. Go
+   * through connectionCredentials rather than using it directly. */
+  access_token_expires_at: string | Date | null;
   /** A STRING in practice, despite the name. These rows come from
    * `db.execute()` with raw SQL, which hands back whatever the neon HTTP
    * driver produced without drizzle's column parsing — timestamps arrive as
@@ -254,15 +262,44 @@ export function connectedAtMs(row: LatestConnectionRow) {
     : new Date(row.connected_at).getTime();
 }
 
-/** A connection is only actually usable if it's marked connected AND belongs
- * to the Nylas app we're currently configured against — grants don't carry
- * over between Nylas apps (Sandbox vs Production, or after rotating to a new
- * app entirely), so a row with a stale nylas_client_id will fail at the
- * Nylas API regardless of what connection_status says. Rows from before this
- * column existed (nylas_client_id is null) are treated as stale rather than
- * assumed valid — we have no record of which app actually created them. */
+/** A connection is only usable if it's marked connected AND we hold a refresh
+ * token for it.
+ *
+ * That second condition is what carries the switch away from Nylas. Rows
+ * created through Nylas have no refresh token and never will, so they stop
+ * being usable the moment this ships — which is correct, because nothing can
+ * be read from them any more. They aren't hidden: getMemberConnectionState
+ * still lists them, marked "needs reconnect", so the member sees a button
+ * rather than an unexplained absence.
+ *
+ * This replaced a check against the current Nylas client id, which existed for
+ * the same reason in the Nylas world: a row can look connected and still be
+ * unusable, and connection_status alone was never enough to tell. */
 export function isConnectionUsable(row: LatestConnectionRow) {
-  return row.connection_status === "connected" && row.nylas_client_id === env.NYLAS_CLIENT_ID;
+  return row.connection_status === "connected" && row.refresh_token_encrypted !== null;
+}
+
+/** The credentials shape the calendar modules expect, converted out of the raw
+ * SQL row.
+ *
+ * The date conversion is the point: these rows come from db.execute(), which
+ * hands back whatever the neon HTTP driver produced, and timestamps arrive as
+ * ISO strings rather than Dates. Passing one straight through would make the
+ * token manager compare a string to a number and refresh on every single call
+ * — or worse, never. The same trap already crashed /me once via connected_at. */
+export function connectionCredentials(row: LatestConnectionRow) {
+  return {
+    id: row.id,
+    provider: row.provider,
+    grantEmail: row.grant_email,
+    refreshTokenEncrypted: row.refresh_token_encrypted,
+    accessTokenEncrypted: row.access_token_encrypted,
+    accessTokenExpiresAt: row.access_token_expires_at
+      ? row.access_token_expires_at instanceof Date
+        ? row.access_token_expires_at
+        : new Date(row.access_token_expires_at)
+      : null,
+  };
 }
 
 /**
@@ -294,12 +331,11 @@ export async function getLatestConnections(memberIds?: number[]) {
   // calendar. Deduping by member_id alone silently hid every calendar but the
   // most recent.
   //
-  // Rows for the CURRENT Nylas app win before recency does. One address can
-  // accumulate rows across app changes (Sandbox, pre-column NULLs, production),
-  // and picking purely by newest would surface a stale one and report a member
-  // as disconnected while a perfectly usable row sat right behind it. COALESCE
-  // because `nylas_client_id = ...` is NULL for the pre-column rows, and NULL
-  // sorts first under DESC — which is exactly backwards.
+  // Rows we hold a refresh token for win before recency does. One address
+  // accumulates rows over time — through Nylas, then directly — and picking
+  // purely by newest could surface an unusable Nylas row and report a member as
+  // disconnected while a perfectly good one sat right behind it. This replaced
+  // the same rule expressed against the Nylas client id, for the same reason.
   //
   // Deliberately does NOT prefer connected over revoked: for one address the
   // newest row is the truth about that calendar, and reaching past a revoked
@@ -312,7 +348,7 @@ export async function getLatestConnections(memberIds?: number[]) {
     ORDER BY
       member_id,
       grant_email,
-      COALESCE(nylas_client_id = ${env.NYLAS_CLIENT_ID}, false) DESC,
+      (refresh_token_encrypted IS NOT NULL) DESC,
       connected_at DESC,
       id DESC
   `);

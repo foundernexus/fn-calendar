@@ -15,13 +15,13 @@ import {
 
 let harness: TestDb;
 
-type AvailArgs = { participantEmails: string[] };
+type AvailArgs = { connections: { grantEmail: string }[] };
 
 const getCollectiveAvailability = vi.fn(
   async (_a: AvailArgs) => [] as { emails: string[]; startTime: number; endTime: number }[]
 );
 
-vi.mock("@/lib/nylas", () => ({
+vi.mock("@/lib/calendar/availability", () => ({
   getCollectiveAvailability: (a: AvailArgs) => getCollectiveAvailability(a),
 }));
 
@@ -93,7 +93,9 @@ describe("who gets checked", () => {
 
     await search({ organizerMemberId: lead.id, guestMemberIds: [founder.id] });
 
-    const sent = getCollectiveAvailability.mock.calls[0]![0].participantEmails;
+    // Every calendar, not just the one that receives invites — a founder with a
+    // work and a private calendar is only free when both are.
+    const sent = getCollectiveAvailability.mock.calls[0]![0].connections.map((c) => c.grantEmail);
     expect(sent).toContain("founder@example.com");
     expect(sent).toContain("founder.private@gmail.com");
     expect(sent).toContain("lead@foundernexus.com");
@@ -136,7 +138,7 @@ describe("who gets checked", () => {
       memberId: lead.id,
       grantEmail: lead.email,
       grantId: "g-stale",
-      clientId: "retired-app",
+      refreshToken: null,
     });
 
     const { body } = await search({ organizerMemberId: lead.id, guestMemberIds: [founder.id] });

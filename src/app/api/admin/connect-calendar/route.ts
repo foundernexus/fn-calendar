@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getMemberByEmail, getLatestConnections, pickInviteConnection } from "@/db/queries";
 import { requireAdminSession } from "@/lib/auth/admin";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
-import { asCalendarProvider, buildHostedAuthUrl } from "@/lib/nylas";
+import { asCalendarProvider, buildAuthUrl } from "@/lib/calendar";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 
@@ -43,7 +43,7 @@ export async function POST() {
   // Same reasoning as /api/me/reconnect: one row per calendar now, so the
   // first is not necessarily the one they actually use.
   const existing = pickInviteConnection(await getLatestConnections([member.id]));
-  const url = buildHostedAuthUrl({
+  const url = buildAuthUrl({
     // Same as /api/me/reconnect: hint the calendar being repaired, not the
     // registered address, or a mismatch between the two adds a second
     // calendar instead of fixing the first.

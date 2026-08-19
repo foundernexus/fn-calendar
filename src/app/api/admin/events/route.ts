@@ -7,10 +7,12 @@ import {
   getActiveConnections,
   groupConnectionsByMember,
   pickInviteConnection,
+  connectionCredentials,
   getMemberById,
   getMembersByIds,
 } from "@/db/queries";
-import { createNylasEvent, getCollectiveAvailability } from "@/lib/nylas";
+import { createSessionEvent } from "@/lib/calendar/events";
+import { getCollectiveAvailability } from "@/lib/calendar/availability";
 import { computeIdempotencyKey } from "@/lib/idempotency";
 import { TIMEZONES, zonedDateTimeParts, AVAILABILITY_INTERVAL_MINUTES } from "@/lib/time";
 import { requireAdminSession } from "@/lib/auth/admin";
@@ -179,14 +181,16 @@ export async function POST(request: Request) {
     );
   }
 
-  // Every calendar of everyone on this session, deduped — the same set the
-  // search checked, and what the re-check below needs.
-  const participantEmails = [
-    ...new Set(
+  // Every calendar of everyone on this session, deduped by address — the same
+  // set the search checked, and what the re-check below needs. Deduped by
+  // address rather than row id so two members who share an account aren't
+  // queried twice.
+  const participantConnections = [
+    ...new Map(
       [body.organizerMemberId, ...(advisorMember ? [advisorMember.id] : []), ...guestMemberIds]
         .flatMap((id) => connectionsByMemberId.get(id) ?? [])
-        .map((c) => c.grant_email)
-    ),
+        .map((c) => [c.grant_email, connectionCredentials(c)] as const)
+    ).values(),
   ];
 
   const missingIds = guestMemberIds.filter((id) => !guestMembers.some((m) => m.id === id));
@@ -210,10 +214,10 @@ export async function POST(request: Request) {
   // second thing that can go wrong.
   const localStart = zonedDateTimeParts(body.startsAtUnix, body.timezone);
   const localEnd = zonedDateTimeParts(endsAtUnix, body.timezone);
-  if (participantEmails.length > 0 && localStart.date === localEnd.date) {
+  if (participantConnections.length > 0 && localStart.date === localEnd.date) {
     try {
       const stillFree = await getCollectiveAvailability({
-        participantEmails,
+        connections: participantConnections,
         startTime: body.startsAtUnix,
         endTime: endsAtUnix,
         durationMinutes: body.durationMinutes,
@@ -243,10 +247,10 @@ export async function POST(request: Request) {
     }
   }
 
-  let nylasEvent;
+  let providerEvent;
   try {
-    const result = await createNylasEvent({
-      organizerGrantId: organizerConnection.nylas_grant_id,
+    providerEvent = await createSessionEvent({
+      connection: connectionCredentials(organizerConnection),
       title: body.title,
       description: body.description,
       meetingUrl: body.meetingUrl || undefined,
@@ -271,16 +275,22 @@ export async function POST(request: Request) {
         ...guestMembers.map((m) => ({ email: resolvedEmail(m.id, m.email), name: m.fullName })),
       ],
     });
-    nylasEvent = result.data;
   } catch (err) {
-    console.error("[admin/events] Nylas event creation failed", { idempotencyKey, err });
+    // The provider's own message is carried on the error — see GoogleApiError
+    // and MicrosoftApiError. Losing it here is what turned a configuration
+    // fault into a morning of guessing once already.
+    console.error("[admin/events] Calendar event creation failed", {
+      idempotencyKey,
+      organizerConnectionId: organizerConnection.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return NextResponse.json(
-      { error: "Couldn't create the event in Nylas. Please try again." },
+      { error: "Couldn't create the event in the calendar. Please try again." },
       { status: 502 }
     );
   }
 
-  // From here on, a REAL event with REAL invites already exists in Nylas —
+  // From here on, a REAL event with REAL invites already exists —
   // every failure path below must say so, not imply nothing happened.
   //
   // The attendee rows go in the SAME transaction as the event, via db.batch().
@@ -329,13 +339,13 @@ export async function POST(request: Request) {
         timezone: body.timezone,
         meetingUrl: body.meetingUrl || null,
         organizerMemberId: body.organizerMemberId,
-        nylasEventId: nylasEvent.id,
-        // Recorded, not re-derived later: Nylas resolves an event id within a
-        // grant, and the organizer may hold several calendars or change which
-        // one receives invites. Cancelling or moving has to go back to the
-        // grant this was actually created on, or it 404s at the provider while
-        // the meeting sits in everyone's diary.
-        organizerGrantId: organizerConnection.nylas_grant_id,
+        providerEventId: providerEvent.eventId,
+        // Recorded, not re-derived later: an event id only means anything
+        // against the calendar it was created on, and the organiser may hold
+        // several calendars or change which one receives invites. Cancelling or
+        // moving has to go back to this exact connection, or it 404s at the
+        // provider while the meeting sits in everyone's diary.
+        organizerConnectionId: organizerConnection.id,
         idempotencyKey,
       })
         .returning(),
@@ -355,12 +365,12 @@ export async function POST(request: Request) {
     if (isUniqueViolation(err)) {
       // A concurrent request beat us to the insert — this IS the actual
       // correctness guarantee (the pre-check above is only an optimization).
-      // Our own Nylas call above is now the "losing" duplicate: it created a
+      // Our own calendar call above is now the "losing" duplicate: it created a
       // real event that no DB row will ever reference. Logged so it's at
       // least traceable, not silently lost.
       console.error(
-        "[admin/events] Lost an idempotency race — orphaned Nylas event, returning the winning row",
-        { idempotencyKey, orphanedNylasEventId: nylasEvent.id }
+        "[admin/events] Lost an idempotency race — orphaned calendar event, returning the winning row",
+        { idempotencyKey, orphanedProviderEventId: providerEvent.eventId }
       );
       try {
         const [winner] = await db
@@ -378,9 +388,9 @@ export async function POST(request: Request) {
         });
       }
     }
-    console.error("[admin/events] DB insert failed after a real Nylas event was created", {
+    console.error("[admin/events] DB insert failed after a real calendar event was created", {
       idempotencyKey,
-      nylasEventId: nylasEvent.id,
+      providerEventId: providerEvent.eventId,
       err,
     });
     return NextResponse.json(

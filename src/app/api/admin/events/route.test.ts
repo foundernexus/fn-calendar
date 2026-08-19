@@ -24,12 +24,14 @@ let harness: TestDb;
 type CreateArgs = { participants: { email: string; name?: string }[] };
 
 const nylas = {
-  createNylasEvent: vi.fn(async (_args: CreateArgs) => ({ data: { id: "nylas-event-1" } })),
+  createNylasEvent: vi.fn(async (_args: CreateArgs) => ({ eventId: "provider-event-1" })),
   getCollectiveAvailability: vi.fn(async () => [] as { startTime: number; endTime: number }[]),
 };
 
-vi.mock("@/lib/nylas", () => ({
-  createNylasEvent: (args: CreateArgs) => nylas.createNylasEvent(args),
+vi.mock("@/lib/calendar/events", () => ({
+  createSessionEvent: (args: CreateArgs) => nylas.createNylasEvent(args),
+}));
+vi.mock("@/lib/calendar/availability", () => ({
   getCollectiveAvailability: () => nylas.getCollectiveAvailability(),
 }));
 
@@ -47,7 +49,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   // Default: the slot is still free. Individual tests override.
   nylas.getCollectiveAvailability.mockResolvedValue([{ startTime: SLOT, endTime: SLOT + 3600 }]);
-  nylas.createNylasEvent.mockResolvedValue({ data: { id: "nylas-event-1" } });
+  nylas.createNylasEvent.mockResolvedValue({ eventId: "provider-event-1" });
   vi.resetModules();
   mockCookies(await adminCookie());
   await reinstallTestDb();
@@ -111,7 +113,11 @@ describe("writing the session", () => {
     // rescheduled, because the idempotency key is rebuilt from this list.
     expect(attendees).toHaveLength(3);
     expect(attendees.find((a) => a.memberId === cast.advisor.id)!.role).toBe("advisor");
-    expect(event.organizerGrantId).toBe(`g-${cast.lead.id}`);
+    // The connection it was created on is pinned, not re-derived later: an
+    // event id only means anything against the calendar that issued it, so
+    // cancelling has to go back to this exact row.
+    expect(event.providerEventId).toBe("provider-event-1");
+    expect(event.organizerConnectionId).not.toBeNull();
   });
 
   it("writes nothing at all when the attendee insert fails", async () => {
@@ -247,7 +253,7 @@ describe("guards", () => {
       memberId: lead.id,
       grantEmail: lead.email,
       grantId: "g-stale",
-      clientId: "some-old-app",
+      refreshToken: null,
     });
 
     const res = await post({

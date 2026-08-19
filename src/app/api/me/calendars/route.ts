@@ -6,12 +6,8 @@ import { calendarConnections } from "@/db/schema";
 import { requireMemberSession } from "@/lib/auth/member";
 import { getLatestConnections, groupConnectionsByMember, isConnectionUsable } from "@/db/queries";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
-import {
-  buildHostedAuthUrl,
-  revokeNylasGrant,
-  asCalendarProvider,
-  CALENDAR_PROVIDERS,
-} from "@/lib/nylas";
+import { buildAuthUrl, revokeToken, asCalendarProvider, CALENDAR_PROVIDERS } from "@/lib/calendar";
+import { decryptToken } from "@/lib/calendar/crypto";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 
@@ -90,7 +86,7 @@ export async function POST(request: Request) {
   );
 
   return NextResponse.json({
-    url: buildHostedAuthUrl({ loginHint, state, provider }),
+    url: buildAuthUrl({ loginHint, state, provider }),
   });
 }
 
@@ -207,16 +203,25 @@ export async function DELETE(request: Request) {
     );
   }
 
+  // A row with no refresh token is a leftover from the Nylas era — there is
+  // nothing of ours to hand back, so removing it is purely local.
   let grantRevokeFailed = false;
-  try {
-    await revokeNylasGrant(target.nylas_grant_id);
-  } catch (err) {
-    grantRevokeFailed = true;
-    console.error("[api/me/calendars] Grant revoke failed", {
-      memberId: session.memberId,
-      grantId: target.nylas_grant_id,
-      err,
-    });
+  let providerRevocationIncomplete = false;
+  if (target.refresh_token_encrypted) {
+    try {
+      const result = await revokeToken({
+        provider: asCalendarProvider(target.provider),
+        refreshToken: decryptToken(target.refresh_token_encrypted),
+      });
+      providerRevocationIncomplete = !result.revokedAtProvider;
+    } catch (err) {
+      grantRevokeFailed = true;
+      console.error("[api/me/calendars] Token revoke failed", {
+        memberId: session.memberId,
+        connectionId: target.id,
+        err,
+      });
+    }
   }
 
   try {

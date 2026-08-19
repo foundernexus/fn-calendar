@@ -5,11 +5,14 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProviderIcon } from "@/components/provider-icon";
-import type { CalendarProvider } from "@/lib/nylas";
+import type { CalendarProvider } from "@/lib/calendar";
 
-/** Rendered as our own buttons rather than letting Nylas's hosted page show a
- * picker — that page carries the Nylas logo and can't be rebranded without an
- * annual Nylas contract. Naming the provider in the auth URL skips it. */
+/** Our own buttons, so the member picks the provider before leaving the page.
+ *
+ * Originally this existed to skip Nylas's hosted picker, which carried their
+ * logo. That page is gone entirely now, but the two buttons stay: the choice
+ * has to be made somewhere, and making it here means the next screen someone
+ * sees is their own provider's, with nothing in between. */
 const PROVIDERS: { id: CalendarProvider; label: string }[] = [
   { id: "google", label: "Continue with Google" },
   { id: "microsoft", label: "Continue with Microsoft" },
@@ -41,8 +44,8 @@ export function ConnectForm({ initialEmail }: { initialEmail?: string }) {
         return;
       }
       // An admin email gets `redirect` (straight to the admin dashboard, no
-      // calendar connect needed); anyone else gets `url` (the Nylas hosted
-      // auth flow, unchanged from before).
+      // calendar connect needed); anyone else gets `url` — their provider's own
+      // OAuth screen.
       window.location.href = data.redirect ?? data.url;
     } catch {
       toast.error("Something went wrong. Please try again.");
@@ -91,21 +94,22 @@ export function ConnectForm({ initialEmail }: { initialEmail?: string }) {
         ))}
       </div>
 
-      {/* Google names the OAuth redirect host — api.us.nylas.com — wherever our
-          own branding would otherwise appear, because that branding only shows
-          once Google has verified the app. So members are told to continue to
-          "nylas.com", by a screen that also warns the app is unverified, and
-          the honest reaction to that is to stop.
-          Warned here rather than in the invite message: the invite is read once
-          and days earlier, this is read in the second it matters. Google-only
-          on purpose — Microsoft consent shows our own Azure app registration
-          and says nothing about Nylas. */}
+      {/* Google still warns that the app isn't verified, and the honest
+          reaction to that screen is to stop. Warned here rather than in the
+          invite message: the invite is read once and days earlier, this is read
+          in the second it matters.
+          The note used to explain "nylas.com" as well. That name is gone now
+          that the app talks to Google directly — the screen shows our own
+          domain — so mentioning it would only introduce a company nobody has
+          heard of. What's left is the unverified warning, which only Google's
+          review removes. */}
       <div className="rounded-lg border border-border bg-secondary/40 p-3 text-xs leading-relaxed text-muted-foreground">
-        <p className="font-medium text-foreground">Google will mention “nylas.com”. That’s us.</p>
+        <p className="font-medium text-foreground">
+          Google will say this app isn&apos;t verified yet.
+        </p>
         <p className="mt-1">
-          Nylas is the calendar service behind this scheduler — like Stripe for payments. Google
-          shows their name, and a note that we&apos;re not verified yet, until our review with
-          Google finishes. Choose <span className="text-foreground">Advanced</span> →{" "}
+          That&apos;s expected — our review with Google is still in progress. Choose{" "}
+          <span className="text-foreground">Advanced</span> →{" "}
           <span className="text-foreground">Continue</span>.
         </p>
         <p className="mt-1">

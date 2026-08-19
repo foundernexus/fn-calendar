@@ -7,7 +7,8 @@ import {
   getMemberAvailabilityForMembers,
   getBookedEventsOverlapping,
 } from "@/db/queries";
-import { getCollectiveAvailability } from "@/lib/nylas";
+import { getCollectiveAvailability } from "@/lib/calendar/availability";
+import { connectionCredentials } from "@/db/queries";
 import {
   zonedDateTimeToUnix,
   zonedDateTimeParts,
@@ -171,17 +172,17 @@ export async function POST(request: Request) {
   // people" because one of them holds two accounts would be nonsense.
   const checkedCount = allSelectedIds.filter(isConnected).length;
 
-  // Every calendar of every selected member, deduped by address. Nylas's
-  // collective availability requires ALL participants to be free, which is
-  // exactly the rule wanted here: a member with a personal and a work calendar
-  // is only offered when both are clear. Deduping also covers two members who
-  // happen to share an account, which would otherwise appear twice.
-  const participantEmails = [
-    ...new Set(
+  // Every calendar of every selected member, deduped by address. All of them
+  // must be free for a slot to be offered, which is exactly the rule wanted
+  // here: a member with a personal and a work calendar is only offered when
+  // both are clear. Deduping also covers two members who happen to share an
+  // account, which would otherwise be queried twice.
+  const participantConnections = [
+    ...new Map(
       allSelectedIds
         .flatMap((id) => connectionsByMemberId.get(id) ?? [])
-        .map((c) => c.grant_email)
-    ),
+        .map((c) => [c.grant_email, connectionCredentials(c)] as const)
+    ).values(),
   ];
 
   // Nylas requires start_time/end_time to be exact multiples of 5 minutes.
@@ -199,7 +200,7 @@ export async function POST(request: Request) {
   try {
     [slots, bookedEvents] = await Promise.all([
       getCollectiveAvailability({
-        participantEmails,
+        connections: participantConnections,
         startTime,
         endTime,
         durationMinutes: body.durationMinutes,
@@ -217,14 +218,22 @@ export async function POST(request: Request) {
       getBookedEventsOverlapping(allSelectedIds, new Date(startTime * 1000), new Date(endTime * 1000)),
     ]);
   } catch (err) {
-    console.error("[admin/availability] Nylas availability call failed", {
+    console.error("[admin/availability] Availability lookup failed", {
       startTime,
       endTime,
-      participantCount: participantEmails.length,
-      err,
+      participantCount: participantConnections.length,
+      error: err instanceof Error ? err.message : String(err),
     });
     return NextResponse.json(
-      { error: "Couldn't reach Nylas to check availability. Please try again." },
+      {
+        // Names the calendar that failed when we know it — an admin can then
+        // chase the right person instead of retrying blindly. The error message
+        // already carries the address (see AvailabilityUnavailableError).
+        error:
+          err instanceof Error && err.name === "AvailabilityUnavailableError"
+            ? `${err.message}. They may need to reconnect it.`
+            : "Couldn't check calendars right now. Please try again.",
+      },
       { status: 502 }
     );
   }
