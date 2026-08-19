@@ -377,6 +377,11 @@ export type MemberCalendar = {
   /** True for the one that receives sessions. Exactly one usable calendar
    * carries this whenever the member has any. */
   isInviteTarget: boolean;
+  /** Connected once, but under a Nylas app we no longer hold credentials for,
+   * so nothing can be read from it. Listed rather than hidden: a calendar that
+   * vanishes silently leaves the member believing it's still being checked,
+   * with no way to repair it. */
+  needsReconnect: boolean;
 };
 
 export async function getMemberConnectionState(memberId: number): Promise<{
@@ -392,15 +397,24 @@ export async function getMemberConnectionState(memberId: number): Promise<{
   const usable = rows.filter(isConnectionUsable);
   const invite = pickInviteConnection(usable);
 
+  // Broken calendars are listed alongside working ones. Filtering them out
+  // meant a member with one good and one stale calendar saw a tidy list, no
+  // warning, and no Reconnect button — that only appeared once NOTHING worked.
+  // They'd have gone on believing both were being checked.
+  const listed = rows.filter(
+    (r) => isConnectionUsable(r) || r.connection_status === "connected"
+  );
+
   return {
     connection: invite ? { provider: invite.provider, grantEmail: invite.grant_email } : null,
-    calendars: [...usable]
+    calendars: [...listed]
       .sort((a, b) => connectedAtMs(a) - connectedAtMs(b) || a.id - b.id)
       .map((r) => ({
         id: r.id,
         provider: r.provider,
         grantEmail: r.grant_email,
         isInviteTarget: r.id === invite?.id,
+        needsReconnect: !isConnectionUsable(r),
       })),
     // Same reasoning as getMembersWithConnectionStatus: only when NOTHING
     // works, not merely because an old row is lying around.

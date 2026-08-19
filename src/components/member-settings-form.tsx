@@ -209,7 +209,15 @@ export function MemberSettingsForm({
         toast.error(data.error ?? "Something went wrong. Please try again.");
         return;
       }
-      toast.success("Saved.");
+      // Saving with every day off is a valid choice, and also the most
+      // consequential one on this page: it removes you from every search with
+      // nothing on screen to say so. A plain "Saved." let people make
+      // themselves invisible and wonder for weeks why nobody booked them.
+      toast.success(
+        availability.length === 0
+          ? "Saved — every day is off, so you won't be offered for any session until you turn one back on."
+          : "Saved."
+      );
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
@@ -337,6 +345,15 @@ export function MemberSettingsForm({
           The hours you&apos;re open to sessions. Your calendar is still checked on top of this —
           these are the outer bounds, not a promise you&apos;re free.
         </p>
+        {/* Shown before saving, not only after. Every day off is the one
+            setting here that makes someone disappear from every search, and it
+            looks identical to a form nobody has filled in yet. */}
+        {DISPLAY_ORDER.every((d) => !days[d].enabled) && (
+          <p className="mt-3 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+            Every day is switched off. Save this and you won&apos;t be offered for any session at
+            all — turn a day on if that isn&apos;t what you meant.
+          </p>
+        )}
         <div className="mt-4 divide-y divide-border">
             {DISPLAY_ORDER.map((day) => {
               const d = days[day];

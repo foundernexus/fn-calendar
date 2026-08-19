@@ -4,24 +4,34 @@ import { z } from "zod";
 import { db } from "@/db";
 import { calendarConnections } from "@/db/schema";
 import { requireMemberSession } from "@/lib/auth/member";
-import { getActiveConnections, groupConnectionsByMember } from "@/db/queries";
+import { getLatestConnections, groupConnectionsByMember, isConnectionUsable } from "@/db/queries";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
-import { buildHostedAuthUrl, revokeNylasGrant, CALENDAR_PROVIDERS } from "@/lib/nylas";
+import {
+  buildHostedAuthUrl,
+  revokeNylasGrant,
+  asCalendarProvider,
+  CALENDAR_PROVIDERS,
+} from "@/lib/nylas";
+import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 
 const STATE_TTL_SECONDS = 60 * 10; // matches /api/connect/start
 
 const addSchema = z.object({
   provider: z.enum(CALENDAR_PROVIDERS).default("google"),
+  /** Repair this specific calendar instead of attaching a new one. */
+  connectionId: z.number().int().positive().optional(),
 });
 
 /** Starts connecting an ADDITIONAL calendar for the signed-in member.
  *
+ * Also repairs a specific one, when given its connectionId.
+ *
  * Two things separate this from /api/connect/start, and both matter:
  *
- * 1. No loginHint. The whole point is to reach a DIFFERENT account than the one
- *    already connected, and a hint would steer the provider's account picker
- *    straight back to the existing one.
+ * 1. No loginHint when ADDING. The point is to reach a DIFFERENT account than
+ *    the one already connected, and a hint would steer the account picker
+ *    straight back to it. Repairing is the opposite and hints that calendar.
  *
  * 2. The state token carries `addCalendar`. The callback normally insists the
  *    account signed into matches the member's registered address (or one
@@ -44,7 +54,33 @@ export async function POST(request: Request) {
     // Body is optional — an older client sending nothing gets google.
   }
   const parsed = addSchema.safeParse(json ?? {});
-  const provider = parsed.success ? parsed.data.provider : "google";
+  let provider: (typeof CALENDAR_PROVIDERS)[number] = parsed.success
+    ? parsed.data.provider
+    : "google";
+
+  // Repairing a specific calendar rather than adding one. The hint has to be
+  // THAT calendar's address: hinting anything else sends them to a different
+  // account, leaves the broken one broken, and the upsert quietly adds a
+  // third. Scoped to the caller's own rows so a guessed id can't be used to
+  // probe somebody else's.
+  let loginHint = "";
+  if (parsed.success && parsed.data.connectionId) {
+    const [target] = await db
+      .select()
+      .from(calendarConnections)
+      .where(
+        and(
+          eq(calendarConnections.id, parsed.data.connectionId),
+          eq(calendarConnections.memberId, session.memberId)
+        )
+      )
+      .limit(1);
+    if (!target) {
+      return NextResponse.json({ error: "That calendar isn't connected." }, { status: 404 });
+    }
+    loginHint = normalizeEmail(target.grantEmail);
+    provider = asCalendarProvider(target.provider);
+  }
 
   const state = await signValue(
     TOKEN_PURPOSE.connectState,
@@ -54,7 +90,7 @@ export async function POST(request: Request) {
   );
 
   return NextResponse.json({
-    url: buildHostedAuthUrl({ loginHint: "", state, provider }),
+    url: buildHostedAuthUrl({ loginHint, state, provider }),
   });
 }
 
@@ -146,14 +182,22 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Pick a calendar." }, { status: 400 });
   }
 
-  const usable = groupConnectionsByMember(await getActiveConnections([session.memberId])).get(
-    session.memberId
-  ) ?? [];
-  const target = usable.find((c) => c.id === parsed.data.connectionId);
+  // Searched among ALL of the member's rows, not just the working ones: broken
+  // calendars are now listed on /me, so they have a Remove button too, and
+  // looking only at usable rows made the one calendar most worth removing the
+  // one that 404'd.
+  const all =
+    groupConnectionsByMember(await getLatestConnections([session.memberId])).get(
+      session.memberId
+    ) ?? [];
+  const usable = all.filter(isConnectionUsable);
+  const target = all.find((c) => c.id === parsed.data.connectionId);
   if (!target) {
     return NextResponse.json({ error: "That calendar isn't connected." }, { status: 404 });
   }
-  if (usable.length === 1) {
+  // Only the last WORKING calendar is protected. Removing a broken one leaves
+  // nothing worse behind than it already was.
+  if (usable.length === 1 && isConnectionUsable(target)) {
     return NextResponse.json(
       {
         error:

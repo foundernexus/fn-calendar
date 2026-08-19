@@ -301,6 +301,34 @@ describe("connection state", () => {
 
     const state = await getMemberConnectionState(member.id);
     expect(state.needsReconnect).toBe(true);
-    expect(state.calendars).toHaveLength(0);
+    // Listed, not hidden. Filtering broken calendars out meant they vanished
+    // from /me with no warning and no way to repair them — the member went on
+    // believing that calendar was still being checked.
+    expect(state.calendars).toHaveLength(1);
+    expect(state.calendars[0].needsReconnect).toBe(true);
+    expect(state.connection).toBeNull();
+  });
+
+  it("flags only the broken one when a member has both", async () => {
+    const member = await seedMember({ email: "m@example.com" });
+    await seedConnection({
+      memberId: member.id,
+      grantEmail: "works@example.com",
+      grantId: "g-ok",
+    });
+    await seedConnection({
+      memberId: member.id,
+      grantEmail: "broken@example.com",
+      grantId: "g-broken",
+      clientId: "retired-app",
+    });
+
+    const state = await getMemberConnectionState(member.id);
+
+    // The whole point: one good, one broken, and the member can SEE which.
+    expect(state.needsReconnect).toBe(false);
+    expect(state.calendars).toHaveLength(2);
+    expect(state.calendars.filter((c) => c.needsReconnect)).toHaveLength(1);
+    expect(state.calendars.find((c) => c.needsReconnect)!.grantEmail).toBe("broken@example.com");
   });
 });

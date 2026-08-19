@@ -20,13 +20,14 @@ export function CalendarList({ calendars }: { calendars: MemberCalendar[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
 
-  async function connectAnother(provider: "google" | "microsoft") {
-    setBusy(`connect:${provider}`);
+  /** Adds a calendar, or repairs the one named by `connectionId`. */
+  async function connect(provider: "google" | "microsoft", connectionId?: number) {
+    setBusy(connectionId ? `fix:${connectionId}` : `connect:${provider}`);
     try {
       const res = await fetch("/api/me/calendars", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider }),
+        body: JSON.stringify({ provider, connectionId }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -105,21 +106,43 @@ export function CalendarList({ calendars }: { calendars: MemberCalendar[] }) {
               <ProviderIcon provider={c.provider} />
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                 {c.grantEmail}
+                {c.needsReconnect && (
+                  <span className="block text-xs text-destructive">
+                    Not being checked — sign in again to fix it
+                  </span>
+                )}
               </span>
 
-              {/* A radio, not a toggle: exactly one calendar receives sessions,
-                  and a set of toggles would suggest several could. */}
-              <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-                <input
-                  type="radio"
-                  name="invite-target"
-                  checked={c.isInviteTarget}
-                  onChange={() => setInviteTarget(c.id)}
+              {c.needsReconnect ? (
+                // A broken calendar gets its own repair, hinted at its own
+                // address. The page-level Reconnect only appeared once NOTHING
+                // worked, so somebody with one good and one broken calendar had
+                // no way to fix the broken one — and no sign it had stopped
+                // being checked at all.
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => connect(c.provider === "microsoft" ? "microsoft" : "google", c.id)}
                   disabled={busy !== null}
-                  className="size-3.5 accent-primary"
-                />
-                Add sessions here
-              </label>
+                >
+                  {busy === `fix:${c.id}` ? "Opening…" : "Reconnect"}
+                </Button>
+              ) : (
+                /* A radio, not a toggle: exactly one calendar receives sessions,
+                   and a set of toggles would suggest several could. */
+                <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="radio"
+                    name="invite-target"
+                    checked={c.isInviteTarget}
+                    onChange={() => setInviteTarget(c.id)}
+                    disabled={busy !== null}
+                    className="size-3.5 accent-primary"
+                  />
+                  Add sessions here
+                </label>
+              )}
 
               {calendars.length > 1 && (
                 <Button
@@ -144,7 +167,7 @@ export function CalendarList({ calendars }: { calendars: MemberCalendar[] }) {
           type="button"
           variant="secondary"
           size="sm"
-          onClick={() => connectAnother("google")}
+          onClick={() => connect("google")}
           disabled={busy !== null}
         >
           {calendars.length === 0 ? "Connect Google" : "Connect another Google calendar"}
@@ -153,7 +176,7 @@ export function CalendarList({ calendars }: { calendars: MemberCalendar[] }) {
           type="button"
           variant="secondary"
           size="sm"
-          onClick={() => connectAnother("microsoft")}
+          onClick={() => connect("microsoft")}
           disabled={busy !== null}
         >
           {calendars.length === 0 ? "Connect Microsoft" : "Connect another Microsoft calendar"}
