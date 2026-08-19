@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { Slot, BookedSlot } from "@/components/results-list";
+import { handleExpiredSession } from "@/lib/session-expired";
 
 function formatWhen(unix: number, timezone: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -60,6 +61,7 @@ export function RescheduleSessionDialog({
         }),
       });
       const data = await res.json();
+      if (handleExpiredSession(res)) return;
       if (!res.ok) {
         toast.error(data.error ?? "Something went wrong. Please try again.");
         setSubmitting(false);

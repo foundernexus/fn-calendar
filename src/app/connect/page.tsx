@@ -17,6 +17,11 @@ const FAILURE_MESSAGES: Record<string, string> = {
     "The calendar account you signed in with doesn't match the email you entered. Use the exact address you were registered under.",
   taken:
     "That calendar is already connected to someone else here, so it can't be added to your profile too. Pick a different account.",
+  /** Not a failed sign-in at all — an admin action rejected because the 8-hour
+   * session had run out. Distinct from `expired`, which is about the sign-in
+   * link itself: this person was signed in a moment ago and simply needs to do
+   * it again. See lib/session-expired.ts. */
+  session: "Your session expired. Please sign in again to carry on.",
   error: "That connection attempt didn't go through. Please try again.",
 };
 

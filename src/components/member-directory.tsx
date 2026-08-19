@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/table";
 import { ProviderIcon } from "@/components/provider-icon";
 import type { MemberWithConnection } from "@/db/queries";
+import { handleExpiredSession } from "@/lib/session-expired";
 
 /** The three states an admin needs to tell apart, ordered by how much they
  * need doing something about. `pending` is the whole reason this page exists:
@@ -335,6 +336,7 @@ function RemoveMemberDialog({
     try {
       const res = await fetch(`/api/admin/members/${member.id}`, { method: "DELETE" });
       const data = await res.json();
+      if (handleExpiredSession(res)) return;
       if (!res.ok) {
         toast.error(data.error ?? "Something went wrong. Please try again.");
         setSubmitting(false);

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { handleExpiredSession } from "@/lib/session-expired";
 
 type Connection = { provider: string; grantEmail: string } | null;
 
@@ -37,6 +38,7 @@ export function AdminConnectCalendarButton({
     try {
       const res = await fetch("/api/admin/connect-calendar", { method: "POST" });
       const data = await res.json();
+      if (handleExpiredSession(res)) return;
       if (!res.ok) {
         toast.error(data.error ?? "Something went wrong. Please try again.");
         setSubmitting(false);

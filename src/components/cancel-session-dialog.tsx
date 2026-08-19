@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { BookedSlot } from "@/components/results-list";
+import { handleExpiredSession } from "@/lib/session-expired";
 
 /** Confirmation before cancelling a booked session.
  *
@@ -54,6 +55,7 @@ export function CancelSessionDialog({
     try {
       const res = await fetch(`/api/admin/events/${booked.id}`, { method: "DELETE" });
       const data = await res.json();
+      if (handleExpiredSession(res)) return;
       if (!res.ok) {
         toast.error(data.error ?? "Something went wrong. Please try again.");
         setSubmitting(false);

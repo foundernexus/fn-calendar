@@ -27,6 +27,7 @@ import { CancelSessionDialog } from "@/components/cancel-session-dialog";
 import { RescheduleSessionDialog } from "@/components/reschedule-session-dialog";
 import type { MemberWithConnection } from "@/db/queries";
 import { TIMEZONES } from "@/lib/time";
+import { handleExpiredSession } from "@/lib/session-expired";
 
 const DURATIONS = [30, 45, 60] as const;
 
@@ -141,6 +142,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
         body: JSON.stringify(body),
       });
       const data = await res.json();
+      if (handleExpiredSession(res)) return;
       if (!res.ok) {
         toast.error(data.error ?? "Something went wrong. Please try again.");
         return;
@@ -214,8 +216,12 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
       });
       const data = await res.json();
       if (!res.ok) {
-        // Whatever the admin just did already succeeded — say so, or a failed
-        // refresh reads like a failed booking and invites a second attempt.
+        // Deliberately NOT handleExpiredSession, even on a 401. Whatever the
+        // admin just did already succeeded, and redirecting them to sign-in
+        // here would throw away the confirmation of a booking or cancellation
+        // that really happened — leaving them unsure whether to do it again.
+        // Telling them and letting them reload is the safer end of that trade;
+        // the reload sends them to sign-in anyway.
         toast.error("That worked, but the grid couldn't refresh. Reload to see the latest.");
         return;
       }

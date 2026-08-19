@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { handleExpiredSession } from "@/lib/session-expired";
 
 type CreatedMember = { id: number; email: string; fullName: string };
 
@@ -102,6 +103,7 @@ export function AddPersonDialog({
         body: JSON.stringify({ fullName, email, ...ROLES[role].flags }),
       });
       const data = await res.json();
+      if (handleExpiredSession(res)) return;
       if (!res.ok) {
         toast.error(data.error ?? "Something went wrong. Please try again.");
         return;

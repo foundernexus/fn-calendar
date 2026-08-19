@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Slot } from "@/components/results-list";
+import { handleExpiredSession } from "@/lib/session-expired";
 
 export function CreateEventDialog({
   slot,
@@ -69,6 +70,8 @@ export function CreateEventDialog({
         }),
       });
       const data = await res.json();
+      if (handleExpiredSession(res)) return;
+
       if (!res.ok) {
         toast.error(data.error ?? "Something went wrong. Please try again.");
         setSubmitting(false);
