@@ -43,6 +43,28 @@ export async function hasAdminAccess(email: string) {
   return !!member?.isFacilitator;
 }
 
+/** Where someone's admin access comes from, because the two aren't equal.
+ *
+ * `owner` is the ADMIN_EMAILS allowlist — an env var only someone with Vercel
+ * access can change. `team` is the Team flag, which any owner can grant from
+ * the People page.
+ *
+ * Everything about running sessions is open to both: searching, booking,
+ * cancelling, rescheduling, adding founders and advisors. A Team member who
+ * couldn't cancel the session they're about to run would be unable to do their
+ * job. Two things are owner-only, and both for the same reason — they're the
+ * actions you can't take back or that hand out access:
+ *
+ *   - removing a person, which revokes their calendar and is irreversible
+ *   - marking someone as Team, which is granting admin
+ *
+ * Returns null for anyone with no admin access at all. */
+export async function resolveAdminTier(email: string): Promise<"owner" | "team" | null> {
+  if (isAdminEmail(email, env.ADMIN_EMAILS)) return "owner";
+  const member = await getMemberByEmail(email);
+  return member?.isFacilitator ? "team" : null;
+}
+
 /** Re-checks the admin session cookie from inside a Server Component or Route
  * Handler. `proxy.ts` already blocks unauthenticated requests to /admin/* and
  * /api/admin/*, but Next's own guidance is not to rely on Proxy alone (a
@@ -68,8 +90,11 @@ export async function requireAdminSession() {
   // since answering it needs a database read and middleware runs on every
   // request. That's why this function is called at the top of every admin page
   // and every admin route handler, not merely as belt-and-braces.
-  if (!(await hasAdminAccess(session.email))) return null;
-  return session;
+  const tier = await resolveAdminTier(session.email);
+  if (!tier) return null;
+  // Callers that gate an owner-only action check `tier`; everything else just
+  // checks the session exists, exactly as before.
+  return { ...session, tier };
 }
 
 /** Signs an admin session and sets it on `res`. Called from exactly one

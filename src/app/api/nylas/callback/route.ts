@@ -176,11 +176,22 @@ export async function GET(request: Request) {
 
   let grantAdminSession = false;
   if (statePayload.redirectTo === "admin") {
-    // Admin sessions demand the registered address itself — a side calendar
-    // linked to the account is enough to manage your own settings, not to
-    // hold admin. Re-checked against the live allowlist too, in case they
-    // were removed while this 10-minute flow was in flight.
-    if (!isRegisteredEmail || !(await hasAdminAccess(targetMember.email))) {
+    // Signing in as an admin demands the registered address itself: typing an
+    // address proves nothing, so the OAuth round trip has to land on the
+    // account that address belongs to.
+    //
+    // Repairing a calendar is not signing in. /api/admin/connect-calendar runs
+    // behind an existing admin session and tags its state `addCalendar`, and
+    // the calendar being repaired can legitimately sit under a different
+    // address than the registered one. Demanding a match there rejected the
+    // very people it was meant to protect. The identity proof for that path
+    // already happened — at the session, before the flow started — and the
+    // flag cannot be set from outside a signed token.
+    //
+    // hasAdminAccess is re-checked live either way, in case they lost access
+    // during this 10-minute round trip.
+    const identityProven = isRegisteredEmail || addingCalendar;
+    if (!identityProven || !(await hasAdminAccess(targetMember.email))) {
       console.warn("[nylas/callback] admin verification failed", {
         memberId: statePayload.memberId,
         expectedEmail: targetMember.email,

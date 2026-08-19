@@ -30,7 +30,10 @@ export async function POST() {
 
   const state = await signValue(
     TOKEN_PURPOSE.connectState,
-    { memberId: member.id, redirectTo: "admin" as const },
+    // addCalendar marks this as a repair started from an existing admin
+    // session rather than a login — see the callback for why that distinction
+    // decides whether the registered address is demanded.
+    { memberId: member.id, redirectTo: "admin" as const, addCalendar: true as const },
     env.SESSION_SECRET,
     STATE_TTL_SECONDS
   );
@@ -41,7 +44,17 @@ export async function POST() {
   // first is not necessarily the one they actually use.
   const existing = pickInviteConnection(await getLatestConnections([member.id]));
   const url = buildHostedAuthUrl({
-    loginHint: normalizeEmail(member.email),
+    // Same as /api/me/reconnect: hint the calendar being repaired, not the
+    // registered address, or a mismatch between the two adds a second
+    // calendar instead of fixing the first.
+    //
+    // One extra constraint here that doesn't apply there: an ADMIN session is
+    // only ever minted for the registered address (see the callback), so an
+    // admin whose calendar sits under a different address gets their calendar
+    // repaired but stays on their existing admin session rather than being
+    // re-granted one. That's correct — this button connects a calendar, it
+    // isn't a login.
+    loginHint: normalizeEmail(existing?.grant_email ?? member.email),
     state,
     provider: asCalendarProvider(existing?.provider),
   });

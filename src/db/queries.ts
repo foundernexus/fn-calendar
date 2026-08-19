@@ -293,11 +293,28 @@ export async function getLatestConnections(memberIds?: number[]) {
   // newest row wins — while a genuinely different account is kept as its own
   // calendar. Deduping by member_id alone silently hid every calendar but the
   // most recent.
+  //
+  // Rows for the CURRENT Nylas app win before recency does. One address can
+  // accumulate rows across app changes (Sandbox, pre-column NULLs, production),
+  // and picking purely by newest would surface a stale one and report a member
+  // as disconnected while a perfectly usable row sat right behind it. COALESCE
+  // because `nylas_client_id = ...` is NULL for the pre-column rows, and NULL
+  // sorts first under DESC — which is exactly backwards.
+  //
+  // Deliberately does NOT prefer connected over revoked: for one address the
+  // newest row is the truth about that calendar, and reaching past a revoked
+  // row to an older connected one would resurrect a calendar the member
+  // deliberately disconnected.
   const result = await db.execute<LatestConnectionRow>(sql`
     SELECT DISTINCT ON (member_id, grant_email) *
     FROM ${calendarConnections}
     ${memberFilter}
-    ORDER BY member_id, grant_email, connected_at DESC, id DESC
+    ORDER BY
+      member_id,
+      grant_email,
+      COALESCE(nylas_client_id = ${env.NYLAS_CLIENT_ID}, false) DESC,
+      connected_at DESC,
+      id DESC
   `);
 
   return result.rows;

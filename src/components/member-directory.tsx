@@ -87,9 +87,13 @@ const SECTIONS: { status: Status; title: string; hint: string; urgent: boolean }
 export function MemberDirectory({
   members,
   connectUrl,
+  canRemove,
 }: {
   members: MemberWithConnection[];
   connectUrl: string;
+  /** Owner-only. Team members get the same view but no Remove — see
+   * resolveAdminTier for why those two actions are the line. */
+  canRemove: boolean;
 }) {
   const router = useRouter();
   const [removing, setRemoving] = useState<MemberWithConnection | null>(null);

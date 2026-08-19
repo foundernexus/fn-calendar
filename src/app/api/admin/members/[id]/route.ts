@@ -28,6 +28,16 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Owner-only. Removing someone revokes their calendar and deletes their row;
+  // there's no undo, and it's the one admin action whose damage can't be
+  // repaired from inside the app. Team can do everything else.
+  if (session.tier !== "owner") {
+    return NextResponse.json(
+      { error: "Only an account owner can remove people. Ask them to do it." },
+      { status: 403 }
+    );
+  }
+
   const memberId = Number((await params).id);
   if (!Number.isInteger(memberId) || memberId <= 0) {
     return NextResponse.json({ error: "Invalid member id." }, { status: 400 });

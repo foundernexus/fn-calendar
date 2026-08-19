@@ -59,13 +59,23 @@ export type PersonRole = keyof typeof ROLES;
 export function AddPersonDialog({
   connectUrl,
   defaultRole = "founder",
+  canAddTeam,
   onAdded,
 }: {
   connectUrl: string;
   defaultRole?: PersonRole;
+  /** Owner-only. Marking someone Team grants them admin, so Team members can
+   * add founders and advisors but not more staff. The server enforces this
+   * too — hiding the option is the courtesy, not the rule. */
+  canAddTeam: boolean;
   onAdded?: () => void;
 }) {
   const router = useRouter();
+  // Team is simply absent from the list for anyone who cannot grant it, rather
+  // than shown and rejected on submit.
+  const availableRoles = (Object.keys(ROLES) as PersonRole[]).filter(
+    (r) => r !== "team" || canAddTeam
+  );
   const [open, setOpen] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -200,7 +210,7 @@ export function AddPersonDialog({
                 <Label>Role</Label>
                 <Select
                   items={Object.fromEntries(
-                    Object.entries(ROLES).map(([key, r]) => [key, r.label])
+                    availableRoles.map((key) => [key, ROLES[key].label])
                   )}
                   value={role}
                   onValueChange={(v) => v && setRole(v as PersonRole)}
@@ -209,9 +219,9 @@ export function AddPersonDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Object.entries(ROLES).map(([key, r]) => (
+                    {availableRoles.map((key) => (
                       <SelectItem key={key} value={key}>
-                        {r.label}
+                        {ROLES[key].label}
                       </SelectItem>
                     ))}
                   </SelectContent>

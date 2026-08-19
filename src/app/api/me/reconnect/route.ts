@@ -34,7 +34,14 @@ export async function POST() {
   // and could send someone with both Google and Microsoft to the wrong one.
   const existing = pickInviteConnection(await getLatestConnections([session.memberId]));
   const url = buildHostedAuthUrl({
-    loginHint: normalizeEmail(session.member.email),
+    // The address of the calendar being REPAIRED, not the registered one.
+    // Those differ whenever someone connected a personal account against a
+    // work address, and hinting the registered address sent them to a
+    // different account entirely: the broken calendar stayed broken and the
+    // upsert added a second one, costing another Nylas grant. Falls back to
+    // the registered address when there's nothing to repair — this button
+    // doubles as first-time connect.
+    loginHint: normalizeEmail(existing?.grant_email ?? session.member.email),
     state,
     provider: asCalendarProvider(existing?.provider),
   });

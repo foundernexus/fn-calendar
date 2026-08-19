@@ -58,6 +58,17 @@ export async function POST(request: Request) {
     );
   }
 
+  // Owner-only, because marking someone Team IS granting admin — see
+  // resolveAdminTier. Adding founders and advisors stays open to Team, who
+  // need it to do their job. Checked here rather than in the UI alone: hiding
+  // the option is a courtesy, this is the rule.
+  if (parsed.data.isFacilitator && session.tier !== "owner") {
+    return NextResponse.json(
+      { error: "Only an account owner can add someone as Team. Add them as a founder or advisor." },
+      { status: 403 }
+    );
+  }
+
   const email = normalizeEmail(parsed.data.email);
   const existing = await getMemberByEmail(email);
   if (existing) {
