@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { GuidedTour, tourAlreadyDone } from "@/components/guided-tour";
 import { guideProgress, type OnboardingStep } from "@/lib/onboarding";
 
 function StepIcon({ step }: { step: OnboardingStep }) {
@@ -57,10 +58,17 @@ export function OnboardingGuide({
   const [mounted, setMounted] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [openStepId, setOpenStepId] = useState<string | null>(null);
+  const [tourRunning, setTourRunning] = useState(false);
 
   const collapsedKey = `fn-guide-collapsed:${storageKey}`;
+  const hasTour = steps.some((s) => s.target);
 
   useEffect(() => {
+    // The walkthrough runs once, ever — localStorage, not sessionStorage, so it
+    // doesn't reappear every time someone opens a new tab. Someone who has
+    // already been shown around gets the checklist and nothing else.
+    if (hasTour && !tourAlreadyDone(storageKey)) setTourRunning(true);
+
     let collapsed = false;
     try {
       collapsed = window.sessionStorage.getItem(collapsedKey) === "1";
@@ -80,7 +88,7 @@ export function OnboardingGuide({
     // it for good, on a panel most people meet exactly once.
     setExpanded(!collapsed);
     setMounted(true);
-  }, [collapsedKey]);
+  }, [collapsedKey, hasTour, storageKey]);
 
   function setCollapsed(collapsed: boolean) {
     setExpanded(!collapsed);
@@ -99,6 +107,10 @@ export function OnboardingGuide({
 
   return (
     <>
+      {tourRunning && (
+        <GuidedTour steps={steps} storageKey={storageKey} onFinish={() => setTourRunning(false)} />
+      )}
+
       {/* Top-right on a wide screen, where it sits beside the content instead
           of over it. Below lg there's no room for that, so it drops to the
           bottom corner and out of the reading path. */}
@@ -155,6 +167,18 @@ export function OnboardingGuide({
                 </li>
               ))}
             </ul>
+            {/* The walkthrough is offered again rather than being a one-shot.
+                Someone who skipped it in a hurry, or who comes back months
+                later, shouldn't have to clear browser storage to see it. */}
+            {hasTour && (
+              <button
+                type="button"
+                onClick={() => setTourRunning(true)}
+                className="w-full border-t border-border px-4 py-3 text-left text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
+              >
+                Show me around again
+              </button>
+            )}
           </div>
         ) : (
           /* Collapses to a pill rather than vanishing — these explanations are

@@ -26,6 +26,14 @@ export type OnboardingStep = {
   /** Worth doing, but doesn't hold the guide open — most people have one
    * calendar and are entirely finished without ever adding a second. */
   optional?: boolean;
+  /** CSS selector for the thing on screen this step is about. Steps with one
+   * are pointed at during the walkthrough; steps without are checklist-only.
+   *
+   * A selector rather than a ref because the checklist is built on the server
+   * and the elements live in three different client components — passing refs
+   * across that boundary would mean restructuring all of them to describe
+   * something that is, in the end, "the box over there". */
+  target?: string;
 };
 
 /** Founders and advisors. `/me` and the advisor panel run the same availability
@@ -53,6 +61,7 @@ export function buildMemberSteps({
       id: "connect-calendar",
       kind: "task",
       done: working.length > 0,
+      target: '[data-tour="calendars"]',
       title: "Connect your calendar",
       summary: "So we can tell when you're actually free.",
       detail: [
@@ -64,6 +73,7 @@ export function buildMemberSteps({
       id: "set-availability",
       kind: "task",
       done: hasSavedAvailability,
+      target: '[data-tour="availability"]',
       title: "Set your availability",
       summary: "The hours you're open to sessions at all.",
       detail: [
@@ -86,6 +96,7 @@ export function buildMemberSteps({
     {
       id: "invite-target",
       kind: "info",
+      target: '[data-tour="calendars"]',
       title: "Where sessions get added",
       summary: "All are read. One receives the invite.",
       detail: [

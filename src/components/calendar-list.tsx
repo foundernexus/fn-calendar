@@ -91,7 +91,10 @@ export function CalendarList({ calendars }: { calendars: MemberCalendar[] }) {
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card p-6 shadow-card">
+    // data-tour is what the walkthrough points at — see GuidedTour. Kept as a
+    // data attribute rather than an id so it reads as "something looks for
+    // this" and doesn't get repurposed as a styling or anchor hook.
+    <div data-tour="calendars" className="rounded-lg border border-border bg-card p-6 shadow-card">
       <p className="text-base font-semibold text-foreground">Your calendars</p>
       <p className="mt-1 text-sm text-muted-foreground">
         {calendars.length > 1

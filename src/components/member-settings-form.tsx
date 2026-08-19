@@ -339,7 +339,10 @@ export function MemberSettingsForm({
         <CalendarList calendars={calendars} />
       </div>
 
-      <div className="mt-5 rounded-lg border border-border bg-card p-6 shadow-card">
+      <div
+        data-tour="availability"
+        className="mt-5 rounded-lg border border-border bg-card p-6 shadow-card"
+      >
         <p className="text-base font-semibold text-foreground">Weekly availability</p>
         <p className="mt-1 text-sm text-muted-foreground">
           The hours you&apos;re open to sessions. Your calendar is still checked on top of this —
