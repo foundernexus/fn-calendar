@@ -61,7 +61,14 @@ export function buildMemberSteps({
       id: "connect-calendar",
       kind: "task",
       done: working.length > 0,
-      target: '[data-tour="calendars"]',
+      // Deliberately no `target`, so the walkthrough skips it: anyone seeing
+      // this page connected a calendar to get here, and opening a tour by
+      // pointing at something already done reads as though nobody checked.
+      //
+      // It stays in the checklist because it stops being a formality the
+      // moment a connection breaks — that is when it turns into the reconnect
+      // prompt, which is exactly what every member saw during the switch away
+      // from Nylas.
       title: "Connect your calendar",
       summary: "So we can tell when you're actually free.",
       detail: [
