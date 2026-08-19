@@ -10,6 +10,7 @@ import { TimezoneSelect } from "@/components/timezone-select";
 import { TimeSelect } from "@/components/time-select";
 import { CalendarList } from "@/components/calendar-list";
 import { isSupportedTimezone } from "@/lib/timezones";
+import { celebrate } from "@/lib/celebrate";
 import type { MemberCalendar } from "@/db/queries";
 
 type Block = { startTime: string; endTime: string };
@@ -135,6 +136,10 @@ export function MemberSettingsForm({
   const [connection, setConnection] = useState(initialConnection);
   const [submitting, setSubmitting] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  // A null timezone means this form has never been submitted — the same signal
+  // defaultDays() uses above. Captured once at mount, because the save itself
+  // is what makes it false, and reading it afterwards would always say no.
+  const [firstSave, setFirstSave] = useState(initialTimezone === null);
 
   function updateDay(day: number, patch: Partial<DayState>) {
     setDays((prev) => ({ ...prev, [day]: { ...prev[day], ...patch } }));
@@ -213,11 +218,22 @@ export function MemberSettingsForm({
       // consequential one on this page: it removes you from every search with
       // nothing on screen to say so. A plain "Saved." let people make
       // themselves invisible and wonder for weeks why nobody booked them.
+      const madeThemselvesUnavailable = availability.length === 0;
       toast.success(
-        availability.length === 0
+        madeThemselvesUnavailable
           ? "Saved — every day is off, so you won't be offered for any session until you turn one back on."
           : "Saved."
       );
+
+      // Only on the FIRST real save, and only if they're actually bookable
+      // afterwards. That is the one moment in this app worth marking: setup is
+      // done and sessions can now be booked with them. Firing on every save
+      // would make it wallpaper, and firing when they've just switched every
+      // day off would be celebrating the opposite of what happened.
+      if (firstSave && !madeThemselvesUnavailable) {
+        setFirstSave(false);
+        celebrate();
+      }
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
