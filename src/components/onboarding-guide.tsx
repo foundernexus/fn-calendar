@@ -51,7 +51,7 @@ export function OnboardingGuide({
   heading?: string;
 }) {
   const { total, done, allRequiredDone } = guideProgress(steps);
-  // localStorage can't be read during render without a hydration mismatch, so
+  // sessionStorage can't be read during render without a hydration mismatch, so
   // the panel renders nothing until it knows. It's an overlay, not content —
   // one frame late costs nothing.
   const [mounted, setMounted] = useState(false);
@@ -63,23 +63,30 @@ export function OnboardingGuide({
   useEffect(() => {
     let collapsed = false;
     try {
-      collapsed = window.localStorage.getItem(collapsedKey) === "1";
+      collapsed = window.sessionStorage.getItem(collapsedKey) === "1";
     } catch {
       // Storage blocked (private mode, or a browser setting) — fall through to
       // the default rather than breaking the page over a preference.
     }
-    // Opens itself only while there's something outstanding. Once the required
-    // tasks are done it steps out of the way on its own, without being
-    // dismissed and without taking the explanations with it.
-    setExpanded(!collapsed && !allRequiredDone);
+    // Open by default on arrival, whether or not the setup is finished. Someone
+    // signing in has just been handed a tool they may not have used in weeks,
+    // and the steps double as the reference for how it works — a panel that
+    // only appears while something is outstanding is missing exactly when
+    // they've forgotten which calendar receives the invites.
+    //
+    // sessionStorage, not localStorage, is what makes that bearable: closing it
+    // sticks for as long as they're working, and a fresh sign-in opens it
+    // again. Persisting the dismissal forever would mean one stray click hides
+    // it for good, on a panel most people meet exactly once.
+    setExpanded(!collapsed);
     setMounted(true);
-  }, [collapsedKey, allRequiredDone]);
+  }, [collapsedKey]);
 
   function setCollapsed(collapsed: boolean) {
     setExpanded(!collapsed);
     try {
-      if (collapsed) window.localStorage.setItem(collapsedKey, "1");
-      else window.localStorage.removeItem(collapsedKey);
+      if (collapsed) window.sessionStorage.setItem(collapsedKey, "1");
+      else window.sessionStorage.removeItem(collapsedKey);
     } catch {
       // Same as above: the panel still works for this visit, it just won't
       // remember the choice.
@@ -168,16 +175,10 @@ export function OnboardingGuide({
           <DialogHeader>
             <DialogTitle>{openStep?.title}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 text-sm leading-relaxed text-muted-foreground">
-            {openStep?.detail.map((line, i) =>
-              typeof line === "string" ? (
-                <p key={i}>{line}</p>
-              ) : (
-                <p key={i}>
-                  <span className="font-medium text-foreground">{line.term}</span> {line.text}
-                </p>
-              )
-            )}
+          <div className="space-y-2 text-sm leading-relaxed text-muted-foreground">
+            {openStep?.detail.map((line, i) => (
+              <p key={i}>{line}</p>
+            ))}
           </div>
           <DialogFooter showCloseButton />
         </DialogContent>

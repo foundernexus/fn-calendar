@@ -1,26 +1,26 @@
 import type { MemberCalendar, MemberWithConnection } from "@/db/queries";
 
-/** A line of explanation. The object form is a labelled paragraph — used where
- * the text is really defining terms (the three roles, mostly) and running them
- * together as prose made them impossible to scan. */
-export type StepDetail = string | { term: string; text: string };
-
 /** One entry in the setup guide.
  *
  * `task` is something the person does, and it carries a `done` computed from
  * real data rather than from "have they clicked this". A checklist that ticks
  * itself when you read it teaches people to distrust it.
  *
- * `info` is an explanation with nothing to tick. The multi-calendar rules are
- * the clearest case: knowing that every calendar is READ but only one is
- * WRITTEN to isn't a step, it's the thing you have to understand before the
- * radio button makes any sense. Info steps never count towards progress. */
+ * `info` is an explanation with nothing to tick. That every calendar is READ
+ * but only one is WRITTEN to isn't a step, it's the thing you have to
+ * understand before the radio button makes any sense. Info steps never count
+ * towards progress.
+ *
+ * `detail` is kept to a couple of short lines on purpose. Nobody opens a setup
+ * panel to read; they open it to find out why something is there and then get
+ * on with it, and a paragraph they skip explains less than one line they
+ * actually finish. */
 export type OnboardingStep = {
   id: string;
   title: string;
   /** Shown in the collapsed list, under the title. One line. */
   summary: string;
-  detail: StepDetail[];
+  detail: string[];
   kind: "task" | "info";
   done?: boolean;
   /** Worth doing, but doesn't hold the guide open — most people have one
@@ -56,9 +56,8 @@ export function buildMemberSteps({
       title: "Connect your calendar",
       summary: "So we can tell when you're actually free.",
       detail: [
-        "Everything else here depends on this one. Your calendar is read for busy times, so a meeting already in your diary blocks that slot automatically — nobody can book over it.",
-        "We read when you're busy and write FounderNexus sessions. Not your email, not your files, not your contacts.",
-        "If a calendar ever stops working — you changed your password, or revoked access — it shows up here marked “Reconnect” rather than quietly going unchecked.",
+        "We read your busy times, so nobody can book over something you already have.",
+        "Calendar access only — nothing else is touched.",
       ],
     },
     {
@@ -68,13 +67,9 @@ export function buildMemberSteps({
       title: "Set your availability",
       summary: "The hours you're open to sessions at all.",
       detail: [
-        "Start with your timezone. Every time on this page is stored against it, so getting it wrong shifts your whole week.",
-        "The switch beside each day turns it on or off; the dropdowns set the hours. Think of these as the outer bounds rather than a promise you're free — your calendar is still checked on top of them.",
-        {
-          term: "Several blocks a day:",
-          text: "“+ Add block” splits a day, so 9:00–12:00 and 14:00–17:00 keeps lunch clear. Up to three blocks per day, and they can't overlap.",
-        },
-        "Turning every day off is allowed and sometimes right — but it removes you from every search until you turn one back on, so the page warns you before you save it.",
+        "These are the outer bounds. Your calendar is still checked on top of them.",
+        "Use “+ Add block” to split a day and keep a break in the middle.",
+        "It only counts once you press Save.",
       ],
     },
     {
@@ -83,22 +78,19 @@ export function buildMemberSteps({
       optional: true,
       done: working.length > 1,
       title: "Add a second calendar",
-      summary: "If work and private live in different places.",
+      summary: "If your time is split across two of them.",
       detail: [
-        "You can connect more than one, and they don't have to match: Google for work and Microsoft for private is the usual reason people do this.",
-        "Every calendar you add is checked for conflicts. You're only offered a time when you're free in all of them at once — which is the whole point, because it means a private appointment can't be booked over by someone who can't see it.",
-        "Add one from the “Your calendars” card. Each address gets its own row, and you can remove any of them later as long as one is left.",
+        "Every calendar you add is checked as well, so a private appointment can't be booked over by someone who can't see it.",
       ],
     },
     {
       id: "invite-target",
       kind: "info",
       title: "Where sessions get added",
-      summary: "Every calendar is read. Exactly one is written to.",
+      summary: "All are read. One receives the invite.",
       detail: [
-        "Beside each address is a radio button marked “Add sessions here”. That's the calendar a booked session actually lands in.",
-        "Only one can hold it, and that's deliberate. Writing the session to all of them would put the same meeting in your diary two or three times, as separate entries that then cancel independently of each other — leaving ghost meetings behind after a session moves.",
-        "So the two halves are on purpose: connecting a calendar protects you from being double-booked, picking one decides where the invite shows up.",
+        "Pick it with the radio button beside the address.",
+        "Only one, or the same session would land in your diary twice.",
       ],
     },
   ];
@@ -109,10 +101,7 @@ export function buildMemberSteps({
       kind: "info",
       title: "Your sessions",
       summary: "Everything you've been booked into.",
-      detail: [
-        "The Sessions tab lists what's been booked with you, soonest first, with who's attending.",
-        "The invite lands in your calendar as well — the tab exists so you can see the whole picture at once instead of reconstructing it from your diary.",
-      ],
+      detail: ["One list, so you don't have to reconstruct it from your calendar."],
     });
   }
 
@@ -129,19 +118,10 @@ export function buildAdminSteps({ people }: { people: MemberWithConnection[] }):
       kind: "task",
       done: people.length > 0,
       title: "Add the people you schedule",
-      summary: "Founders, advisors and team, from the People page.",
+      summary: "Founders, advisors and team.",
       detail: [
-        "“Add person” registers someone so the sign-in page recognises their email. There's no automatic invite mail — you get a link and pass it on yourself, however you normally talk to them.",
-        { term: "Founder", text: "— scheduled into sessions as a participant. The default." },
-        {
-          term: "Advisor",
-          text: "— gets their own dashboard, and is picked from the Advisor field when booking rather than from the founder list.",
-        },
-        {
-          term: "Team",
-          text: "— FounderNexus staff who run sessions, and can be picked as the session lead.",
-        },
-        "Team also hands over the admin area, Schedule and People included, which is why only an account owner can grant it.",
+        "Registers them so they can sign in. There's no automatic invite mail — you pass the link on yourself.",
+        "Founders are scheduled into sessions, advisors get their own dashboard, and team can run sessions and see this admin area.",
       ],
     },
     {
@@ -149,22 +129,20 @@ export function buildAdminSteps({ people }: { people: MemberWithConnection[] }):
       kind: "task",
       done: people.some((p) => p.connected),
       title: "Get their calendars connected",
-      summary: "Added and connected are not the same thing.",
+      summary: "Added and connected aren't the same.",
       detail: [
-        "Until someone signs in and connects a calendar, there's no way to know when they're free — so they stay out of every picker and can't be booked at all.",
-        "The People page shows exactly who's still pending, grouped by role, so you can chase the right ones instead of guessing. The link to send them is on that page.",
-        "Warn them about one thing in advance: Google shows a screen naming “nylas.com” and says the app isn't verified. That's expected, and the sign-in page explains it — but people who weren't told tend to stop there.",
+        "Until someone connects a calendar there's no way to know when they're free, so they can't be booked at all.",
+        "The People page shows who's still pending.",
       ],
     },
     {
       id: "booking",
       kind: "info",
       title: "Booking a session",
-      summary: "Pick who's in it, then a time that suits all of them.",
+      summary: "Only times that suit everyone are offered.",
       detail: [
-        "On Schedule you choose the founders, optionally an advisor, and a session lead. The grid then shows only slots where every single person involved is free.",
-        "A grey cell doesn't only mean someone's outside their working hours — it also greys out when one participant has a conflict in their own calendar. Adding more people to a session will always leave fewer slots, never more.",
-        "Booking creates the calendar invite for everyone at once, and cancelling from the grid removes it everywhere. You don't need to tidy up in anyone's calendar afterwards.",
+        "A grey cell can be someone's conflict, not just their working hours.",
+        "Booking invites everyone at once; cancelling removes it everywhere.",
       ],
     },
   ];
@@ -178,8 +156,9 @@ export function guideProgress(steps: OnboardingStep[]) {
   return {
     total: tasks.length,
     done: tasks.filter((s) => s.done).length,
-    /** Drives whether the guide starts open. Optional tasks are excluded on
-     * purpose: one calendar is a complete, finished setup. */
+    /** Only drives the header wording now that the panel opens on every
+     * sign-in. Optional tasks are excluded on purpose: one calendar is a
+     * complete, finished setup. */
     allRequiredDone: required.every((s) => s.done),
   };
 }
