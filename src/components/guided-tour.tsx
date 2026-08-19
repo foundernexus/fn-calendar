@@ -42,7 +42,7 @@ export function GuidedTour({
 
   const finish = useCallback(() => {
     try {
-      window.localStorage.setItem(`fn-tour-done:${storageKey}`, "1");
+      window.localStorage.setItem(tourStorageKey(storageKey), "1");
     } catch {
       // Storage blocked — the tour just runs again next time. Harmless.
     }
@@ -160,13 +160,26 @@ export function GuidedTour({
   );
 }
 
-/** Whether this person has already been walked through. Read on the client
- * only — the server has no idea, and guessing would flash the tour at someone
- * who finished it months ago. */
+/** Bumped when the steps themselves change materially.
+ *
+ * Without it, "already seen it" is permanent: anyone who ran an earlier version
+ * never sees the revised one, and the tour silently stops existing for exactly
+ * the people who have been here longest. Raising this shows the new walkthrough
+ * once more, to everyone. Do it for a changed sequence, not for a reworded
+ * sentence. */
+const TOUR_VERSION = 2;
+
+/** Whether this person has already been walked through THIS version. Read on
+ * the client only — the server has no idea, and guessing would flash the tour
+ * at someone who finished it months ago. */
 export function tourAlreadyDone(storageKey: string) {
   try {
-    return window.localStorage.getItem(`fn-tour-done:${storageKey}`) === "1";
+    return window.localStorage.getItem(tourStorageKey(storageKey)) === "1";
   } catch {
     return false;
   }
+}
+
+export function tourStorageKey(storageKey: string) {
+  return `fn-tour-done:${storageKey}:v${TOUR_VERSION}`;
 }

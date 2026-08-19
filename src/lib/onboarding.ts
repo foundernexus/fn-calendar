@@ -34,6 +34,11 @@ export type OnboardingStep = {
    * across that boundary would mean restructuring all of them to describe
    * something that is, in the end, "the box over there". */
   target?: string;
+  /** Shown during the walkthrough but kept out of the checklist. For steps
+   * that are a prompt in the moment rather than a thing to track — "press
+   * Save" belongs beside the button while you're there, not in a permanent
+   * list of outstanding work. */
+  tourOnly?: boolean;
 };
 
 /** Founders and advisors. `/me` and the advisor panel run the same availability
@@ -76,6 +81,23 @@ export function buildMemberSteps({
         "Calendar access only — nothing else is touched.",
       ],
     },
+    // Ordered as the page is, top to bottom: calendars card, then the weekly
+    // grid, then Save. A walkthrough that jumps up and down the page makes
+    // people hunt for what moved, and the checklist reads the same way for the
+    // same reason.
+    {
+      id: "second-calendar",
+      kind: "task",
+      optional: true,
+      done: working.length > 1,
+      target: '[data-tour="calendars"]',
+      title: "Add a second calendar",
+      summary: "If your time is split across two of them.",
+      detail: [
+        "Only if your time is split — work in one calendar, private in another. Every calendar you add is checked too, so a private appointment can't be booked over by someone who can't see it.",
+        "They don't have to match: a Google and a Microsoft calendar can sit side by side.",
+      ],
+    },
     {
       id: "set-availability",
       kind: "task",
@@ -90,20 +112,12 @@ export function buildMemberSteps({
       ],
     },
     {
-      id: "second-calendar",
-      kind: "task",
-      optional: true,
-      done: working.length > 1,
-      title: "Add a second calendar",
-      summary: "If your time is split across two of them.",
-      detail: [
-        "Every calendar you add is checked as well, so a private appointment can't be booked over by someone who can't see it.",
-      ],
-    },
-    {
       id: "invite-target",
       kind: "info",
-      target: '[data-tour="calendars"]',
+      // No target: it would point at the same card as the second-calendar step
+      // above, and a walkthrough that highlights the same box twice in a row
+      // looks like it lost its place. The rule lives in the checklist, where
+      // it can be reread at the moment it's actually needed.
       title: "Where sessions get added",
       summary: "All are read. One receives the invite.",
       detail: [
@@ -112,6 +126,24 @@ export function buildMemberSteps({
       ],
     },
   ];
+
+  // Last, and tour-only. The form arrives pre-filled with Mon–Fri 9–5, which
+  // looks exactly like a saved setting and isn't one — someone who reads it,
+  // agrees with it and closes the tab has stored nothing and stays unbookable.
+  // That has already happened once here, to the account of the person who
+  // built this. It belongs beside the button, in the moment, not in a
+  // permanent checklist.
+  steps.push({
+    id: "save",
+    kind: "info",
+    tourOnly: true,
+    target: '[data-tour="save"]',
+    title: "Press Save",
+    summary: "Nothing is stored until you do.",
+    detail: [
+      "The times above are only a suggestion until you save them — the form looks filled in from the start, which is exactly why this is easy to miss.",
+    ],
+  });
 
   if (isAdvisor) {
     steps.push({

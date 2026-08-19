@@ -99,6 +99,43 @@ describe("member steps", () => {
   });
 });
 
+describe("the walkthrough sequence", () => {
+  const tourSteps = () =>
+    buildMemberSteps({
+      calendars: [calendar()],
+      hasSavedAvailability: false,
+      isAdvisor: false,
+    }).filter((s) => s.target);
+
+  it("walks calendars, then availability, then Save", () => {
+    // The order someone actually works in. Connecting is deliberately absent:
+    // anyone seeing this page already connected to get here.
+    expect(tourSteps().map((s) => s.id)).toEqual([
+      "second-calendar",
+      "set-availability",
+      "save",
+    ]);
+  });
+
+  it("never highlights the same box twice in a row", () => {
+    // Two consecutive steps pointing at one card reads as though the tour lost
+    // its place — which is why "where sessions get added" is checklist-only.
+    const targets = tourSteps().map((s) => s.target);
+    expect(new Set(targets).size).toBe(targets.length);
+  });
+
+  it("keeps the Save prompt out of the checklist", () => {
+    // "Press Save" is a prompt for the moment. In a permanent list it would
+    // sit there looking like unfinished work forever.
+    const save = buildMemberSteps({
+      calendars: [calendar()],
+      hasSavedAvailability: true,
+      isAdvisor: false,
+    }).find((s) => s.id === "save");
+    expect(save?.tourOnly).toBe(true);
+  });
+});
+
 describe("progress", () => {
   it("treats one calendar as a finished setup", () => {
     const steps = buildMemberSteps({

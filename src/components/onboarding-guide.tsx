@@ -51,7 +51,11 @@ export function OnboardingGuide({
   storageKey: string;
   heading?: string;
 }) {
-  const { total, done, allRequiredDone } = guideProgress(steps);
+  // The checklist is the permanent list; steps marked tourOnly are prompts for
+  // the moment ("press Save") and would read as unfinished work sitting in it
+  // forever.
+  const listSteps = steps.filter((s) => !s.tourOnly);
+  const { total, done, allRequiredDone } = guideProgress(listSteps);
   // sessionStorage can't be read during render without a hydration mismatch, so
   // the panel renders nothing until it knows. It's an overlay, not content —
   // one frame late costs nothing.
@@ -135,7 +139,7 @@ export function OnboardingGuide({
               </Button>
             </div>
             <ul className="max-h-[min(60vh,26rem)] divide-y divide-border overflow-y-auto">
-              {steps.map((step) => (
+              {listSteps.map((step) => (
                 <li key={step.id}>
                   <button
                     type="button"

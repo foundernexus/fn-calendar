@@ -452,7 +452,10 @@ export function MemberSettingsForm({
       {/* Sticky: three blocks on several days can still outgrow a short
           window, and a Save you have to hunt for is a Save people forget to
           press. */}
-      <div className="sticky bottom-0 z-10 mt-5 flex justify-end rounded-lg border border-border bg-card/95 px-5 py-3 shadow-card backdrop-blur">
+      <div
+        data-tour="save"
+        className="sticky bottom-0 z-10 mt-5 flex justify-end rounded-lg border border-border bg-card/95 px-5 py-3 shadow-card backdrop-blur"
+      >
         <Button type="submit" disabled={submitting}>
           {submitting ? "Saving…" : "Save"}
         </Button>
