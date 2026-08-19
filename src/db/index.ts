@@ -19,6 +19,20 @@ function getDb() {
   return _db;
 }
 
+/** Test-only seam: points every `db` consumer at an in-process Postgres.
+ *
+ * Route handlers can then be exercised against real tables, real constraints
+ * and real transactions without knowing they're in a test — which is the point,
+ * since the bugs worth catching here live in exactly those three things (see
+ * src/test/db.ts).
+ *
+ * Never called outside tests. It's a plain setter rather than dependency
+ * injection through every call site because the alternative was threading a db
+ * argument through forty functions to make one file testable. */
+export function __setTestDb(instance: NeonHttpDatabase<typeof schema>) {
+  _db = instance;
+}
+
 export const db = new Proxy({} as NeonHttpDatabase<typeof schema>, {
   get(_target, prop, receiver) {
     return Reflect.get(getDb(), prop, receiver);
