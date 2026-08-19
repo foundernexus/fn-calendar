@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql as raw } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { events, eventAttendees } from "@/db/schema";
@@ -10,9 +10,9 @@ import {
   getMemberById,
   getMembersByIds,
 } from "@/db/queries";
-import { createNylasEvent } from "@/lib/nylas";
+import { createNylasEvent, getCollectiveAvailability } from "@/lib/nylas";
 import { computeIdempotencyKey } from "@/lib/idempotency";
-import { TIMEZONES } from "@/lib/time";
+import { TIMEZONES, zonedDateTimeParts, AVAILABILITY_INTERVAL_MINUTES } from "@/lib/time";
 import { requireAdminSession } from "@/lib/auth/admin";
 
 const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [string, ...string[]];
@@ -179,6 +179,16 @@ export async function POST(request: Request) {
     );
   }
 
+  // Every calendar of everyone on this session, deduped — the same set the
+  // search checked, and what the re-check below needs.
+  const participantEmails = [
+    ...new Set(
+      [body.organizerMemberId, ...(advisorMember ? [advisorMember.id] : []), ...guestMemberIds]
+        .flatMap((id) => connectionsByMemberId.get(id) ?? [])
+        .map((c) => c.grant_email)
+    ),
+  ];
+
   const missingIds = guestMemberIds.filter((id) => !guestMembers.some((m) => m.id === id));
   if (missingIds.length > 0) {
     return NextResponse.json({ error: "One or more selected founders no longer exist." }, { status: 400 });
@@ -186,6 +196,52 @@ export async function POST(request: Request) {
 
 
   const endsAtUnix = body.startsAtUnix + body.durationMinutes * 60;
+
+  // Re-check that the slot is still free, immediately before booking it.
+  // Availability was only ever checked at SEARCH time, and the start time
+  // arrives from the client — a grid left open while someone else took the
+  // slot, or two admins working at once, produced a confident double booking,
+  // because Nylas creates events over conflicts without complaint.
+  //
+  // Fails OPEN on purpose. If the check itself errors, or the slot straddles
+  // local midnight (where a one-day open-hours window can't express it), the
+  // booking proceeds with a logged warning. A bug in this guard must never be
+  // able to block real bookings — it exists to catch a race, not to become a
+  // second thing that can go wrong.
+  const localStart = zonedDateTimeParts(body.startsAtUnix, body.timezone);
+  const localEnd = zonedDateTimeParts(endsAtUnix, body.timezone);
+  if (participantEmails.length > 0 && localStart.date === localEnd.date) {
+    try {
+      const stillFree = await getCollectiveAvailability({
+        participantEmails,
+        startTime: body.startsAtUnix,
+        endTime: endsAtUnix,
+        durationMinutes: body.durationMinutes,
+        intervalMinutes: AVAILABILITY_INTERVAL_MINUTES,
+        timezone: body.timezone,
+        // Open hours spanning exactly this slot, so only real calendar busy
+        // time can rule it out — not anyone's stated preferences, which were
+        // already applied at search time and are the admin's to override here.
+        workingHoursStart: localStart.time,
+        workingHoursEnd: localEnd.time,
+        excludeWeekends: false,
+      });
+      if (!stillFree.some((s) => s.startTime === body.startsAtUnix)) {
+        return NextResponse.json(
+          {
+            error:
+              "That time isn't free any more — someone's calendar changed since you searched. Search again to see what's left.",
+          },
+          { status: 409 }
+        );
+      }
+    } catch (err) {
+      console.warn("[admin/events] Slot re-check failed, booking anyway", {
+        idempotencyKey,
+        err,
+      });
+    }
+  }
 
   let nylasEvent;
   try {
@@ -226,9 +282,44 @@ export async function POST(request: Request) {
 
   // From here on, a REAL event with REAL invites already exists in Nylas —
   // every failure path below must say so, not imply nothing happened.
+  //
+  // The attendee rows go in the SAME transaction as the event, via db.batch().
+  // They used to be a second, separate insert, and when it failed the request
+  // still returned 200 "created" for a session with no attendees: invisible on
+  // every advisor's dashboard, no obstacle to removing the people on it, and
+  // unreschedulable, since the idempotency key is rebuilt from the attendee
+  // list. The event id isn't known until the first statement runs, so the
+  // second finds it by the idempotency key — unique, and the value we just
+  // wrote.
+  const attendeeValues = [
+    {
+      memberId: body.organizerMemberId,
+      email: resolvedEmail(body.organizerMemberId, organizerMember.email),
+      role: "guest",
+    },
+    // role: "advisor" is what lets /advisor say "you were the advisor on this
+    // one" rather than listing it identically to sessions they merely
+    // attended.
+    ...(advisorMember
+      ? [
+          {
+            memberId: advisorMember.id,
+            email: resolvedEmail(advisorMember.id, advisorMember.email),
+            role: "advisor",
+          },
+        ]
+      : []),
+    ...guestMembers.map((m) => ({
+      memberId: m.id,
+      email: resolvedEmail(m.id, m.email),
+      role: "guest",
+    })),
+  ];
+
   let inserted;
   try {
-    [inserted] = await db
+    const [eventRows] = await db.batch([
+      db
       .insert(events)
       .values({
         title: body.title,
@@ -247,7 +338,19 @@ export async function POST(request: Request) {
         organizerGrantId: organizerConnection.nylas_grant_id,
         idempotencyKey,
       })
-      .returning();
+        .returning(),
+      db.execute(raw`
+        INSERT INTO ${eventAttendees} (event_id, member_id, attendee_email, role)
+        SELECT e.id, v.member_id, v.attendee_email, v.role::attendee_role
+        FROM ${events} e
+        CROSS JOIN (VALUES ${raw.join(
+          attendeeValues.map((a) => raw`(${a.memberId}::int, ${a.email}::text, ${a.role}::text)`),
+          raw`, `
+        )}) AS v(member_id, attendee_email, role)
+        WHERE e.idempotency_key = ${idempotencyKey}
+      `),
+    ]);
+    inserted = eventRows[0];
   } catch (err) {
     if (isUniqueViolation(err)) {
       // A concurrent request beat us to the insert — this IS the actual
@@ -287,45 +390,6 @@ export async function POST(request: Request) {
       },
       { status: 500 }
     );
-  }
-
-  try {
-    await db.insert(eventAttendees).values([
-      {
-        eventId: inserted.id,
-        memberId: body.organizerMemberId,
-        attendeeEmail: resolvedEmail(body.organizerMemberId, organizerMember.email),
-      },
-      // role: "advisor" is what lets /advisor say "you were the advisor on
-      // this one" rather than listing it identically to sessions they merely
-      // attended. Everyone else defaults to "guest".
-      ...(advisorMember
-        ? [
-            {
-              eventId: inserted.id,
-              memberId: advisorMember.id,
-              attendeeEmail: resolvedEmail(advisorMember.id, advisorMember.email),
-              role: "advisor" as const,
-            },
-          ]
-        : []),
-      ...guestMembers.map((m) => ({
-        eventId: inserted.id,
-        memberId: m.id,
-        attendeeEmail: resolvedEmail(m.id, m.email),
-      })),
-    ]);
-  } catch (err) {
-    console.error("[admin/events] event_attendees insert failed after events row was created", {
-      idempotencyKey,
-      eventId: inserted.id,
-      nylasEventId: nylasEvent.id,
-      err,
-    });
-    // The event itself is saved and the invites already went out — this is a
-    // partial-write edge case (documented, accepted for V1), not a failure
-    // to report as if nothing happened.
-    return NextResponse.json({ event: inserted, alreadyExisted: false });
   }
 
   return NextResponse.json({ event: inserted, alreadyExisted: false });

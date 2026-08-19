@@ -71,8 +71,19 @@ export async function POST(request: Request) {
 
   const member = await getMemberByEmail(parsed.data.email);
   if (!member) {
+    // Worth being straight about what this does and doesn't achieve: the
+    // wording no longer confirms whether an address is registered, but a known
+    // one still gets a redirect URL and an unknown one still gets an error, so
+    // the difference remains observable to anyone probing deliberately. It
+    // can't be closed here — issuing a working auth URL for an address we
+    // don't recognise isn't possible.
+    //
+    // The control that actually matters is rate limiting at the edge, which
+    // this endpoint has none of (nothing in the codebase does). It is public,
+    // unauthenticated, takes an arbitrary email, and each call reaches Nylas.
+    // See the audit notes: add a Vercel Firewall rate-limit rule on this path.
     return NextResponse.json(
-      { error: "No matching member found. Contact an admin to be added." },
+      { error: "We couldn't start sign-in for that address. Check it, or ask an admin to add you." },
       { status: 404 }
     );
   }

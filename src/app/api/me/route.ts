@@ -86,7 +86,7 @@ export async function PATCH(request: Request) {
   const memberId = session.memberId;
 
   try {
-    await db
+    const saveTimezone = db
       .update(members)
       .set({ timezone: body.timezone })
       .where(eq(members.id, memberId));
@@ -101,12 +101,22 @@ export async function PATCH(request: Request) {
     // db.batch() runs these in a single Neon transaction, so a failure can't
     // leave the member with their availability deleted and nothing written
     // back. Deleting and inserting as two separate awaits could.
+    //
+    // The timezone save belongs in the SAME transaction, not before it. A
+    // member's timezone being null is what marks them as "never saved, treat
+    // as unconstrained" (see slotMatchesMemberAvailability); the moment it's
+    // set, their blocks apply strictly. Writing it separately meant a first
+    // save whose block insert failed left them with a timezone and zero
+    // blocks — which reads as "available never" — while the form showed
+    // success. They'd have vanished from every search with nothing to explain
+    // it.
     const deleteExisting = db
       .delete(memberAvailability)
       .where(eq(memberAvailability.memberId, memberId));
 
     if (body.availability.length > 0) {
       await db.batch([
+        saveTimezone,
         deleteExisting,
         db.insert(memberAvailability).values(
           body.availability.map((d) => ({
@@ -118,8 +128,9 @@ export async function PATCH(request: Request) {
         ),
       ]);
     } else {
-      // Every day off — nothing to insert, so no transaction needed.
-      await deleteExisting;
+      // Deliberately every day off. Still one transaction: the timezone must
+      // not land without the delete that goes with it.
+      await db.batch([saveTimezone, deleteExisting]);
     }
   } catch (err) {
     console.error("[api/me] Save failed", { memberId, err });

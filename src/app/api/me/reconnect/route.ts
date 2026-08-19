@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireMemberSession } from "@/lib/auth/member";
-import { getLatestConnections } from "@/db/queries";
+import { getLatestConnections, pickInviteConnection } from "@/db/queries";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
 import { asCalendarProvider, buildHostedAuthUrl } from "@/lib/nylas";
 import { normalizeEmail } from "@/lib/email";
@@ -28,7 +28,11 @@ export async function POST() {
   // precisely because their existing connection broke, so silently sending an
   // Outlook user to Google would hand them a second, wrong calendar rather
   // than repairing the one they came here to fix.
-  const [existing] = await getLatestConnections([session.memberId]);
+  // pickInviteConnection, not rows[0]. getLatestConnections returns one row
+  // per calendar now that a member can hold several, ordered by grant_email —
+  // taking the first would pick whichever address sorts alphabetically first
+  // and could send someone with both Google and Microsoft to the wrong one.
+  const existing = pickInviteConnection(await getLatestConnections([session.memberId]));
   const url = buildHostedAuthUrl({
     loginHint: normalizeEmail(session.member.email),
     state,

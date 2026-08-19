@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
@@ -50,7 +49,6 @@ const DAY_LABELS_FULL: Record<number, string> = {
 const PROVIDER_LABELS: Record<string, string> = {
   google: "Google Calendar",
   microsoft: "Microsoft/Outlook",
-  icloud: "iCloud",
 };
 function providerLabel(provider: string) {
   return PROVIDER_LABELS[provider] ?? provider.charAt(0).toUpperCase() + provider.slice(1);

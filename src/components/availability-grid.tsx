@@ -59,6 +59,16 @@ export function AvailabilityGrid({
   const weekDays = allDays.slice(weekOffset * 7, weekOffset * 7 + 7);
   const visibleDays = excludeWeekends ? weekDays.filter((d) => !isWeekendDateString(d)) : weekDays;
 
+  // Booked sessions the grid has no column for. "Exclude weekends" hides whole
+  // days, and a session booked on one of them became invisible AND
+  // unreachable — the only way to open a session is its cell, so it could not
+  // be cancelled or moved from anywhere in the app. Surfacing them as rows
+  // below the grid keeps every booked session reachable no matter how the
+  // search is filtered.
+  const hiddenBooked = bookedSlots.filter(
+    (b) => !visibleDays.includes(zonedDateTimeParts(b.startUnix, timezone).date)
+  );
+
   const timeRows = generateTimeRows(workingHoursStart, workingHoursEnd);
 
   // Keyed by wall-clock date+time, which is not unique on a DST fall-back day
@@ -189,6 +199,36 @@ export function AvailabilityGrid({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {hiddenBooked.length > 0 && (
+        <div className="mt-4 rounded-lg border border-border bg-secondary/40 p-3">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Booked outside this view
+          </p>
+          <ul className="mt-2 space-y-1">
+            {hiddenBooked.map((booked) => {
+              const { date } = zonedDateTimeParts(booked.startUnix, timezone);
+              return (
+                <li key={booked.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectBooked(booked)}
+                    className="text-left text-sm text-foreground underline-offset-2 hover:underline"
+                  >
+                    {booked.title}
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {formatDateLabel(date)}
+                      {isWeekendDateString(date) && excludeWeekends
+                        ? " — weekends are excluded from this search"
+                        : ""}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
     </div>

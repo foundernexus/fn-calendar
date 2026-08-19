@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getMemberByEmail, getLatestConnections } from "@/db/queries";
+import { getMemberByEmail, getLatestConnections, pickInviteConnection } from "@/db/queries";
 import { requireAdminSession } from "@/lib/auth/admin";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
 import { asCalendarProvider, buildHostedAuthUrl } from "@/lib/nylas";
@@ -37,7 +37,9 @@ export async function POST() {
   // Same reasoning as /api/me/reconnect: reuse the provider already on file
   // so an admin repairing a broken connection isn't switched to a different
   // calendar account behind their back.
-  const [existing] = await getLatestConnections([member.id]);
+  // Same reasoning as /api/me/reconnect: one row per calendar now, so the
+  // first is not necessarily the one they actually use.
+  const existing = pickInviteConnection(await getLatestConnections([member.id]));
   const url = buildHostedAuthUrl({
     loginHint: normalizeEmail(member.email),
     state,
