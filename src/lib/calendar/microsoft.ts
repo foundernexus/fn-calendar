@@ -1,0 +1,292 @@
+import { env } from "@/lib/env";
+import type { BusyInterval } from "@/lib/calendar/slots";
+
+/** Microsoft Outlook / Microsoft 365, spoken to directly through Graph.
+ *
+ * Same shape as the Google module, different vocabulary. Scopes match what the
+ * Nylas connector requested, so the switch changes who asks and not what for:
+ *   Calendars.ReadWrite — read free/busy, create and cancel sessions
+ *   offline_access      — without this Microsoft returns no refresh token at
+ *                         all, and the connection dies within the hour
+ *   User.Read           — which account this is, so we can bind it to a member
+ */
+const SCOPES = ["offline_access", "User.Read", "Calendars.ReadWrite"];
+
+const GRAPH = "https://graph.microsoft.com/v1.0";
+
+function authority() {
+  return `https://login.microsoftonline.com/${env.MICROSOFT_TENANT}`;
+}
+
+export function microsoftRedirectUri() {
+  return `${env.APP_URL}/api/auth/microsoft/callback`;
+}
+
+export function buildMicrosoftAuthUrl(params: { state: string; loginHint?: string }) {
+  const url = new URL(`${authority()}/oauth2/v2.0/authorize`);
+  url.searchParams.set("client_id", env.MICROSOFT_CLIENT_ID);
+  url.searchParams.set("redirect_uri", microsoftRedirectUri());
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("response_mode", "query");
+  url.searchParams.set("scope", SCOPES.join(" "));
+  url.searchParams.set("state", params.state);
+  if (params.loginHint) url.searchParams.set("login_hint", params.loginHint);
+  return url.toString();
+}
+
+/** Carries the provider's own error text. Microsoft's messages are the useful
+ * part — `AADSTS70000` and friends name the actual problem, and a bare status
+ * code names nothing. That exact error cost a morning when it was swallowed. */
+export class MicrosoftApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+    context: string
+  ) {
+    super(`Microsoft ${context} failed (${status}): ${body.slice(0, 500)}`);
+    this.name = "MicrosoftApiError";
+  }
+}
+
+async function graphFetch(url: string, init: RequestInit, context: string) {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    throw new MicrosoftApiError(res.status, await res.text().catch(() => ""), context);
+  }
+  return res;
+}
+
+export type MicrosoftTokens = {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt: Date;
+  email: string;
+};
+
+export async function exchangeMicrosoftCode(code: string): Promise<MicrosoftTokens> {
+  const res = await graphFetch(
+    `${authority()}/oauth2/v2.0/token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: env.MICROSOFT_CLIENT_ID,
+        client_secret: env.MICROSOFT_CLIENT_SECRET,
+        redirect_uri: microsoftRedirectUri(),
+        grant_type: "authorization_code",
+      }),
+    },
+    "code exchange"
+  );
+  const data = (await res.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+  };
+
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresAt: new Date(Date.now() + data.expires_in * 1000),
+    email: await fetchMicrosoftEmail(data.access_token),
+  };
+}
+
+/** `mail` is empty on plenty of accounts — personal Outlook addresses in
+ * particular — where `userPrincipalName` carries the address instead. Reading
+ * only `mail` is how a personal Outlook connection ends up bound to nobody. */
+async function fetchMicrosoftEmail(accessToken: string) {
+  const res = await graphFetch(
+    `${GRAPH}/me?$select=mail,userPrincipalName`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    "me"
+  );
+  const data = (await res.json()) as { mail?: string; userPrincipalName?: string };
+  const email = data.mail || data.userPrincipalName;
+  if (!email) throw new Error("Microsoft returned no email for this account");
+  return email;
+}
+
+export async function refreshMicrosoftToken(refreshToken: string) {
+  const res = await graphFetch(
+    `${authority()}/oauth2/v2.0/token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        refresh_token: refreshToken,
+        client_id: env.MICROSOFT_CLIENT_ID,
+        client_secret: env.MICROSOFT_CLIENT_SECRET,
+        scope: SCOPES.join(" "),
+        grant_type: "refresh_token",
+      }),
+    },
+    "token refresh"
+  );
+  const data = (await res.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+  };
+  return {
+    accessToken: data.access_token,
+    // Microsoft rotates refresh tokens: a refresh often returns a NEW one and
+    // retires the old. Callers must persist this when present, or the
+    // connection works until the next rotation and then stops for good.
+    refreshToken: data.refresh_token,
+    expiresAt: new Date(Date.now() + data.expires_in * 1000),
+  };
+}
+
+/** Busy periods from the signed-in mailbox.
+ *
+ * getSchedule against your own address covers every calendar in the mailbox,
+ * which is what we want — the equivalent of Google's calendar-list walk without
+ * needing the list.
+ *
+ * The Prefer header pins the response to UTC. Without it Graph answers in the
+ * mailbox's own timezone and omits any offset, so the timestamps parse as local
+ * time on the server and every busy block silently shifts by hours. */
+export async function fetchMicrosoftBusy(params: {
+  accessToken: string;
+  email: string;
+  startTime: number;
+  endTime: number;
+}): Promise<BusyInterval[]> {
+  const res = await graphFetch(
+    `${GRAPH}/me/calendar/getSchedule`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+        "Content-Type": "application/json",
+        Prefer: 'outlook.timezone="UTC"',
+      },
+      body: JSON.stringify({
+        schedules: [params.email],
+        startTime: { dateTime: graphDateTime(params.startTime), timeZone: "UTC" },
+        endTime: { dateTime: graphDateTime(params.endTime), timeZone: "UTC" },
+        availabilityViewInterval: 15,
+      }),
+    },
+    "getSchedule"
+  );
+  const data = (await res.json()) as {
+    value?: {
+      scheduleItems?: { status?: string; start: { dateTime: string }; end: { dateTime: string } }[];
+    }[];
+  };
+
+  const busy: BusyInterval[] = [];
+  for (const schedule of data.value ?? []) {
+    for (const item of schedule.scheduleItems ?? []) {
+      // Anything that isn't explicitly free counts as busy — tentative and
+      // out-of-office included. Offering a slot against a tentative meeting
+      // books over something the person is probably attending.
+      if (item.status === "free") continue;
+      busy.push({
+        start: Math.floor(Date.parse(asUtc(item.start.dateTime)) / 1000),
+        end: Math.floor(Date.parse(asUtc(item.end.dateTime)) / 1000),
+      });
+    }
+  }
+  return busy;
+}
+
+/** Graph wants "2026-08-19T09:00:00" with no trailing Z, and pairs it with a
+ * separate timeZone field. */
+function graphDateTime(unixSeconds: number) {
+  return new Date(unixSeconds * 1000).toISOString().replace(/\.\d{3}Z$/, "");
+}
+
+/** Graph returns timestamps with no offset even when the response is UTC, so
+ * they must be marked as UTC before parsing or the server's own timezone gets
+ * applied. */
+function asUtc(dateTime: string) {
+  return /(?:Z|[+-]\d{2}:\d{2})$/.test(dateTime) ? dateTime : `${dateTime}Z`;
+}
+
+export async function createMicrosoftEvent(params: {
+  accessToken: string;
+  title: string;
+  description?: string;
+  meetingUrl?: string;
+  startTime: number;
+  endTime: number;
+  timezone: string;
+  participants: { name?: string; email: string }[];
+}) {
+  const res = await graphFetch(
+    `${GRAPH}/me/events`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        subject: params.title,
+        body: params.description ? { contentType: "text", content: params.description } : undefined,
+        location: params.meetingUrl ? { displayName: params.meetingUrl } : undefined,
+        start: { dateTime: graphDateTime(params.startTime), timeZone: "UTC" },
+        end: { dateTime: graphDateTime(params.endTime), timeZone: "UTC" },
+        attendees: params.participants.map((p) => ({
+          emailAddress: { address: p.email, name: p.name },
+          type: "required",
+        })),
+      }),
+    },
+    "event create"
+  );
+  const data = (await res.json()) as { id: string; webLink?: string };
+  return { eventId: data.id, url: data.webLink };
+}
+
+export async function updateMicrosoftEvent(params: {
+  accessToken: string;
+  eventId: string;
+  startTime: number;
+  endTime: number;
+}) {
+  await graphFetch(
+    `${GRAPH}/me/events/${encodeURIComponent(params.eventId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        start: { dateTime: graphDateTime(params.startTime), timeZone: "UTC" },
+        end: { dateTime: graphDateTime(params.endTime), timeZone: "UTC" },
+      }),
+    },
+    "event update"
+  );
+}
+
+export async function deleteMicrosoftEvent(params: { accessToken: string; eventId: string }) {
+  const res = await fetch(`${GRAPH}/me/events/${encodeURIComponent(params.eventId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${params.accessToken}` },
+  });
+  // Already gone is the state we wanted — see the Google module for why this
+  // must not be an error.
+  if (!res.ok && res.status !== 404 && res.status !== 410) {
+    throw new MicrosoftApiError(res.status, await res.text().catch(() => ""), "event delete");
+  }
+}
+
+/** Microsoft has no public endpoint to revoke a single refresh token the way
+ * Google does — the nearest equivalents invalidate every session the user has
+ * everywhere, which is far beyond what "disconnect this calendar" should do.
+ *
+ * So disconnecting deletes our stored token and nothing else. The consequence
+ * is worth stating plainly rather than hiding behind a no-op: the app instantly
+ * loses all access, but the consent entry stays listed under the member's
+ * Microsoft account until they remove it there. The disconnect copy should say
+ * so instead of implying we revoked it. */
+export async function revokeMicrosoftToken(_refreshToken: string) {
+  return { revokedAtProvider: false as const };
+}

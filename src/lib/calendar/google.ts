@@ -1,0 +1,317 @@
+import { env } from "@/lib/env";
+import type { BusyInterval } from "@/lib/calendar/slots";
+
+/** Google Calendar, spoken to directly.
+ *
+ * Replaces the Google half of what Nylas did. Everything here is plain OAuth 2
+ * and REST — there is no SDK, because the four calls we need are smaller than
+ * the wrapper would be.
+ *
+ * Scopes are deliberately identical to what the Nylas connector requested, so
+ * the switch changes who asks and not what is asked for:
+ *   calendar.readonly — list calendars and read free/busy
+ *   calendar.events   — create, move and cancel the sessions we book
+ * Narrowing to calendar.freebusy is tempting and would show a friendlier
+ * consent screen, but it can't enumerate a member's several calendars, which
+ * would quietly stop checking their secondary ones. That's a behaviour change,
+ * so it isn't part of this switch. */
+const SCOPES = [
+  "https://www.googleapis.com/auth/calendar.readonly",
+  "https://www.googleapis.com/auth/calendar.events",
+  // Identifies which account was connected. Nylas told us the grant's email;
+  // without this we would have no idea whose calendar we just linked.
+  "https://www.googleapis.com/auth/userinfo.email",
+];
+
+const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const REVOKE_URL = "https://oauth2.googleapis.com/revoke";
+const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
+
+export function googleRedirectUri() {
+  return `${env.APP_URL}/api/auth/google/callback`;
+}
+
+/** Where to send someone to connect their Google calendar.
+ *
+ * `access_type=offline` plus `prompt=consent` is what actually returns a
+ * refresh token. Google only issues one on the FIRST authorisation for a given
+ * user/client pair; without prompt=consent, anyone reconnecting gets an access
+ * token good for an hour and nothing to renew it with, and their calendar
+ * silently stops being readable that afternoon. Asking every time costs one
+ * extra screen and removes a whole class of "it worked yesterday". */
+export function buildGoogleAuthUrl(params: { state: string; loginHint?: string }) {
+  const url = new URL(AUTH_URL);
+  url.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
+  url.searchParams.set("redirect_uri", googleRedirectUri());
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", SCOPES.join(" "));
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent");
+  url.searchParams.set("include_granted_scopes", "true");
+  url.searchParams.set("state", params.state);
+  if (params.loginHint) url.searchParams.set("login_hint", params.loginHint);
+  return url.toString();
+}
+
+/** Wraps a non-2xx provider response with its body attached.
+ *
+ * The body is the entire point: Google's errors say `invalid_grant` or
+ * `insufficientPermissions`, and the status code alone says none of it. A bare
+ * `catch {}` over this call is what turned yesterday's outage into a morning of
+ * guessing. */
+export class GoogleApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+    context: string
+  ) {
+    super(`Google ${context} failed (${status}): ${body.slice(0, 500)}`);
+    this.name = "GoogleApiError";
+  }
+}
+
+async function googleFetch(url: string, init: RequestInit, context: string) {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    throw new GoogleApiError(res.status, await res.text().catch(() => ""), context);
+  }
+  return res;
+}
+
+export type GoogleTokens = {
+  accessToken: string;
+  /** Absent when Google decides this isn't a first authorisation. Callers must
+   * treat that as a failure to connect rather than storing a session that dies
+   * in an hour. */
+  refreshToken?: string;
+  expiresAt: Date;
+  email: string;
+};
+
+export async function exchangeGoogleCode(code: string): Promise<GoogleTokens> {
+  const res = await googleFetch(
+    TOKEN_URL,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: env.GOOGLE_CLIENT_ID,
+        client_secret: env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: googleRedirectUri(),
+        grant_type: "authorization_code",
+      }),
+    },
+    "code exchange"
+  );
+  const data = (await res.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+    id_token?: string;
+  };
+
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresAt: new Date(Date.now() + data.expires_in * 1000),
+    email: await fetchGoogleEmail(data.access_token),
+  };
+}
+
+/** Whose calendar this is. Read from the userinfo endpoint rather than by
+ * decoding the id_token: the value decides which member a calendar is bound to,
+ * and a JWT we haven't verified is not something to make that decision on. */
+async function fetchGoogleEmail(accessToken: string) {
+  const res = await googleFetch(
+    "https://www.googleapis.com/oauth2/v2/userinfo",
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    "userinfo"
+  );
+  const data = (await res.json()) as { email?: string };
+  if (!data.email) throw new Error("Google returned no email for this account");
+  return data.email;
+}
+
+export async function refreshGoogleToken(refreshToken: string) {
+  const res = await googleFetch(
+    TOKEN_URL,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        refresh_token: refreshToken,
+        client_id: env.GOOGLE_CLIENT_ID,
+        client_secret: env.GOOGLE_CLIENT_SECRET,
+        grant_type: "refresh_token",
+      }),
+    },
+    "token refresh"
+  );
+  const data = (await res.json()) as { access_token: string; expires_in: number };
+  return {
+    accessToken: data.access_token,
+    expiresAt: new Date(Date.now() + data.expires_in * 1000),
+  };
+}
+
+/** Busy periods across every calendar this account can see.
+ *
+ * Two calls, not one: freeBusy only reports on calendars you name, so the
+ * calendar list is fetched first. Asking only for "primary" was how a member's
+ * second work calendar could sit there full of meetings while the app declared
+ * them free.
+ *
+ * Google caps a freeBusy query at 50 calendars, so the list is chunked. */
+export async function fetchGoogleBusy(params: {
+  accessToken: string;
+  startTime: number;
+  endTime: number;
+}): Promise<BusyInterval[]> {
+  const calendarIds = await listGoogleCalendarIds(params.accessToken);
+  if (calendarIds.length === 0) return [];
+
+  const busy: BusyInterval[] = [];
+  for (let i = 0; i < calendarIds.length; i += 50) {
+    const chunk = calendarIds.slice(i, i + 50);
+    const res = await googleFetch(
+      `${CALENDAR_API}/freeBusy`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          timeMin: new Date(params.startTime * 1000).toISOString(),
+          timeMax: new Date(params.endTime * 1000).toISOString(),
+          items: chunk.map((id) => ({ id })),
+        }),
+      },
+      "freeBusy"
+    );
+    const data = (await res.json()) as {
+      calendars: Record<string, { busy?: { start: string; end: string }[]; errors?: unknown[] }>;
+    };
+
+    for (const entry of Object.values(data.calendars ?? {})) {
+      // A per-calendar error (access revoked, calendar deleted) is reported
+      // inside a 200 response. Treated as "nothing known", never as "free":
+      // the caller merges these into a busy set, and silently dropping a
+      // calendar we failed to read would offer a slot we can't vouch for.
+      for (const block of entry.busy ?? []) {
+        busy.push({
+          start: Math.floor(Date.parse(block.start) / 1000),
+          end: Math.floor(Date.parse(block.end) / 1000),
+        });
+      }
+    }
+  }
+  return busy;
+}
+
+async function listGoogleCalendarIds(accessToken: string) {
+  const res = await googleFetch(
+    `${CALENDAR_API}/users/me/calendarList?minAccessRole=freeBusyReader&maxResults=250`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    "calendarList"
+  );
+  const data = (await res.json()) as { items?: { id: string; selected?: boolean }[] };
+  return (data.items ?? []).map((c) => c.id);
+}
+
+export async function createGoogleEvent(params: {
+  accessToken: string;
+  title: string;
+  description?: string;
+  meetingUrl?: string;
+  startTime: number;
+  endTime: number;
+  timezone: string;
+  participants: { name?: string; email: string }[];
+}) {
+  const res = await googleFetch(
+    // sendUpdates=all is what actually emails the invitations. Without it the
+    // event appears on the organiser's calendar and nobody else ever hears
+    // about it.
+    `${CALENDAR_API}/calendars/primary/events?sendUpdates=all&conferenceDataVersion=0`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        summary: params.title,
+        description: params.description,
+        // An admin-pasted URL of unknown provider goes in `location`, not a
+        // typed conferencing object — it shows on the invite whatever it is.
+        location: params.meetingUrl,
+        start: { dateTime: new Date(params.startTime * 1000).toISOString(), timeZone: params.timezone },
+        end: { dateTime: new Date(params.endTime * 1000).toISOString(), timeZone: params.timezone },
+        attendees: params.participants.map((p) => ({ email: p.email, displayName: p.name })),
+      }),
+    },
+    "event create"
+  );
+  const data = (await res.json()) as { id: string; htmlLink?: string };
+  return { eventId: data.id, url: data.htmlLink };
+}
+
+export async function updateGoogleEvent(params: {
+  accessToken: string;
+  eventId: string;
+  startTime: number;
+  endTime: number;
+  timezone: string;
+}) {
+  // PATCH, not a delete-and-recreate: attendees get a "this moved" update
+  // rather than a cancellation followed by a fresh invite, so it stays one
+  // entry in their calendar and keeps whatever they had already answered.
+  await googleFetch(
+    `${CALENDAR_API}/calendars/primary/events/${encodeURIComponent(params.eventId)}?sendUpdates=all`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        start: { dateTime: new Date(params.startTime * 1000).toISOString(), timeZone: params.timezone },
+        end: { dateTime: new Date(params.endTime * 1000).toISOString(), timeZone: params.timezone },
+      }),
+    },
+    "event update"
+  );
+}
+
+export async function deleteGoogleEvent(params: { accessToken: string; eventId: string }) {
+  const res = await fetch(
+    `${CALENDAR_API}/calendars/primary/events/${encodeURIComponent(params.eventId)}?sendUpdates=all`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${params.accessToken}` } }
+  );
+  // Already gone (410) or never there (404) is the state we wanted. Treating
+  // those as failures would leave the admin unable to clear a session from the
+  // grid because it had been deleted in Google first.
+  if (!res.ok && res.status !== 404 && res.status !== 410) {
+    throw new GoogleApiError(res.status, await res.text().catch(() => ""), "event delete");
+  }
+}
+
+/** Hands the refresh token back to Google, which invalidates it and drops the
+ * app from the member's account permissions page. Marking our row revoked
+ * without this leaves the grant alive on Google's side — the member sees an app
+ * they think they removed still holding access. */
+export async function revokeGoogleToken(refreshToken: string) {
+  const res = await fetch(REVOKE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ token: refreshToken }),
+  });
+  // 400 means Google no longer recognises it — already revoked or expired,
+  // which is the outcome we were after.
+  if (!res.ok && res.status !== 400) {
+    throw new GoogleApiError(res.status, await res.text().catch(() => ""), "token revoke");
+  }
+}

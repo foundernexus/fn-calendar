@@ -17,6 +17,21 @@ const envSchema = z.object({
   NYLAS_CALLBACK_URI: z.string(),
   ADMIN_EMAILS: z.string(),
   APP_URL: z.string(),
+  // Talking to Google and Microsoft directly instead of through Nylas. These
+  // carry `.default("")` rather than following the plain `z.string()` rule
+  // above ONLY while the switch is in progress: nothing reads them yet, and a
+  // missing key would otherwise break local dev and CI before the values exist
+  // everywhere. Drop the defaults in the cutover commit, once the Nylas vars
+  // come out — at that point a blank value here means nobody can sign in, and
+  // that should fail loudly at boot rather than at 3pm on a Tuesday.
+  GOOGLE_CLIENT_ID: z.string().default(""),
+  GOOGLE_CLIENT_SECRET: z.string().default(""),
+  MICROSOFT_CLIENT_ID: z.string().default(""),
+  MICROSOFT_CLIENT_SECRET: z.string().default(""),
+  /** "common" admits both work and personal Microsoft accounts, matching how
+   * the Azure app registration is configured. A tenant GUID here would lock
+   * out every founder using a personal Outlook address. */
+  MICROSOFT_TENANT: z.string().default("common"),
   // Every session/state token in the app (admin, member, OAuth state) is
   // HMAC-signed with this one value — unlike the other vars above, a blank
   // or weak value here isn't just "not configured yet," it's a live security
