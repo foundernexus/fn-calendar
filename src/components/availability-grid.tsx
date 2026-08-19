@@ -139,10 +139,21 @@ export function AvailabilityGrid({
         </p>
       ) : (
         <div className="overflow-x-auto">
+          {/* Minimum width comes from the COLUMNS, never from cell content.
+              It used to be min-w-max, which asks the browser to fit the widest
+              thing inside on one line — fine while every cell was empty, but
+              the first booked session put a title in one, and the whole grid
+              stretched to fit that title, forcing the page sideways. `truncate`
+              on the cell can't prevent it, because max-content sizing measures
+              the text before it is clipped.
+              This keeps the original intent — columns never get crushed below
+              5.5rem, and the container scrolls when they don't fit — without
+              letting one long session title decide how wide the week is. */}
           <div
-            className="grid min-w-max"
+            className="grid"
             style={{
               gridTemplateColumns: `5rem repeat(${visibleDays.length}, minmax(5.5rem, 1fr))`,
+              minWidth: `calc(5rem + ${visibleDays.length} * 5.5rem)`,
             }}
           >
             <div />
@@ -173,7 +184,11 @@ export function AvailabilityGrid({
                         onClick={() => onSelectBooked(booked)}
                         title={`${booked.title} — click to view or cancel`}
                         aria-label={`${booked.title}, booked — view or cancel`}
-                        className="truncate border-b border-l border-border bg-white px-1.5 py-1.5 text-left text-[10px] text-foreground ring-1 ring-inset ring-foreground/15 transition-colors hover:bg-secondary"
+                        // min-w-0 belt and braces: a grid item's default
+                        // minimum size is its content, so without this a long
+                        // title can still push its own column wide even though
+                        // the grid no longer sizes itself to content.
+                        className="min-w-0 truncate border-b border-l border-border bg-white px-1.5 py-1.5 text-left text-[10px] text-foreground ring-1 ring-inset ring-foreground/15 transition-colors hover:bg-secondary"
                       >
                         {booked.title}
                       </button>
