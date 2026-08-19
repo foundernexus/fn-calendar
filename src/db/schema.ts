@@ -76,9 +76,26 @@ export const calendarConnections = pgTable(
     memberId: integer("member_id")
       .notNull()
       .references(() => members.id, { onDelete: "cascade" }),
-    nylasGrantId: text("nylas_grant_id").notNull().unique(),
+    // Nullable since the switch to talking to Google and Microsoft directly:
+    // rows created that way have no Nylas grant at all. Still unique, so the
+    // remaining Nylas rows can't collide while they're being retired.
+    nylasGrantId: text("nylas_grant_id").unique(),
     provider: text("provider").notNull(),
     grantEmail: text("grant_email").notNull(),
+    // The OAuth refresh token, encrypted (see lib/calendar/crypto.ts). This is
+    // what replaced the Nylas grant: a long-lived credential we now hold
+    // ourselves rather than delegate.
+    //
+    // Its presence is what makes a row usable. The Nylas rows that predate the
+    // switch have none, so they read as "needs reconnect" through the existing
+    // machinery without any special case — which is exactly the prompt those
+    // members need to see.
+    refreshTokenEncrypted: text("refresh_token_encrypted"),
+    // Short-lived, cached only to avoid a refresh round trip on every single
+    // availability search. Losing it costs one extra request, never a
+    // connection, so it is safe to clear at any time.
+    accessTokenEncrypted: text("access_token_encrypted"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
     // Which Nylas application (client_id) this grant was created under —
     // grants aren't portable between Nylas apps (e.g. Sandbox vs Production,
     // or after rotating to a new app), so a row whose nylasClientId doesn't
@@ -132,7 +149,22 @@ export const events = pgTable("events", {
   organizerMemberId: integer("organizer_member_id")
     .notNull()
     .references(() => members.id),
-  nylasEventId: text("nylas_event_id").notNull(),
+  // Nullable since the switch away from Nylas — see provider_event_id below,
+  // which is where new bookings record their id.
+  nylasEventId: text("nylas_event_id"),
+  /** The event id as Google or Microsoft knows it. Needed to move or cancel
+   * the session later, and meaningless without knowing WHICH connection it was
+   * created on — hence organizerConnectionId below. */
+  providerEventId: text("provider_event_id"),
+  /** The connection the event was actually created on, pinned at booking time.
+   *
+   * Same reasoning as organizerGrantId before it: looking the organiser's
+   * calendar up fresh would silently target the wrong one the moment they
+   * change which calendar receives invites, and the cancellation would fail
+   * while the meeting sat in everyone's diary. Deliberately no foreign key —
+   * removing a calendar must not cascade away the record of sessions booked
+   * from it. */
+  organizerConnectionId: integer("organizer_connection_id"),
   // The grant the event was actually created on. Nylas resolves an event id
   // within a grant, so cancelling or moving it has to use the same one —
   // and now that a member can hold several calendars, "the organizer's

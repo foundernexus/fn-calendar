@@ -124,11 +124,16 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     // Stale rows point at grants on a Nylas app we no longer hold credentials
     // for — revoking those would 401 and tells us nothing. Only current-app
     // grants are ours to revoke.
+    // The nulls are rows connected directly to Google/Microsoft rather than
+    // through Nylas — there is no grant to revoke, and passing null here would
+    // throw inside the loop and be logged as a revoke failure the admin can do
+    // nothing about. Their own revocation lands with the cutover.
     const grantIds = [
       ...new Set(
         connections
           .filter((c) => c.nylasClientId === env.NYLAS_CLIENT_ID)
           .map((c) => c.nylasGrantId)
+          .filter((id): id is string => id !== null)
       ),
     ];
 

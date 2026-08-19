@@ -57,6 +57,13 @@
       "when": 1787089076029,
       "tag": "0007_strange_prism",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787170190799,
+      "tag": "0008_faulty_lethal_legion",
+      "breakpoints": true
     }
   ]
 }

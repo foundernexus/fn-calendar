@@ -156,6 +156,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const endsAtUnix = body.startsAtUnix + body.durationMinutes * 60;
 
+  // nylasEventId became nullable when the switch to talking to Google and
+  // Microsoft directly began. Until the cutover this route still speaks Nylas,
+  // so an event without one cannot be moved here — and saying so beats moving
+  // nothing while reporting success.
+  if (!event.nylasEventId) {
+    return NextResponse.json(
+      {
+        error:
+          "That session was booked through a calendar connection that's no longer available. Cancel it and book it again.",
+      },
+      { status: 409 }
+    );
+  }
+
   try {
     await rescheduleNylasEvent({
       organizerGrantId,
@@ -261,6 +275,19 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       {
         error:
           "The session lead's calendar is no longer connected, so this can't be cancelled automatically. Delete it from their calendar directly.",
+      },
+      { status: 409 }
+    );
+  }
+
+  // Same nullable-column guard as the reschedule path above. Cancelling is the
+  // more dangerous one to fudge: marking our row cancelled while the invite
+  // stays in everyone's calendar is worse than refusing.
+  if (!event.nylasEventId) {
+    return NextResponse.json(
+      {
+        error:
+          "That session was booked through a calendar connection that's no longer available, so it can't be cancelled automatically. Remove it from the calendar directly.",
       },
       { status: 409 }
     );
