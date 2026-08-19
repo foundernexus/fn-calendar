@@ -264,7 +264,7 @@ export function MemberSettingsForm({
           themselves they end up visibly uneven, which reads as broken rather
           than deliberate. */}
       <div className="grid gap-5 lg:grid-cols-2">
-      <div className="rounded-xl border border-border bg-card p-6 shadow-card">
+      <div className="rounded-lg border border-border bg-card p-6 shadow-card">
         {/* Stacked, not two columns inside a column: the timezone select was
             cramped beside the name, and the taller card sits closer to the
             calendars beside it. */}
@@ -331,7 +331,7 @@ export function MemberSettingsForm({
         <CalendarList calendars={calendars} />
       </div>
 
-      <div className="mt-5 rounded-xl border border-border bg-card p-6 shadow-card">
+      <div className="mt-5 rounded-lg border border-border bg-card p-6 shadow-card">
         <p className="text-base font-semibold text-foreground">Weekly availability</p>
         <p className="mt-1 text-sm text-muted-foreground">
           The hours you&apos;re open to sessions. Your calendar is still checked on top of this —
@@ -416,7 +416,7 @@ export function MemberSettingsForm({
       {/* Sticky: three blocks on several days can still outgrow a short
           window, and a Save you have to hunt for is a Save people forget to
           press. */}
-      <div className="sticky bottom-0 z-10 mt-5 flex justify-end rounded-xl border border-border bg-card/95 px-5 py-3 shadow-card backdrop-blur">
+      <div className="sticky bottom-0 z-10 mt-5 flex justify-end rounded-lg border border-border bg-card/95 px-5 py-3 shadow-card backdrop-blur">
         <Button type="submit" disabled={submitting}>
           {submitting ? "Saving…" : "Save"}
         </Button>

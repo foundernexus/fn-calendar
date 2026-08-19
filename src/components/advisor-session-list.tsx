@@ -150,7 +150,7 @@ function SessionRow({ session }: { session: MemberSession }) {
 export function AdvisorSessionList({ sessions }: { sessions: MemberSession[] }) {
   if (sessions.length === 0) {
     return (
-      <p className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-card">
+      <p className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground shadow-card">
         Nothing booked yet. Once your availability is saved, admins can book you into sessions and
         they&apos;ll show up here.
       </p>
@@ -166,7 +166,7 @@ export function AdvisorSessionList({ sessions }: { sessions: MemberSession[] }) 
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-border bg-card p-6 shadow-card">
+      <div className="rounded-lg border border-border bg-card p-6 shadow-card">
         <p className="text-base font-semibold text-foreground">Upcoming</p>
         {upcoming.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">Nothing coming up.</p>
@@ -185,7 +185,7 @@ export function AdvisorSessionList({ sessions }: { sessions: MemberSession[] }) 
       </div>
 
       {past.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-6 shadow-card">
+        <div className="rounded-lg border border-border bg-card p-6 shadow-card">
           <p className="text-base font-semibold text-foreground">Past</p>
           <ul className="mt-3 divide-y divide-border">
             {past.map((s) => (

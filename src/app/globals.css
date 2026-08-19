@@ -163,4 +163,19 @@
     font-weight: 700;
     letter-spacing: -0.015em;
   }
+
+  /* Tailwind v4 dropped `cursor: pointer` on buttons from its base styles, so
+     every button in the app showed a plain arrow and gave no sign it could be
+     clicked. Restored here rather than on each component: it has to hold for
+     the bare <button>s too — grid cells, calendar rows, the trash icons — not
+     only the ones built on the Button primitive.
+
+     Disabled controls keep the default arrow, which is the whole point of the
+     distinction. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  label:has(> input[type="radio"]:not(:disabled)),
+  label:has(> input[type="checkbox"]:not(:disabled)) {
+    cursor: pointer;
+  }
 }

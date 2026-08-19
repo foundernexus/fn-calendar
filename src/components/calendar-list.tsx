@@ -90,7 +90,7 @@ export function CalendarList({ calendars }: { calendars: MemberCalendar[] }) {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-6 shadow-card">
+    <div className="rounded-lg border border-border bg-card p-6 shadow-card">
       <p className="text-base font-semibold text-foreground">Your calendars</p>
       <p className="mt-1 text-sm text-muted-foreground">
         {calendars.length > 1
