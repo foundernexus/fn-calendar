@@ -7,7 +7,12 @@
  * a sighted-only cue should be responsible for carrying. */
 export function ProviderIcon({
   provider,
-  className = "size-4",
+  // shrink-0 is not decoration. These are almost always laid out in a flex row
+  // beside text, and a flex item shrinks before its siblings do — so in a
+  // crowded row (a member holding two calendars, say) the browser squeezes the
+  // mark instead of the label, and it renders visibly clipped. Anything passing
+  // its own className should keep shrink-0 in it.
+  className = "size-4 shrink-0",
 }: {
   provider: string;
   className?: string;

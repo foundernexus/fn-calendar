@@ -289,7 +289,9 @@ function StatusMark({ member }: { member: MemberWithConnection }) {
     // them are checked before a slot is offered. The invite target is the one
     // named in the Email column, so it isn't singled out again here.
     return (
-      <span className="flex items-center gap-1">
+      // A member with two calendars puts two marks in one narrow cell, which is
+      // exactly where the row runs out of room — so this doesn't shrink either.
+      <span className="flex shrink-0 items-center gap-1">
         {member.connections.map((c) => (
           <ProviderIcon key={c.grantEmail} provider={c.provider} />
         ))}
