@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProviderIcon } from "@/components/provider-icon";
 import type { CalendarProvider } from "@/lib/nylas";
 
 /** Rendered as our own buttons rather than letting Nylas's hosted page show a
@@ -70,17 +70,24 @@ export function ConnectForm({ initialEmail }: { initialEmail?: string }) {
           onChange={(e) => setEmail(e.target.value)}
         />
       </div>
-      <div className="flex flex-col gap-2">
+      {/* Full-width, taller than the app's usual buttons, each carrying its
+          provider's mark — the shape people already know from every other
+          sign-in page. Both are outlined rather than one being filled: this
+          isn't a primary action and a fallback, it's a choice between two
+          equals, and colouring one of them steers people towards a calendar
+          that might not be theirs. */}
+      <div className="flex flex-col gap-3 pt-1">
         {PROVIDERS.map((provider) => (
-          <Button
+          <button
             key={provider.id}
             type="button"
-            variant={provider.id === "google" ? "default" : "outline"}
             disabled={pending !== null}
             onClick={() => handleConnect(provider.id)}
+            className="flex h-12 w-full items-center justify-center gap-3 rounded-lg border border-border bg-card text-sm font-medium text-foreground shadow-card transition-colors hover:bg-secondary disabled:pointer-events-none disabled:opacity-60"
           >
+            <ProviderIcon provider={provider.id} className="size-5 shrink-0" />
             {pending === provider.id ? "Continuing…" : provider.label}
-          </Button>
+          </button>
         ))}
       </div>
     </form>
