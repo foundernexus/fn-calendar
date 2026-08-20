@@ -161,6 +161,15 @@ export async function refreshMicrosoftToken(refreshToken: string) {
  * which is what we want — the equivalent of Google's calendar-list walk without
  * needing the list.
  *
+ * Microsoft's reference page lists this endpoint as "Not supported" for
+ * delegated personal Microsoft accounts. That is wrong, or at least out of
+ * date: verified on 2026-08-20 against a personal outlook.com mailbox by
+ * putting a block on the calendar by hand and confirming the availability grid
+ * excluded exactly that slot. Written down because the documented position
+ * looks like a reason to rip this out and reach for calendarView instead —
+ * don't, without re-testing it first. Several members are on personal Outlook
+ * accounts and read their free/busy through here.
+ *
  * The Prefer header pins the response to UTC. Without it Graph answers in the
  * mailbox's own timezone and omits any offset, so the timestamps parse as local
  * time on the server and every busy block silently shifts by hours. */
