@@ -45,7 +45,23 @@ export function buildGoogleAuthUrl(params: {
   url.searchParams.set("scope", requestedScopes("google", params.access).join(" "));
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent");
-  url.searchParams.set("include_granted_scopes", "true");
+  // Deliberately NOT include_granted_scopes=true.
+  //
+  // That flag is incremental authorisation: the returned token also covers
+  // every scope this account ever granted the app. Harmless while the scope
+  // list only ever grew, and directly contrary to the point once it shrank —
+  // everyone who connected before the narrowing granted calendar.readonly, and
+  // with this on they would keep it forever no matter how little we asked for.
+  // The consent screen would show two modest lines while the token quietly
+  // carried the broad read they thought they were leaving behind.
+  //
+  // It also made the capability check unfalsifiable: someone who unticks a
+  // permission still gets a token carrying it from the earlier grant, so a
+  // withheld permission would pass the check and look fine.
+  //
+  // Note this does not shrink a grant that already exists — Google keeps the
+  // old consent on file. Clearing that is the account owner's to do, at
+  // myaccount.google.com/permissions.
   url.searchParams.set("state", params.state);
   if (params.loginHint) url.searchParams.set("login_hint", params.loginHint);
   return url.toString();
