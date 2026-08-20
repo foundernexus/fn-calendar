@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="FounderNexus">
+  <!--
+    Replaces the default favicon that ships with a new Next.js project — the
+    Vercel mark, which is what sat in the tab strip until now.
+
+    Navy #01052A is the app's own ink (--foreground) and the blue #007BE4 is its
+    single accent (--primary), so the tab matches the product rather than
+    guessing at a brand. A filled tile rather than bare letters because a
+    favicon is rendered at 16px: an outline glyph turns to mush at that size,
+    while a solid shape with high contrast stays readable.
+  -->
+  <rect width="64" height="64" rx="14" fill="#01052A"/>
+  <text
+    x="32" y="33"
+    font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    font-size="30" font-weight="700" letter-spacing="-1.5"
+    fill="#FFFFFF" text-anchor="middle" dominant-baseline="central"
+  >FN</text>
+  <!-- A single accent dot: the one flash of brand blue, and enough asymmetry to
+       tell this tab apart from any other dark square at a glance. -->
+  <circle cx="50" cy="15" r="6" fill="#007BE4"/>
+</svg>
