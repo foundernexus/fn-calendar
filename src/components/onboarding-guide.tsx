@@ -64,7 +64,7 @@ export function OnboardingGuide({
   const [openStepId, setOpenStepId] = useState<string | null>(null);
   const [tourRunning, setTourRunning] = useState(false);
 
-  const collapsedKey = `fn-guide-collapsed:${storageKey}`;
+  const openKey = `fn-guide-open:${storageKey}`;
   const hasTour = steps.some((s) => s.target);
 
   useEffect(() => {
@@ -73,32 +73,30 @@ export function OnboardingGuide({
     // already been shown around gets the checklist and nothing else.
     if (hasTour && !tourAlreadyDone(storageKey)) setTourRunning(true);
 
-    let collapsed = false;
+    let openedBefore = false;
     try {
-      collapsed = window.sessionStorage.getItem(collapsedKey) === "1";
+      openedBefore = window.sessionStorage.getItem(openKey) === "1";
     } catch {
       // Storage blocked (private mode, or a browser setting) — fall through to
       // the default rather than breaking the page over a preference.
     }
-    // Open by default on arrival, whether or not the setup is finished. Someone
-    // signing in has just been handed a tool they may not have used in weeks,
-    // and the steps double as the reference for how it works — a panel that
-    // only appears while something is outstanding is missing exactly when
-    // they've forgotten which calendar receives the invites.
+    // Collapsed by default. It used to open itself on arrival, which made sense
+    // when the checklist was the only thing explaining the page — but the
+    // walkthrough does that now, and having both compete for attention on the
+    // first screen is just noise. What remains is a small pill with the count,
+    // which someone opens when they want it.
     //
-    // sessionStorage, not localStorage, is what makes that bearable: closing it
-    // sticks for as long as they're working, and a fresh sign-in opens it
-    // again. Persisting the dismissal forever would mean one stray click hides
-    // it for good, on a panel most people meet exactly once.
-    setExpanded(!collapsed);
+    // sessionStorage remembers only that it was opened, so it stays open while
+    // they work and returns to the pill on the next sign-in.
+    setExpanded(openedBefore);
     setMounted(true);
-  }, [collapsedKey, hasTour, storageKey]);
+  }, [openKey, hasTour, storageKey]);
 
   function setCollapsed(collapsed: boolean) {
     setExpanded(!collapsed);
     try {
-      if (collapsed) window.sessionStorage.setItem(collapsedKey, "1");
-      else window.sessionStorage.removeItem(collapsedKey);
+      if (collapsed) window.sessionStorage.removeItem(openKey);
+      else window.sessionStorage.setItem(openKey, "1");
     } catch {
       // Same as above: the panel still works for this visit, it just won't
       // remember the choice.
@@ -115,25 +113,28 @@ export function OnboardingGuide({
         <GuidedTour steps={steps} storageKey={storageKey} onFinish={() => setTourRunning(false)} />
       )}
 
-      {/* Bottom-right, not top-right. Top-right is where every page keeps its
-          own primary action — "Add person" on People, the search on Schedule —
-          and a floating panel there sits directly on top of them.
+      {/* Bottom-LEFT. Every page in this app keeps its own actions on the right
+          — "Add person", the search, Save — so the left corner is the one place
+          a floating panel cannot land on top of something that matters.
           pointer-events-none on the wrapper is the other half, and the more
-          important one: this box is 20rem wide even when it has collapsed to a
+          important one: this box keeps its full width even when collapsed to a
           small pill, so without it the corner holds an INVISIBLE rectangle that
           swallows clicks meant for whatever is underneath. That is exactly what
           happened — the middle of Add person stopped responding while its edges
           still worked. Only the visible parts take pointer events back. */}
-      <div className="pointer-events-none fixed right-4 bottom-4 z-40 flex w-[min(20rem,calc(100vw-2rem))] flex-col items-end lg:right-6">
+      <div className="pointer-events-none fixed bottom-4 left-4 z-40 flex w-[min(15rem,calc(100vw-2rem))] flex-col items-start lg:left-6">
         {expanded ? (
           <div className="pointer-events-auto w-full rounded-lg border border-border bg-card shadow-card">
-            <div className="flex items-start justify-between gap-2 border-b border-border p-4">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground">{heading}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {allRequiredDone ? "Nothing left to do." : `${done} of ${total} done`}
-                </p>
-              </div>
+            {/* Heading and count on one line: two lines of chrome above a
+                three-item list made the panel taller than the thing it was
+                describing. */}
+            <div className="flex items-center justify-between gap-2 border-b border-border py-2 pr-1 pl-3">
+              <p className="truncate text-xs font-semibold text-foreground">
+                {heading}
+                <span className="ml-1.5 font-normal text-muted-foreground">
+                  {allRequiredDone ? "· done" : `· ${done}/${total}`}
+                </span>
+              </p>
               <Button
                 type="button"
                 variant="ghost"
@@ -144,35 +145,28 @@ export function OnboardingGuide({
                 <X />
               </Button>
             </div>
-            <ul className="max-h-[min(60vh,26rem)] divide-y divide-border overflow-y-auto">
+            <ul className="max-h-[min(50vh,20rem)] overflow-y-auto">
               {listSteps.map((step) => (
                 <li key={step.id}>
+                  {/* One line per step. The summary moved into the dialog behind
+                      each row: repeating it here doubled the panel's height to
+                      explain things nobody is reading at that moment. */}
                   <button
                     type="button"
                     onClick={() => setOpenStepId(step.id)}
-                    className="flex w-full items-start gap-3 p-4 text-left transition-colors hover:bg-secondary/50"
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-secondary/50"
                   >
                     <StepIcon step={step} />
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className={`block text-sm font-medium ${
-                          step.kind === "task" && step.done
-                            ? "text-muted-foreground"
-                            : "text-foreground"
-                        }`}
-                      >
-                        {step.title}
-                        {step.optional && !step.done && (
-                          <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                            optional
-                          </span>
-                        )}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-muted-foreground">
-                        {step.summary}
-                      </span>
+                    <span
+                      className={`min-w-0 flex-1 truncate text-xs ${
+                        step.kind === "task" && step.done
+                          ? "text-muted-foreground line-through decoration-muted-foreground/40"
+                          : "text-foreground"
+                      }`}
+                    >
+                      {step.title}
                     </span>
-                    <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
                   </button>
                 </li>
               ))}
@@ -184,22 +178,23 @@ export function OnboardingGuide({
               <button
                 type="button"
                 onClick={() => setTourRunning(true)}
-                className="w-full border-t border-border px-4 py-3 text-left text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
+                className="w-full border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
               >
                 Show me around again
               </button>
             )}
           </div>
         ) : (
-          /* Collapses to a pill rather than vanishing — these explanations are
-             worth rereading long after setup is finished. */
+          /* The default. A small pill carrying the count, which is the only
+             thing worth glancing at — the list itself is something you open
+             when you want it, not something the page pushes at you. */
           <button
             type="button"
             onClick={() => setCollapsed(false)}
-            className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-secondary"
+            className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-secondary"
           >
-            <ListChecks className="size-4" />
-            {allRequiredDone ? "Setup guide" : `Setup · ${done}/${total}`}
+            <ListChecks className="size-3.5" />
+            {allRequiredDone ? "Setup" : `Setup · ${done}/${total}`}
           </button>
         )}
       </div>
