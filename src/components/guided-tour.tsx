@@ -40,6 +40,7 @@ export function GuidedTour({
   const [rect, setRect] = useState<Rect | null>(null);
   const step = tourSteps[index];
 
+  /** Done with it for good — reached the end, or chose Skip. */
   const finish = useCallback(() => {
     try {
       window.localStorage.setItem(tourStorageKey(storageKey), "1");
@@ -48,6 +49,17 @@ export function GuidedTour({
     }
     onFinish?.();
   }, [storageKey, onFinish]);
+
+  /** Out of the way for now, WITHOUT recording it as seen.
+   *
+   * Escape is a reflex — people press it to shut something, not to decline it
+   * forever. Treating that as "seen it" meant one stray keypress permanently
+   * removed the walkthrough, and the person then reported it as missing rather
+   * than as dismissed, because from where they sat those look identical.
+   * Skip is the deliberate no; this is the accidental one. */
+  const dismissForNow = useCallback(() => {
+    onFinish?.();
+  }, [onFinish]);
 
   // Measure the target, and keep measuring: the page reflows when the panel
   // opens, when a day is switched on, or when the window changes size, and a
@@ -79,11 +91,11 @@ export function GuidedTour({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") finish();
+      if (e.key === "Escape") dismissForNow();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [finish]);
+  }, [dismissForNow]);
 
   if (!step || !rect) return null;
 
