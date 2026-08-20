@@ -44,7 +44,15 @@ function defaultDateString(daysFromNow: number) {
   return `${year}-${month}-${day}`;
 }
 
-export function FindATimeForm({ members }: { members: MemberWithConnection[] }) {
+export function FindATimeForm({
+  members,
+  signedInEmail,
+}: {
+  members: MemberWithConnection[];
+  /** Whoever is looking at this page. Only used to preselect them as the
+   * session lead — every other decision on this form is theirs to make. */
+  signedInEmail?: string;
+}) {
   const connectedMembers = members.filter((m) => m.connected);
   // Session lead is a curated subset — connecting a calendar makes someone
   // eligible as a guest, not automatically eligible to lead a session.
@@ -58,8 +66,22 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
   // someone as an advisor is what moves them from one field to the other.
   const guestCandidates = connectedMembers.filter((m) => !m.isAdvisor);
 
+  // The person scheduling the session is usually the one leading it, so they
+  // start selected. This used to be facilitators[0], which is whoever sorts
+  // first by name — a stable answer, but an arbitrary one, and it meant
+  // everybody had to change the field every time or quietly book someone else
+  // as lead.
+  //
+  // Falls back to the old behaviour for an admin who can't lead sessions
+  // themselves, so the field is never left empty when there is something valid
+  // to put in it.
+  const defaultOrganizer =
+    (signedInEmail
+      ? facilitators.find((m) => m.email.toLowerCase() === signedInEmail.toLowerCase())
+      : undefined) ?? facilitators[0];
+
   const [organizerMemberId, setOrganizerMemberId] = useState<number | null>(
-    facilitators[0]?.id ?? null
+    defaultOrganizer?.id ?? null
   );
   // Optional — most sessions won't have one.
   const [advisorMemberId, setAdvisorMemberId] = useState<number | null>(null);

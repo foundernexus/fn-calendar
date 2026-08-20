@@ -28,7 +28,7 @@ export default async function FindATimePage() {
         </p>
       </div>
       <div className="mt-8">
-        <FindATimeForm members={members} />
+        <FindATimeForm members={members} signedInEmail={session.email} />
       </div>
     </div>
   );
