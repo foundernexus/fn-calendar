@@ -52,12 +52,24 @@ describe("what we check we got", () => {
     expect(missing).toEqual(["see when you're busy"]);
   });
 
+  it("rejects Calendars.ReadBasic, which cannot actually read free/busy", () => {
+    // Microsoft documents it as the least-privileged permission for
+    // getSchedule. A personal Outlook account holding exactly that scope got
+    // 403 ErrorAccessDenied from the endpoint. A token that can't do the job
+    // has to fail here and prompt a reconnect rather than be accepted.
+    expect(missingCapabilities("microsoft", "read", ["Calendars.ReadBasic"])).toEqual([
+      "see when you're busy",
+    ]);
+    expect(requestedScopes("microsoft", "read")).not.toContain("Calendars.ReadBasic");
+    expect(requestedScopes("microsoft", "read")).toContain("Calendars.Read");
+  });
+
   it("recognises Microsoft's fully-qualified scope form", () => {
-    // Microsoft returns either `Calendars.ReadBasic` or
-    // `https://graph.microsoft.com/Calendars.ReadBasic` for the same grant.
+    // Microsoft returns either `Calendars.Read` or
+    // `https://graph.microsoft.com/Calendars.Read` for the same grant.
     // Comparing the raw strings would refuse a perfectly good connection.
     expect(
-      missingCapabilities("microsoft", "read", ["https://graph.microsoft.com/Calendars.ReadBasic"])
+      missingCapabilities("microsoft", "read", ["https://graph.microsoft.com/Calendars.Read"])
     ).toEqual([]);
   });
 
@@ -77,7 +89,7 @@ describe("what we check we got", () => {
   });
 
   it("is case-insensitive", () => {
-    expect(missingCapabilities("microsoft", "read", ["calendars.readbasic"])).toEqual([]);
+    expect(missingCapabilities("microsoft", "read", ["calendars.read"])).toEqual([]);
   });
 
   it("treats an absent scope list as unknown rather than as a refusal", () => {

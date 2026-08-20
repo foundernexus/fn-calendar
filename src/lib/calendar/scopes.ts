@@ -57,9 +57,23 @@ const CAPABILITIES: Record<"google" | "microsoft", Record<CalendarAccess, readon
     read: [
       {
         need: "see when you're busy",
-        // Calendars.ReadBasic is the least-privileged permission Microsoft
-        // documents for getSchedule. The other two are strictly broader.
-        satisfiedBy: ["Calendars.ReadBasic", "Calendars.Read", "Calendars.ReadWrite"],
+        // Calendars.ReadBasic is deliberately NOT in this list, even though
+        // Microsoft's reference page names it the least-privileged permission
+        // for getSchedule. It does not work: a personal Outlook account that
+        // granted exactly ReadBasic gets
+        //   403 ErrorAccessDenied "Access is denied. Check credentials..."
+        // from /me/calendar/getSchedule. Observed in production on 2026-08-20
+        // after narrowing to it on the strength of the documentation alone.
+        //
+        // The same page also calls getSchedule unsupported for delegated
+        // personal accounts, which is equally wrong — it works with
+        // Calendars.Read and Calendars.ReadWrite. Treat that page as a rough
+        // guide and test the actual account type before trusting it.
+        //
+        // Listed here rather than only in requestedScopes because a token
+        // holding just ReadBasic genuinely cannot do the job: it has to fail
+        // the capability check and prompt a reconnect, not be waved through.
+        satisfiedBy: ["Calendars.Read", "Calendars.ReadWrite"],
       },
     ],
     write: [{ need: "add sessions to your calendar", satisfiedBy: ["Calendars.ReadWrite"] }],
@@ -77,7 +91,9 @@ export function requestedScopes(provider: "google" | "microsoft", access: Calend
     return [
       "offline_access",
       "User.Read",
-      access === "write" ? "Calendars.ReadWrite" : "Calendars.ReadBasic",
+      // Calendars.Read, not Calendars.ReadBasic — see the note above. ReadBasic
+      // is the documented minimum for getSchedule and returns 403 in practice.
+      access === "write" ? "Calendars.ReadWrite" : "Calendars.Read",
     ];
   }
   const scopes = [
