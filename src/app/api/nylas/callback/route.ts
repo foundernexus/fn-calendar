@@ -341,7 +341,10 @@ export async function GET(request: Request) {
   // Only reached when redirectTo === "admin" AND the verification above
   // passed — this is the one and only place an admin session is ever minted.
   if (grantAdminSession) {
-    await setAdminSessionCookie(response, exchanged.email);
+    // targetMember.email, not the OAuth address — same reasoning as the note
+    // in api/auth/[provider]/callback. hasAdminAccess was checked against the
+    // member, so the cookie has to name the member.
+    await setAdminSessionCookie(response, targetMember.email);
   }
   return response;
 }

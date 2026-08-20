@@ -99,9 +99,31 @@ export async function exchangeMicrosoftCode(code: string): Promise<MicrosoftToke
   };
 }
 
-/** `mail` is empty on plenty of accounts — personal Outlook addresses in
- * particular — where `userPrincipalName` carries the address instead. Reading
- * only `mail` is how a personal Outlook connection ends up bound to nobody. */
+/** Whose account this is — and the one value in this file that has to be right.
+ *
+ * `userPrincipalName` FIRST, deliberately. This used to read `mail` first, and
+ * that is an account-takeover hole: `mail` is a mutable directory attribute
+ * that any tenant administrator can set to any address, including on a domain
+ * they have never proved they own. The UPN suffix, by contrast, must be a
+ * verified domain of the tenant, so it cannot be pointed at somebody else's
+ * company.
+ *
+ * Why that matters here: this address is compared against a registered
+ * member's, and a match is the ONLY thing establishing that the person who
+ * just finished OAuth owns the account being bound (see the identity check in
+ * api/auth/[provider]/callback). With `mail` winning, anyone could stand up a
+ * free tenant, type a member's address into that field, and be handed that
+ * member's session — or an admin's. Google is not affected: its userinfo
+ * address is the account, and the provider verifies the domain.
+ *
+ * Reversing the order is safe for the accounts we hold. Personal Outlook
+ * accounts leave `mail` empty and carry the address in the UPN, which is what
+ * the previous note here was about, so they resolve identically either way.
+ *
+ * `mail` is kept as a fallback rather than dropped: some directory
+ * configurations leave the UPN unusable, and an account with no resolvable
+ * address cannot connect at all. It is only reached when there is no UPN, so
+ * it can no longer override a verified value. */
 async function fetchMicrosoftEmail(accessToken: string) {
   const res = await graphFetch(
     `${GRAPH}/me?$select=mail,userPrincipalName`,
@@ -109,8 +131,29 @@ async function fetchMicrosoftEmail(accessToken: string) {
     "me"
   );
   const data = (await res.json()) as { mail?: string; userPrincipalName?: string };
-  const email = data.mail || data.userPrincipalName;
+  const email = data.userPrincipalName || data.mail;
   if (!email) throw new Error("Microsoft returned no email for this account");
+
+  // A guest invited into someone else's tenant gets a UPN of the form
+  // `person_theirdomain.com#EXT#@hosttenant.onmicrosoft.com`. It identifies the
+  // guest relationship, not a mailbox, and binding a calendar to it would tie
+  // someone's sessions to an address that can't receive an invitation.
+  if (email.includes("#EXT#")) {
+    throw new Error("Microsoft returned a guest account, which can't be connected");
+  }
+
+  // Divergence is legitimate in plenty of tenants (UPN on the onmicrosoft.com
+  // domain, mail on the company one), and it is now the case where someone's
+  // registered address may no longer match what we resolve. Logged so that
+  // shows up as a line naming both rather than as an unexplained "denied".
+  if (data.mail && data.userPrincipalName && data.mail !== data.userPrincipalName) {
+    console.warn("[microsoft] account reports two different addresses", {
+      userPrincipalName: data.userPrincipalName,
+      mail: data.mail,
+      using: email,
+    });
+  }
+
   return email;
 }
 

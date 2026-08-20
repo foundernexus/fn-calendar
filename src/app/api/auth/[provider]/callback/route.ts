@@ -375,7 +375,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   // Only reached when redirectTo === "admin" AND the verification above passed
   // — this is the one and only place an admin session is ever minted.
   if (grantAdminSession) {
-    await setAdminSessionCookie(response, signedInEmail);
+    // targetMember.email, NOT signedInEmail. These are the same address on a
+    // sign-in, but deliberately allowed to differ when an admin is adding or
+    // repairing a calendar (identityProven accepts addingCalendar on its own).
+    // The address just authorised above is the member's — minting the cookie
+    // with the other one hands the session an identity nobody checked.
+    //
+    // It also broke the ordinary case, fail-closed: an admin connecting a
+    // personal Gmail got a cookie naming that address, and since the tier is
+    // re-derived from the cookie on every request (resolveAdminTier), the next
+    // one found no allowlist entry and no member row and ejected them from the
+    // admin area — via the very button that promises it won't.
+    await setAdminSessionCookie(response, targetMember.email);
   }
   return response;
 }
