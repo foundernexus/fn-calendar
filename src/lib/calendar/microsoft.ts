@@ -1,16 +1,13 @@
 import { env } from "@/lib/env";
 import type { BusyInterval } from "@/lib/calendar/slots";
+import { requestedScopes, type CalendarAccess } from "@/lib/calendar/scopes";
 
 /** Microsoft Outlook / Microsoft 365, spoken to directly through Graph.
  *
- * Same shape as the Google module, different vocabulary. Scopes match what the
- * Nylas connector requested, so the switch changes who asks and not what for:
- *   Calendars.ReadWrite — read free/busy, create and cancel sessions
- *   offline_access      — without this Microsoft returns no refresh token at
- *                         all, and the connection dies within the hour
- *   User.Read           — which account this is, so we can bind it to a member
- */
-const SCOPES = ["offline_access", "User.Read", "Calendars.ReadWrite"];
+ * Same shape as the Google module, different vocabulary. Scopes come from
+ * lib/calendar/scopes.ts and differ by role — everyone used to get
+ * Calendars.ReadWrite, which is read AND write across every calendar in the
+ * mailbox, when all most people need is free/busy. */
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 
@@ -22,13 +19,17 @@ export function microsoftRedirectUri() {
   return `${env.APP_URL}/api/auth/microsoft/callback`;
 }
 
-export function buildMicrosoftAuthUrl(params: { state: string; loginHint?: string }) {
+export function buildMicrosoftAuthUrl(params: {
+  state: string;
+  loginHint?: string;
+  access: CalendarAccess;
+}) {
   const url = new URL(`${authority()}/oauth2/v2.0/authorize`);
   url.searchParams.set("client_id", env.MICROSOFT_CLIENT_ID);
   url.searchParams.set("redirect_uri", microsoftRedirectUri());
   url.searchParams.set("response_type", "code");
   url.searchParams.set("response_mode", "query");
-  url.searchParams.set("scope", SCOPES.join(" "));
+  url.searchParams.set("scope", requestedScopes("microsoft", params.access).join(" "));
   url.searchParams.set("state", params.state);
   if (params.loginHint) url.searchParams.set("login_hint", params.loginHint);
   return url.toString();
@@ -61,6 +62,9 @@ export type MicrosoftTokens = {
   refreshToken?: string;
   expiresAt: Date;
   email: string;
+  /** What Microsoft actually granted. Empty if it didn't say — see
+   * missingCapabilities for why that isn't read as a refusal. */
+  grantedScopes: string[];
 };
 
 export async function exchangeMicrosoftCode(code: string): Promise<MicrosoftTokens> {
@@ -83,6 +87,7 @@ export async function exchangeMicrosoftCode(code: string): Promise<MicrosoftToke
     access_token: string;
     refresh_token?: string;
     expires_in: number;
+    scope?: string;
   };
 
   return {
@@ -90,6 +95,7 @@ export async function exchangeMicrosoftCode(code: string): Promise<MicrosoftToke
     refreshToken: data.refresh_token,
     expiresAt: new Date(Date.now() + data.expires_in * 1000),
     email: await fetchMicrosoftEmail(data.access_token),
+    grantedScopes: data.scope?.split(" ").filter(Boolean) ?? [],
   };
 }
 
@@ -118,7 +124,17 @@ export async function refreshMicrosoftToken(refreshToken: string) {
         refresh_token: refreshToken,
         client_id: env.MICROSOFT_CLIENT_ID,
         client_secret: env.MICROSOFT_CLIENT_SECRET,
-        scope: SCOPES.join(" "),
+        // Deliberately no `scope`. It is optional on a refresh, and when it is
+        // omitted Microsoft reissues the token with whatever the original grant
+        // carried — which is the only correct answer now that different people
+        // hold different scopes.
+        //
+        // Naming a scope here would be wrong in both directions: sending the
+        // read-only set would silently strip a session lead of write access on
+        // their next refresh (a refresh may narrow, so it would succeed and
+        // quietly break booking an hour later), and sending the write set would
+        // be rejected outright for anyone who only granted read, since a refresh
+        // can never widen. It also used to pin a constant that no longer exists.
         grant_type: "refresh_token",
       }),
     },

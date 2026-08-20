@@ -12,6 +12,8 @@ import {
 } from "@/lib/auth/session";
 import { hasAdminAccess, setAdminSessionCookie } from "@/lib/auth/admin";
 import { exchangeCode, asCalendarProvider, CALENDAR_PROVIDERS } from "@/lib/calendar";
+import { calendarAccessFor } from "@/lib/calendar/access";
+import { missingCapabilities } from "@/lib/calendar/scopes";
 import { encryptedTokenFields } from "@/lib/calendar/tokens";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
@@ -35,6 +37,8 @@ const FAILURE_STATUS = {
   denied: "denied",
   /** Tried to add a calendar that already belongs to someone else here. */
   taken: "taken",
+  /** Signed in fine, but unticked a permission we can't work without. */
+  permissions: "permissions",
 } as const;
 
 type FailureStatus = (typeof FAILURE_STATUS)[keyof typeof FAILURE_STATUS];
@@ -195,6 +199,35 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
       return failureRedirect(FAILURE_STATUS.denied);
     }
     grantAdminSession = true;
+  }
+
+  // Did they actually grant what we asked for?
+  //
+  // The consent screen has a checkbox per permission and people can untick
+  // them — which is a legitimate thing to do, and someone did. Without this
+  // check the flow completes, we store a token that works for signing in and
+  // for nothing else, the UI reports a healthy calendar, and the first
+  // availability search days later fails with a 403 naming a person who
+  // believes they connected successfully.
+  //
+  // Refusing here costs one confusing minute at exactly the moment the person
+  // can fix it, instead of silently removing them from every search. Nothing is
+  // written to the database on this path: a half-granted connection is worse
+  // than none, because none is visible.
+  const missing = missingCapabilities(
+    provider,
+    await calendarAccessFor(targetMember),
+    exchanged.grantedScopes
+  );
+  if (missing.length > 0) {
+    console.warn("[auth/callback] connection refused — permissions withheld", {
+      provider,
+      memberId: targetMember.id,
+      email: signedInEmail,
+      missing,
+      granted: exchanged.grantedScopes,
+    });
+    return failureRedirect(FAILURE_STATUS.permissions);
   }
 
   // Two lookups, because "which row do I update" and "does this belong to

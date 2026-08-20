@@ -218,11 +218,19 @@ export async function POST(request: Request) {
       getBookedEventsOverlapping(allSelectedIds, new Date(startTime * 1000), new Date(endTime * 1000)),
     ]);
   } catch (err) {
+    // `cause` is the whole point of logging this. AvailabilityUnavailableError's
+    // own message only names WHOSE calendar failed; the provider's response —
+    // the part that distinguishes a withheld permission from a revoked token
+    // from a disabled API — hangs off the cause. Without it this line says a
+    // person's name and nothing else, and diagnosing a 403 meant reading
+    // Vercel's request trace to find a single status code.
+    const cause = err instanceof Error ? err.cause : undefined;
     console.error("[admin/availability] Availability lookup failed", {
       startTime,
       endTime,
       participantCount: participantConnections.length,
       error: err instanceof Error ? err.message : String(err),
+      cause: cause instanceof Error ? cause.message : cause ? String(cause) : undefined,
     });
     return NextResponse.json(
       {

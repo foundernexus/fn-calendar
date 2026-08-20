@@ -7,6 +7,7 @@ import { requireMemberSession } from "@/lib/auth/member";
 import { getLatestConnections, groupConnectionsByMember, isConnectionUsable } from "@/db/queries";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
 import { buildAuthUrl, revokeToken, asCalendarProvider, CALENDAR_PROVIDERS } from "@/lib/calendar";
+import { calendarAccessFor } from "@/lib/calendar/access";
 import { decryptToken } from "@/lib/calendar/crypto";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
@@ -86,7 +87,12 @@ export async function POST(request: Request) {
   );
 
   return NextResponse.json({
-    url: buildAuthUrl({ loginHint, state, provider }),
+    url: buildAuthUrl({
+      loginHint,
+      state,
+      provider,
+      access: await calendarAccessFor(session.member),
+    }),
   });
 }
 

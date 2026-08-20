@@ -1,5 +1,6 @@
 import { env } from "@/lib/env";
 import type { BusyInterval } from "@/lib/calendar/slots";
+import { requestedScopes, type CalendarAccess } from "@/lib/calendar/scopes";
 
 /** Google Calendar, spoken to directly.
  *
@@ -7,21 +8,13 @@ import type { BusyInterval } from "@/lib/calendar/slots";
  * and REST — there is no SDK, because the four calls we need are smaller than
  * the wrapper would be.
  *
- * Scopes are deliberately identical to what the Nylas connector requested, so
- * the switch changes who asks and not what is asked for:
- *   calendar.readonly — list calendars and read free/busy
- *   calendar.events   — create, move and cancel the sessions we book
- * Narrowing to calendar.freebusy is tempting and would show a friendlier
- * consent screen, but it can't enumerate a member's several calendars, which
- * would quietly stop checking their secondary ones. That's a behaviour change,
- * so it isn't part of this switch. */
-const SCOPES = [
-  "https://www.googleapis.com/auth/calendar.readonly",
-  "https://www.googleapis.com/auth/calendar.events",
-  // Identifies which account was connected. Nylas told us the grant's email;
-  // without this we would have no idea whose calendar we just linked.
-  "https://www.googleapis.com/auth/userinfo.email",
-];
+ * Scopes now come from lib/calendar/scopes.ts and differ by role. They used to
+ * be one list here, copied from the Nylas connector, and the note in its place
+ * said narrowing to calendar.freebusy would stop us enumerating a member's
+ * secondary calendars. That was true of freebusy alone and missed that
+ * calendar.calendarlist.readonly exists and closes exactly that gap — so the
+ * reason for asking everyone for "see and download any calendar" turned out not
+ * to hold. See scopes.ts for what replaced it and why. */
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -40,12 +33,16 @@ export function googleRedirectUri() {
  * token good for an hour and nothing to renew it with, and their calendar
  * silently stops being readable that afternoon. Asking every time costs one
  * extra screen and removes a whole class of "it worked yesterday". */
-export function buildGoogleAuthUrl(params: { state: string; loginHint?: string }) {
+export function buildGoogleAuthUrl(params: {
+  state: string;
+  loginHint?: string;
+  access: CalendarAccess;
+}) {
   const url = new URL(AUTH_URL);
   url.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
   url.searchParams.set("redirect_uri", googleRedirectUri());
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", SCOPES.join(" "));
+  url.searchParams.set("scope", requestedScopes("google", params.access).join(" "));
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent");
   url.searchParams.set("include_granted_scopes", "true");
@@ -87,6 +84,11 @@ export type GoogleTokens = {
   refreshToken?: string;
   expiresAt: Date;
   email: string;
+  /** What Google actually granted, which is not always what we asked for — the
+   * consent screen lets people untick individual permissions. Empty if Google
+   * didn't report it; see missingCapabilities for why that isn't treated as a
+   * refusal. */
+  grantedScopes: string[];
 };
 
 export async function exchangeGoogleCode(code: string): Promise<GoogleTokens> {
@@ -110,6 +112,7 @@ export async function exchangeGoogleCode(code: string): Promise<GoogleTokens> {
     refresh_token?: string;
     expires_in: number;
     id_token?: string;
+    scope?: string;
   };
 
   return {
@@ -117,6 +120,7 @@ export async function exchangeGoogleCode(code: string): Promise<GoogleTokens> {
     refreshToken: data.refresh_token,
     expiresAt: new Date(Date.now() + data.expires_in * 1000),
     email: await fetchGoogleEmail(data.access_token),
+    grantedScopes: data.scope?.split(" ").filter(Boolean) ?? [],
   };
 }
 

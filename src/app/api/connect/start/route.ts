@@ -4,6 +4,7 @@ import { getMemberByEmail } from "@/db/queries";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
 import { hasAdminAccess } from "@/lib/auth/admin";
 import { buildAuthUrl, CALENDAR_PROVIDERS } from "@/lib/calendar";
+import { calendarAccessFor } from "@/lib/calendar/access";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 
@@ -65,6 +66,7 @@ export async function POST(request: Request) {
       loginHint: normalizeEmail(member.email),
       state,
       provider: parsed.data.provider,
+      access: await calendarAccessFor(member),
     });
     return NextResponse.json({ url });
   }
@@ -94,10 +96,20 @@ export async function POST(request: Request) {
     env.SESSION_SECRET,
     STATE_TTL_SECONDS
   );
+  // Only a session lead's own calendar ever receives an event we create —
+  // everyone else is an attendee, and delivering an invitation to an attendee
+  // needs no permission from them at all. So founders and advisors are asked for
+  // read access only, and never see an "edit your events" line they'd be right
+  // to question.
+  //
+  // Promoting someone to facilitator later doesn't retroactively widen the token
+  // they already hold; they reconnect once, and the callback's capability check
+  // is what makes that visible instead of silent.
   const url = buildAuthUrl({
     loginHint: normalizeEmail(member.email),
     state,
     provider: parsed.data.provider,
+    access: await calendarAccessFor(member),
   });
 
   return NextResponse.json({ url });

@@ -19,7 +19,17 @@ let exchanged: {
   accessToken: string;
   expiresAt: Date;
   provider: string;
+  grantedScopes?: string[];
 };
+
+/** A grant with every permission we ever ask for, across both providers, so the
+ * tests that aren't about scopes are unaffected by which provider they use. */
+const FULL_GRANT = [
+  "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+  "https://www.googleapis.com/auth/calendar.freebusy",
+  "https://www.googleapis.com/auth/calendar.events",
+  "Calendars.ReadWrite",
+];
 
 vi.mock("@/lib/calendar", async () => {
   const actual = await vi.importActual<typeof import("@/lib/calendar")>("@/lib/calendar");
@@ -46,6 +56,7 @@ beforeEach(async () => {
     accessToken: "access-token",
     expiresAt: new Date(Date.now() + 3_600_000),
     provider: "google",
+    grantedScopes: [...FULL_GRANT],
   };
 });
 
@@ -116,6 +127,89 @@ describe("identity", () => {
       await connectState({ memberId: member.id, addCalendar: true })
     );
     expect(destinationOf(res)).toBe("/me");
+  });
+});
+
+describe("permissions actually granted", () => {
+  it("refuses, and stores nothing, when a required permission was unticked", async () => {
+    // The real incident: an advisor objected to "see and download any calendar"
+    // and unticked it. The connection succeeded, the UI showed a healthy
+    // calendar, and every availability search 403'd for days. A connection we
+    // can't read from is worse than no connection, because no connection is
+    // visible.
+    const member = await seedMember({ email: "advisor@foundernexus.com" });
+    exchanged.email = "advisor@foundernexus.com";
+    exchanged.grantedScopes = ["https://www.googleapis.com/auth/calendar.calendarlist.readonly"];
+
+    const res = await callCallback(await connectState({ memberId: member.id }));
+
+    expect(statusOf(res)).toBe("permissions");
+    expect(await harness.db.select().from(calendarConnections)).toHaveLength(0);
+    expect(res.headers.get("set-cookie") ?? "").not.toContain(MEMBER_COOKIE_NAME);
+  });
+
+  it("accepts a broader legacy scope that covers the same ground", async () => {
+    // Everyone who connected before the scopes were narrowed holds
+    // calendar.readonly, which grants both things we now ask for separately.
+    // Their tokens keep working and they must never be told to reconnect.
+    const member = await seedMember({ email: "early@foundernexus.com" });
+    exchanged.email = "early@foundernexus.com";
+    exchanged.grantedScopes = [
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/calendar.events",
+    ];
+
+    const res = await callCallback(await connectState({ memberId: member.id }));
+
+    expect(destinationOf(res)).toBe("/me");
+    expect(await harness.db.select().from(calendarConnections)).toHaveLength(1);
+  });
+
+  it("doesn't block when the provider reports no scopes at all", async () => {
+    // `scope` isn't a guaranteed field. Absent means "we can't tell", not "they
+    // granted nothing" — refusing here would lock people out over a field the
+    // provider simply didn't send.
+    const member = await seedMember({ email: "quiet@foundernexus.com" });
+    exchanged.email = "quiet@foundernexus.com";
+    exchanged.grantedScopes = [];
+
+    const res = await callCallback(await connectState({ memberId: member.id }));
+
+    expect(destinationOf(res)).toBe("/me");
+  });
+
+  it("only demands write access from someone who can lead a session", async () => {
+    // A founder or advisor is an attendee; the invite reaches them by email and
+    // needs no permission from them. Demanding write here would refuse a
+    // perfectly good calendar.
+    const member = await seedMember({ email: "founder@foundernexus.com" });
+    exchanged.email = "founder@foundernexus.com";
+    exchanged.grantedScopes = [
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+      "https://www.googleapis.com/auth/calendar.freebusy",
+    ];
+
+    const res = await callCallback(await connectState({ memberId: member.id }));
+
+    expect(destinationOf(res)).toBe("/me");
+    expect(await harness.db.select().from(calendarConnections)).toHaveLength(1);
+  });
+
+  it("does demand it from a facilitator, whose calendar hosts the session", async () => {
+    const member = await seedMember({
+      email: "lead@foundernexus.com",
+      isFacilitator: true,
+    });
+    exchanged.email = "lead@foundernexus.com";
+    exchanged.grantedScopes = [
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+      "https://www.googleapis.com/auth/calendar.freebusy",
+    ];
+
+    const res = await callCallback(await connectState({ memberId: member.id }));
+
+    expect(statusOf(res)).toBe("permissions");
+    expect(await harness.db.select().from(calendarConnections)).toHaveLength(0);
   });
 });
 

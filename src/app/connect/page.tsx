@@ -17,6 +17,12 @@ const FAILURE_MESSAGES: Record<string, string> = {
     "The calendar account you signed in with doesn't match the email you entered. Use the exact address you were registered under.",
   taken:
     "That calendar is already connected to someone else here, so it can't be added to your profile too. Pick a different account.",
+  /** Deliberately explicit about what to do differently. The generic "please try
+   * again" would send someone straight back to the same screen to make the same
+   * choice — they didn't fail at signing in, they declined a permission, and
+   * nothing changes until they know which one. */
+  permissions:
+    "Your calendar wasn't connected, because one of the permissions was left unticked. We need to see the list of your calendars and when you're busy — that's how a time that suits everyone gets found. Please try again and leave both boxes ticked. We can't read what your meetings are, only when they are.",
   /** Not a failed sign-in at all — an admin action rejected because the 8-hour
    * session had run out. Distinct from `expired`, which is about the sign-in
    * link itself: this person was signed in a moment ago and simply needs to do

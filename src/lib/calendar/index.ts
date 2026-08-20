@@ -17,6 +17,7 @@ import {
   revokeMicrosoftToken,
 } from "@/lib/calendar/microsoft";
 import type { BusyInterval } from "@/lib/calendar/slots";
+import type { CalendarAccess } from "@/lib/calendar/scopes";
 
 /** One shape for both providers, so nothing outside this folder has to know
  * which one a member uses. Mirrors what src/lib/nylas.ts exposed, which is why
@@ -34,10 +35,14 @@ export function asCalendarProvider(value: string | null | undefined): CalendarPr
   return value === "microsoft" ? "microsoft" : "google";
 }
 
+/** `access` decides how much the consent screen asks for — "read" for founders
+ * and advisors, "write" for the session leads and admins whose own calendar a
+ * session is actually created on. See lib/calendar/scopes.ts. */
 export function buildAuthUrl(params: {
   provider: CalendarProvider;
   state: string;
   loginHint?: string;
+  access: CalendarAccess;
 }) {
   return params.provider === "microsoft"
     ? buildMicrosoftAuthUrl(params)
@@ -50,6 +55,7 @@ export type ExchangedTokens = {
   expiresAt: Date;
   email: string;
   provider: CalendarProvider;
+  grantedScopes: string[];
 };
 
 export async function exchangeCode(

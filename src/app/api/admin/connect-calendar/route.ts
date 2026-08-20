@@ -3,6 +3,7 @@ import { getMemberByEmail, getLatestConnections, pickInviteConnection } from "@/
 import { requireAdminSession } from "@/lib/auth/admin";
 import { signValue, TOKEN_PURPOSE } from "@/lib/auth/session";
 import { asCalendarProvider, buildAuthUrl } from "@/lib/calendar";
+import { calendarAccessFor } from "@/lib/calendar/access";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 
@@ -57,6 +58,7 @@ export async function POST() {
     loginHint: normalizeEmail(existing?.grant_email ?? member.email),
     state,
     provider: asCalendarProvider(existing?.provider),
+    access: await calendarAccessFor(member),
   });
 
   return NextResponse.json({ url });
