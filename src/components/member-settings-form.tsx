@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -133,6 +134,7 @@ export function MemberSettingsForm({
   const [days, setDays] = useState<Record<number, DayState>>(() =>
     defaultDays(initialAvailability, initialTimezone === null)
   );
+  const router = useRouter();
   const [connection, setConnection] = useState(initialConnection);
   const [submitting, setSubmitting] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
@@ -234,6 +236,17 @@ export function MemberSettingsForm({
         setFirstSave(false);
         celebrate();
       }
+
+      // The setup checklist is rendered on the SERVER from the member's saved
+      // timezone, so without this it keeps insisting "Set your availability" is
+      // outstanding immediately after you have set it — right up until a full
+      // page reload. A checklist that denies what you just did is worse than no
+      // checklist, because it teaches people to stop believing the ticks.
+      //
+      // Deliberately after the confetti: refresh() re-renders in the
+      // background, and firing the celebration first keeps it tied to the click
+      // rather than to a round trip.
+      router.refresh();
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
