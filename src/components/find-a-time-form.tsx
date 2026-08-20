@@ -26,7 +26,8 @@ import { CreateEventDialog } from "@/components/create-event-dialog";
 import { CancelSessionDialog } from "@/components/cancel-session-dialog";
 import { RescheduleSessionDialog } from "@/components/reschedule-session-dialog";
 import type { MemberWithConnection } from "@/db/queries";
-import { TIMEZONES } from "@/lib/time";
+import { TIMEZONES, spellOutDate } from "@/lib/time";
+import { TimeSelect } from "@/components/time-select";
 import { handleExpiredSession } from "@/lib/session-expired";
 
 const DURATIONS = [30, 45, 60] as const;
@@ -397,6 +398,15 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
         </div>
 
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          {/* The native date picker stays — it is genuinely the best control for
+              choosing a date, and it is keyboard and screen-reader friendly.
+              What it will NOT do is render in a locale of our choosing: it
+              follows the browser's, so the same field reads 01.09.2026 on a
+              German machine and 9/1/2026 on a US one, and no attribute changes
+              that.
+              So the resolved date is spelled out underneath in US form, with
+              the weekday and the month by name. "Tue, Sep 1, 2026" cannot be
+              read as the ninth of January whatever your browser is set to. */}
           <div className="space-y-2">
             <Label htmlFor="start-date">Start date</Label>
             <Input
@@ -405,6 +415,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
             />
+            <p className="text-xs text-muted-foreground">{spellOutDate(startDate)}</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="end-date">End date</Label>
@@ -414,6 +425,7 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
             />
+            <p className="text-xs text-muted-foreground">{spellOutDate(endDate)}</p>
           </div>
           <div className="space-y-2">
             <Label>Duration</Label>
@@ -453,25 +465,24 @@ export function FindATimeForm({ members }: { members: MemberWithConnection[] }) 
               </SelectContent>
             </Select>
           </div>
+          {/* TimeSelect, not <input type="time">. A native time input renders in
+              the BROWSER's locale — 24-hour "17:00" on a German machine, 12-hour
+              "5:00 PM" on a US one — and that cannot be forced from the page.
+              TimeSelect renders every label itself, so it reads the same for
+              everyone, and it is what the availability form already uses. The
+              two screens disagreeing on how to write five o'clock was its own
+              small bug. */}
           <div className="space-y-2">
             <Label htmlFor="hours-start">Working hours start</Label>
-            <Input
+            <TimeSelect
               id="hours-start"
-              type="time"
-              step={1800}
               value={workingHoursStart}
-              onChange={(e) => setWorkingHoursStart(e.target.value)}
+              onChange={setWorkingHoursStart}
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor="hours-end">Working hours end</Label>
-            <Input
-              id="hours-end"
-              type="time"
-              step={1800}
-              value={workingHoursEnd}
-              onChange={(e) => setWorkingHoursEnd(e.target.value)}
-            />
+            <TimeSelect id="hours-end" value={workingHoursEnd} onChange={setWorkingHoursEnd} />
           </div>
         </div>
 

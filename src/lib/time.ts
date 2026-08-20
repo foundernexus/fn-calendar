@@ -110,6 +110,25 @@ export function formatDateLabel(dateStr: string) {
   });
 }
 
+/** The same date with the year, for spelling out what a native date input is
+ * showing.
+ *
+ * `<input type="date">` renders in the BROWSER's locale, so one field reads
+ * 01.09.2026 in Germany and 9/1/2026 in the US and no attribute changes it.
+ * Written with the month by name, "Tue, Sep 1, 2026" cannot be misread as the
+ * ninth of January whichever way round the reader expects the numbers. */
+export function spellOutDate(dateStr: string) {
+  if (!isValidDateString(dateStr)) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 /** "HH:mm" (24h) -> "9:00 AM" — a plain time-of-day label, not tied to any
  * specific date or timezone conversion. */
 export function formatTimeLabel(timeStr: string) {
