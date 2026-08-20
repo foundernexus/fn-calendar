@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getMembersWithConnectionStatus } from "@/db/queries";
 import { MemberDirectory } from "@/components/member-directory";
 import { AddPersonDialog } from "@/components/add-person-dialog";
+import { CopyLinkButton } from "@/components/copy-link-button";
 import { requireAdminSession } from "@/lib/auth/admin";
 import { OnboardingGuide } from "@/components/onboarding-guide";
 import { buildAdminSteps } from "@/lib/onboarding";
@@ -35,7 +36,15 @@ export default async function MembersPage() {
             with the middle of a two-line block. */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold text-foreground">People</h1>
-          <AddPersonDialog connectUrl={`${env.APP_URL}/connect`} canAddTeam={session.tier === "owner"} />
+          {/* The link lives here, beside Add person, so it is reachable on
+              every visit. It used to appear only inside the "Waiting to
+              connect" section, which meant it disappeared exactly when it was
+              most wanted — when nobody is pending and you are about to invite
+              someone new. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <CopyLinkButton url={`${env.APP_URL}/connect`} />
+            <AddPersonDialog connectUrl={`${env.APP_URL}/connect`} canAddTeam={session.tier === "owner"} />
+          </div>
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
           Everyone who&apos;s been added, and whether their calendar is connected yet.

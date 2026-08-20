@@ -39,12 +39,18 @@ export async function SiteHeader() {
   return (
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-6">
-        <Link
-          href="/connect"
-          className="text-lg font-bold tracking-tight text-foreground"
-        >
-          FounderNexus
-        </Link>
+        {/* Beta sits beside the wordmark rather than beside "Sign in", so it is
+            visible on every page instead of only at the front door. Someone who
+            signed in yesterday and hits something rough today should still be
+            able to see, without being told, that this is new. */}
+        <div className="flex items-center gap-2">
+          <Link href="/connect" className="text-lg font-bold tracking-tight text-foreground">
+            FounderNexus
+          </Link>
+          <span className="rounded-full border border-border bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
+            Beta
+          </span>
+        </div>
         {adminSession ? (
           // Navigation and account controls are different kinds of thing and
           // are separated by a rule rather than sitting in one undifferentiated

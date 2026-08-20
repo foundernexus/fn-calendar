@@ -47,16 +47,10 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
 
   return (
     <div className="mx-auto max-w-md py-16">
-      {/* Says out loud that this is new and still being finished. People are
-          about to be shown a provider warning screen, and "Beta" makes that
-          read as a project in progress rather than as something being hidden
-          from them. */}
-      <div className="flex items-center gap-2">
-        <h1 className="text-2xl font-bold text-foreground">Sign in</h1>
-        <span className="rounded-full border border-border bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
-          Beta
-        </span>
-      </div>
+      {/* The Beta badge moved to the header, beside the wordmark — it belongs
+          on every page rather than only here, and two of them on one screen
+          read as an oversight. */}
+      <h1 className="text-2xl font-bold text-foreground">Sign in</h1>
       <p className="mt-2 text-sm text-muted-foreground">
         Enter your email, then pick the calendar you use. We only ever ask to
         read your calendar and add events — never your email or contacts.
