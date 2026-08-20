@@ -115,12 +115,18 @@ export function OnboardingGuide({
         <GuidedTour steps={steps} storageKey={storageKey} onFinish={() => setTourRunning(false)} />
       )}
 
-      {/* Top-right on a wide screen, where it sits beside the content instead
-          of over it. Below lg there's no room for that, so it drops to the
-          bottom corner and out of the reading path. */}
-      <div className="fixed right-4 bottom-4 z-40 w-[min(20rem,calc(100vw-2rem))] lg:top-24 lg:right-6 lg:bottom-auto">
+      {/* Bottom-right, not top-right. Top-right is where every page keeps its
+          own primary action — "Add person" on People, the search on Schedule —
+          and a floating panel there sits directly on top of them.
+          pointer-events-none on the wrapper is the other half, and the more
+          important one: this box is 20rem wide even when it has collapsed to a
+          small pill, so without it the corner holds an INVISIBLE rectangle that
+          swallows clicks meant for whatever is underneath. That is exactly what
+          happened — the middle of Add person stopped responding while its edges
+          still worked. Only the visible parts take pointer events back. */}
+      <div className="pointer-events-none fixed right-4 bottom-4 z-40 flex w-[min(20rem,calc(100vw-2rem))] flex-col items-end lg:right-6">
         {expanded ? (
-          <div className="rounded-lg border border-border bg-card shadow-card">
+          <div className="pointer-events-auto w-full rounded-lg border border-border bg-card shadow-card">
             <div className="flex items-start justify-between gap-2 border-b border-border p-4">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-foreground">{heading}</p>
@@ -190,7 +196,7 @@ export function OnboardingGuide({
           <button
             type="button"
             onClick={() => setCollapsed(false)}
-            className="ml-auto flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-secondary"
+            className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-secondary"
           >
             <ListChecks className="size-4" />
             {allRequiredDone ? "Setup guide" : `Setup · ${done}/${total}`}
