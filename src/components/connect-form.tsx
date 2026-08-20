@@ -86,7 +86,7 @@ export function ConnectForm({ initialEmail }: { initialEmail?: string }) {
             type="button"
             disabled={pending !== null}
             onClick={() => handleConnect(provider.id)}
-            className="flex h-12 w-full items-center justify-center gap-3 rounded-lg border border-border bg-card text-sm font-medium text-foreground shadow-card transition-colors hover:bg-secondary disabled:pointer-events-none disabled:opacity-60"
+            className="flex h-12 w-full items-center justify-center gap-3 rounded-md border border-border bg-card text-sm font-medium text-foreground shadow-card transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-60"
           >
             <ProviderIcon provider={provider.id} className="size-5 shrink-0" />
             {pending === provider.id ? "Continuing…" : provider.label}

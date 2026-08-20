@@ -178,7 +178,7 @@ export function MemberDirectory({
 
                 return (
                   <div key={role}>
-                    <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                    <p className="mb-2 text-xs font-medium tracking-[0.04em] text-muted-foreground uppercase">
                       {inGroup.length === 1 ? label.one : label.many}
                       <span className="ml-1.5 normal-case opacity-60">{inGroup.length}</span>
                     </p>

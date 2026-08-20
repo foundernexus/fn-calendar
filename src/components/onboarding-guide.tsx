@@ -154,7 +154,7 @@ export function OnboardingGuide({
                   <button
                     type="button"
                     onClick={() => setOpenStepId(step.id)}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-secondary/50"
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted"
                   >
                     <StepIcon step={step} />
                     <span
@@ -178,7 +178,7 @@ export function OnboardingGuide({
               <button
                 type="button"
                 onClick={() => setTourRunning(true)}
-                className="w-full border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
+                className="w-full border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 Show me around again
               </button>
@@ -191,7 +191,7 @@ export function OnboardingGuide({
           <button
             type="button"
             onClick={() => setCollapsed(false)}
-            className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-secondary"
+            className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-muted"
           >
             <ListChecks className="size-3.5" />
             {allRequiredDone ? "Setup" : `Setup · ${done}/${total}`}

@@ -188,7 +188,7 @@ export function AvailabilityGrid({
                         // minimum size is its content, so without this a long
                         // title can still push its own column wide even though
                         // the grid no longer sizes itself to content.
-                        className="min-w-0 truncate border-b border-l border-border bg-white px-1.5 py-1.5 text-left text-[10px] text-foreground ring-1 ring-inset ring-foreground/15 transition-colors hover:bg-secondary"
+                        className="min-w-0 truncate border-b border-l border-border bg-card px-1.5 py-1.5 text-left text-xs text-foreground ring-1 ring-inset ring-foreground/15 transition-colors hover:bg-muted"
                       >
                         {booked.title}
                       </button>
@@ -219,7 +219,7 @@ export function AvailabilityGrid({
 
       {hiddenBooked.length > 0 && (
         <div className="mt-4 rounded-lg border border-border bg-secondary/40 p-3">
-          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          <p className="text-xs font-medium tracking-[0.04em] text-muted-foreground uppercase">
             Booked outside this view
           </p>
           <ul className="mt-2 space-y-1">

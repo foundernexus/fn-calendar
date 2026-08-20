@@ -63,7 +63,7 @@ function SessionRow({ session }: { session: MemberSession }) {
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-start justify-between gap-4 rounded-lg px-2 py-3 text-left transition-colors hover:bg-secondary/60"
+        className="flex w-full items-start justify-between gap-4 rounded-lg px-2 py-3 text-left transition-colors hover:bg-muted"
       >
         <div className="min-w-0">
           <p

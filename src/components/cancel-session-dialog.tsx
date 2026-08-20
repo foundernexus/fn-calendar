@@ -90,7 +90,7 @@ export function CancelSessionDialog({
             people were about to get a cancellation email, or who. */}
         {booked.attendees.length > 0 && (
           <div className="rounded-lg border border-border bg-secondary/40 p-3">
-            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            <p className="text-xs font-medium tracking-[0.04em] text-muted-foreground uppercase">
               {booked.attendees.length} invited
             </p>
             <ul className="mt-2 space-y-1">

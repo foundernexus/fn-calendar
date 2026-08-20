@@ -12,7 +12,12 @@
  * is nothing left in the DOM afterwards and nothing to clean up at the call
  * site. */
 
-const COLOURS = ["#2563eb", "#22c55e", "#f59e0b", "#ec4899", "#8b5cf6"];
+/* Brand palette, not the generic confetti one this started with — that was
+ * Tailwind's stock blue plus pink and violet, and FounderNexus has no purple
+ * anywhere in its system. These are the logo's own two tones (blue #007BE4 and
+ * the mark's grey #929497), the darker partner blue, the pale chip blue, and
+ * the brand's success green, which is what this moment actually is. */
+const COLOURS = ["#007BE4", "#0072BA", "#D3EAFD", "#929497", "#1F9D55"];
 const PARTICLES = 90;
 const DURATION_MS = 2600;
 

@@ -12,7 +12,7 @@ export const metadata: Metadata = {
  * submission; have counsel read it before relying on it further. */
 export default function TermsPage() {
   return (
-    <div className="mx-auto max-w-2xl px-6 py-16">
+    <div className="mx-auto max-w-2xl py-16">
       <h1 className="text-2xl font-bold text-foreground">Terms of Service</h1>
       <p className="mt-2 text-sm text-muted-foreground">
         Last updated 17 August 2026

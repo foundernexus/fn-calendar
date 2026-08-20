@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { requireAdminSession } from "@/lib/auth/admin";
 import { requireMemberSession } from "@/lib/auth/member";
@@ -44,8 +45,21 @@ export async function SiteHeader() {
             signed in yesterday and hits something rough today should still be
             able to see, without being told, that this is new. */}
         <div className="flex items-center gap-2">
-          <Link href="/connect" className="text-lg font-bold tracking-tight text-foreground">
-            FounderNexus
+          {/* The real FounderNexus wordmark (public/brand), not the company
+              name set in the UI font. A tool that writes to a founder's
+              calendar has to be identifiable as FounderNexus at a glance, and
+              a text stand-in is the one thing on the page that can never be
+              the brand. Shorter on small screens so the mark, the Beta pill
+              and the account controls still fit on one row on a phone. */}
+          <Link href="/connect" className="flex items-center">
+            <Image
+              src="/brand/foundernexus-wordmark.png"
+              alt="FounderNexus"
+              width={1982}
+              height={250}
+              priority
+              className="h-6 w-auto sm:h-7"
+            />
           </Link>
           <span className="rounded-full border border-border bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
             Beta

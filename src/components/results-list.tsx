@@ -104,13 +104,13 @@ export function ResultsList({
         <div className="mt-4">
           <div className="mb-3 flex items-center gap-4 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <span className="inline-block size-3 rounded-xs bg-accent" /> Everyone free
+              <span className="inline-block size-3 rounded-xs border border-border bg-accent" /> Everyone free
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="inline-block size-3 rounded-xs bg-secondary" /> Not available
+              <span className="inline-block size-3 rounded-xs border border-border bg-secondary" /> Not available
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="inline-block size-3 rounded-xs border border-foreground/30 bg-white" /> Already
+              <span className="inline-block size-3 rounded-xs border border-border bg-card" /> Already
               booked
             </span>
           </div>

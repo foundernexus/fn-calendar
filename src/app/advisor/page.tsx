@@ -44,7 +44,7 @@ export default async function AdvisorPage() {
   });
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
+    <div className="mx-auto max-w-5xl py-10">
       {/* Its own storage key: an advisor gets one extra step, and dismissing
           the founder guide shouldn't hide it. */}
       <OnboardingGuide steps={steps} storageKey="advisor" />

@@ -27,13 +27,13 @@ export default async function MePage() {
   });
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
+    <div className="mx-auto max-w-5xl py-10">
       <OnboardingGuide steps={steps} storageKey="member" />
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Your availability</h1>
+        <h1 className="text-2xl font-bold text-foreground">Your availability</h1>
         {/* No longer mentions a weekly session cap — that feature was removed,
             and the sentence outlived it. */}
-        <p className="mt-1.5 text-sm text-muted-foreground">
+        <p className="mt-2 text-sm text-muted-foreground">
           Set the days and times you&apos;re available for sessions.
         </p>
       </div>

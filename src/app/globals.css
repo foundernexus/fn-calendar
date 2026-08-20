@@ -2,6 +2,12 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Keeps `dark:` class-based even though the app has no dark mode and never adds
+   the class. Deleting this line does NOT remove dark styling — it hands `dark:`
+   back to Tailwind's default `prefers-color-scheme`, at which point every
+   inert `dark:` utility still sitting in the shadcn primitives would switch
+   itself on for anyone whose OS is set to dark. The variant stays; the theme
+   it used to point at is gone. */
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -10,19 +16,6 @@
   --font-sans: "Plus Jakarta Sans", "Plus Jakarta Sans Fallback", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
   --font-heading: var(--font-sans);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -61,6 +54,7 @@
   --color-blue-50: #F1F8FF;
   --color-gray-600: #56646F;
   --color-gray-400: #9EADBA;
+  --color-gray-200: #E2E8F0;
   --color-gray-350: #D3D6DA;
   --color-gray-50: #F9F9F9;
   --color-green-500: #1F9D55;
@@ -71,6 +65,12 @@
   --color-amber-50: #FEF6E0;
   /* Soft navy-tinted elevation, per the design spec */
   --shadow-card: 0 1px 3px rgba(1, 5, 42, 0.08), 0 1px 2px rgba(1, 5, 42, 0.04);
+  /* Overriding Tailwind's own shadow-md/shadow-xl rather than adding new names:
+     the spec asks for shadows "tinted with navy", and popovers and dialogs reach
+     for the stock utilities. Left neutral they were the one grey shadow in an
+     otherwise navy-tinted interface. */
+  --shadow-md: 0 4px 10px rgba(1, 5, 42, 0.08), 0 2px 4px rgba(1, 5, 42, 0.04);
+  --shadow-xl: 0 20px 40px rgba(1, 5, 42, 0.18), 0 6px 12px rgba(1, 5, 42, 0.08);
   --shadow-focus: 0 0 0 3px rgba(0, 123, 228, 0.25);
   /* Calm motion — no bounce */
   --default-transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
@@ -97,54 +97,10 @@
   --border: #D3D6DA;             /* gray-350 */
   --input: #D3D6DA;
   --ring: #007BE4;
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 8px; /* used directly by sonner's --border-radius; matches --radius-md */
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Consumed directly as a value (not via a Tailwind rounded-* class) by sonner's
+     --border-radius and by input-group's calc(var(--radius) - 3px). Matches
+     --radius-md, the 8px control corner. */
+  --radius: 8px;
 }
 
 @layer base {
