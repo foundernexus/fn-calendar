@@ -167,6 +167,60 @@ describe("a calendar someone else already holds", () => {
     expect(row.memberId).toBe(owner.id);
   });
 
+  it("refuses across providers — one mailbox is one person", async () => {
+    // The address is held by someone else under GOOGLE; this is a MICROSOFT
+    // sign-in for the same address. Matching on provider too let both stand,
+    // and the People page then showed a Team member's address in the Founders
+    // list, because it displays whichever address receives invites.
+    const owner = await seedMember({ email: "owner@foundernexus.com" });
+    const other = await seedMember({ email: "other@foundernexus.com" });
+    await harness.db.insert(calendarConnections).values({
+      memberId: owner.id,
+      provider: "google",
+      grantEmail: "shared@foundernexus.com",
+      refreshTokenEncrypted: null,
+    });
+    exchanged.email = "shared@foundernexus.com";
+    exchanged.provider = "microsoft";
+
+    const res = await callCallback(
+      await connectState({ memberId: other.id, addCalendar: true }),
+      "microsoft"
+    );
+
+    expect(statusOf(res)).toBe("taken");
+    const rows = await harness.db.select().from(calendarConnections);
+    expect(rows.every((r) => r.memberId === owner.id)).toBe(true);
+  });
+
+  it("moves every row for the address when they sign in, not just this provider's", async () => {
+    // Leaving the Microsoft row behind would keep the old member's People entry
+    // showing an address that is no longer theirs.
+    const previous = await seedMember({ email: "previous@foundernexus.com" });
+    const real = await seedMember({ email: "shared@foundernexus.com" });
+    await harness.db.insert(calendarConnections).values([
+      {
+        memberId: previous.id,
+        provider: "google",
+        grantEmail: "shared@foundernexus.com",
+        refreshTokenEncrypted: null,
+      },
+      {
+        memberId: previous.id,
+        provider: "microsoft",
+        grantEmail: "shared@foundernexus.com",
+        refreshTokenEncrypted: null,
+      },
+    ]);
+    exchanged.email = "shared@foundernexus.com";
+
+    await callCallback(await connectState({ memberId: real.id }));
+
+    const rows = await harness.db.select().from(calendarConnections);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.memberId === real.id)).toBe(true);
+  });
+
   it("reassigns it when they sign in with it", async () => {
     // Signing in proves ownership, so whoever held it before was wrong.
     const previous = await seedMember({ email: "previous@foundernexus.com" });

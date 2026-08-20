@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { calendarConnections } from "@/db/schema";
 import { getMemberById, getActiveConnections, pickInviteConnection } from "@/db/queries";
@@ -197,23 +197,34 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     grantAdminSession = true;
   }
 
-  // A calendar account is identified by provider + address now that there's no
-  // grant id. Same purpose the unique grant id served: spotting that this exact
-  // account is already connected, possibly by somebody else.
-  const [existing] = await db
-    .select({ id: calendarConnections.id, memberId: calendarConnections.memberId })
+  // Two lookups, because "which row do I update" and "does this belong to
+  // someone else" are different questions.
+  //
+  // The row to write is keyed on provider + address: a Google and a Microsoft
+  // calendar under one address are genuinely two calendars and get two rows.
+  //
+  // Ownership is keyed on the ADDRESS ALONE, across every provider. One mailbox
+  // is one person, and matching on provider too let the same address attach to
+  // two different members — one via Google, one via Microsoft. That is not
+  // hypothetical: it put a Team member's address in the Founders list, because
+  // the People page shows the address that receives invites.
+  const rowsForAddress = await db
+    .select({
+      id: calendarConnections.id,
+      memberId: calendarConnections.memberId,
+      provider: calendarConnections.provider,
+    })
     .from(calendarConnections)
-    .where(
-      and(
-        eq(calendarConnections.provider, provider),
-        eq(calendarConnections.grantEmail, signedInEmail)
-      )
-    )
-    .limit(1);
+    .where(eq(calendarConnections.grantEmail, signedInEmail));
 
-  if (existing && existing.memberId !== statePayload.memberId) {
+  /** The row this sign-in writes to, if it already exists. */
+  const sameProviderRow = rowsForAddress.find((row) => row.provider === provider);
+  /** Anyone else holding this address, under ANY provider. */
+  const otherMember = rowsForAddress.find((row) => row.memberId !== statePayload.memberId);
+
+  if (otherMember) {
     // Reassigning is right when someone is SIGNING IN: they just proved they
-    // own this calendar, so it belongs to them and whoever held it before was
+    // own this mailbox, so it belongs to them and whoever held it before was
     // wrong. It is not right when someone is ADDING a calendar to their own
     // profile — that would quietly strip another member of their connection,
     // leaving them unbookable with nothing on screen to explain it.
@@ -221,14 +232,25 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
       console.warn("[auth/callback] refused to attach a calendar already held by another member", {
         provider,
         email: signedInEmail,
-        heldBy: existing.memberId,
+        heldBy: otherMember.memberId,
         requestedBy: statePayload.memberId,
       });
       return failureRedirect(FAILURE_STATUS.taken);
     }
+
+    // Every row for this address moves, not just the one for this provider —
+    // otherwise the Microsoft row stays behind on the old member and their
+    // People entry keeps showing an address that is no longer theirs.
+    const strayIds = rowsForAddress
+      .filter((row) => row.memberId !== statePayload.memberId)
+      .map((row) => row.id);
     console.warn(
-      `[auth/callback] ${provider} calendar ${signedInEmail} was connected to member ${existing.memberId}, now reassigned to member ${statePayload.memberId}`
+      `[auth/callback] ${signedInEmail} was held by member ${otherMember.memberId}, reassigning ${strayIds.length} row(s) to member ${statePayload.memberId}`
     );
+    await db
+      .update(calendarConnections)
+      .set({ memberId: statePayload.memberId, isPrimary: false })
+      .where(inArray(calendarConnections.id, strayIds));
   }
 
   // Whether this member already had a usable calendar BEFORE this one, and
@@ -253,12 +275,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   // against rows left over from the Nylas era where the same address was
   // connected by two different members over time.
   let connectionId: number;
-  if (existing) {
+  if (sameProviderRow) {
     await db
       .update(calendarConnections)
       .set(connectionFields)
-      .where(eq(calendarConnections.id, existing.id));
-    connectionId = existing.id;
+      .where(eq(calendarConnections.id, sameProviderRow.id));
+    connectionId = sameProviderRow.id;
   } else {
     const [created] = await db
       .insert(calendarConnections)

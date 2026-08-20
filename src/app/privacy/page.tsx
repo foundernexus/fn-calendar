@@ -9,9 +9,9 @@ export const metadata: Metadata = {
 /** Required for Google OAuth verification: the consent screen links here, and
  * reviewers check that it is publicly reachable without signing in and that it
  * names the Google scopes actually requested. Keep the scope list in this file
- * in sync with the Nylas connector (see scripts/check-nylas-scopes.ts) — a
- * mismatch between what the app requests and what this page discloses is a
- * standard verification rejection.
+ * in sync with the scopes in src/lib/calendar/google.ts — a mismatch between
+ * what the app requests and what this page discloses is a standard
+ * verification rejection.
  *
  * DRAFT — written to satisfy Google's verification requirements and to be
  * accurate about what the code does. It has not been reviewed by a lawyer.
@@ -21,7 +21,7 @@ export default function PrivacyPage() {
     <div className="mx-auto max-w-2xl px-6 py-16">
       <h1 className="text-2xl font-bold text-foreground">Privacy Policy</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        Last updated 17 August 2026
+        Last updated 19 August 2026
       </p>
 
       <div className="mt-8 space-y-8 text-sm leading-relaxed text-foreground">
@@ -75,14 +75,17 @@ export default function PrivacyPage() {
           <h2 className="text-base font-semibold">What we store</h2>
           <ul className="mt-2 space-y-2 text-muted-foreground">
             <li>
-              <strong>About you:</strong> your name, email address, time zone,
-              and how many sessions per week you are willing to take.
+              <strong>About you:</strong> your name, email address and time
+              zone.
             </li>
             <li>
               <strong>Your connection:</strong> which provider you connected,
-              the email address of the connected calendar, and an identifier for
-              the connection. We never store your Google password, and we do not
-              retain Google access tokens ourselves.
+              the email address of that calendar, and an authorisation token —
+              encrypted at rest — that lets the Scheduler check your
+              availability and add sessions. We never see or store your
+              password. You can withdraw the authorisation at any time, either
+              by disconnecting in the Scheduler or from your Google or Microsoft
+              account settings.
             </li>
             <li>
               <strong>Your availability preferences:</strong> the days and times
@@ -108,16 +111,18 @@ export default function PrivacyPage() {
           </p>
           <ul className="mt-3 space-y-2 text-muted-foreground">
             <li>
-              <strong>Nylas</strong> — connects to your calendar provider on our
-              behalf and holds the access token issued by Google.
-            </li>
-            <li>
-              <strong>Neon</strong> — hosts our database.
+              <strong>Neon</strong> — hosts our database, including the
+              encrypted authorisation token for your calendar.
             </li>
             <li>
               <strong>Vercel</strong> — hosts the application.
             </li>
           </ul>
+          <p className="mt-3 text-muted-foreground">
+            The Scheduler talks to Google Calendar and Microsoft Outlook
+            directly. No third-party calendar provider sits in between, and
+            nobody else receives or stores your calendar data.
+          </p>
           <p className="mt-3 text-muted-foreground">
             Other members can see your name and that you are available at a
             given time. They cannot see your calendar.
