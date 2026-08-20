@@ -116,22 +116,12 @@ export function CalendarList({ calendars }: { calendars: MemberCalendar[] }) {
                 )}
               </span>
 
-              {c.needsReconnect ? (
-                // A broken calendar gets its own repair, hinted at its own
-                // address. The page-level Reconnect only appeared once NOTHING
-                // worked, so somebody with one good and one broken calendar had
-                // no way to fix the broken one — and no sign it had stopped
-                // being checked at all.
-                <Button
-                  type="button"
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => connect(c.provider === "microsoft" ? "microsoft" : "google", c.id)}
-                  disabled={busy !== null}
-                >
-                  {busy === `fix:${c.id}` ? "Opening…" : "Reconnect"}
-                </Button>
-              ) : (
+              {/* A broken calendar gets its own repair, hinted at its own
+                  address. The page-level Reconnect only appeared once NOTHING
+                  worked, so somebody with one good and one broken calendar had
+                  no way to fix the broken one — and no sign it had stopped
+                  being checked at all. */}
+              {!c.needsReconnect && (
                 /* A radio, not a toggle: exactly one calendar receives sessions,
                    and a set of toggles would suggest several could. */
                 <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
@@ -146,6 +136,37 @@ export function CalendarList({ calendars }: { calendars: MemberCalendar[] }) {
                   Add sessions here
                 </label>
               )}
+
+              {/* Available on every calendar, not only the ones we already know
+                  are broken.
+
+                  This used to appear only when needsReconnect was set, on the
+                  reasoning that a standing Reconnect beside a healthy calendar
+                  is an invitation to click it by accident. What that missed is
+                  that "healthy" is a weaker claim than it looks: we check the
+                  connection is present and holds a refresh token, and nothing
+                  more. A calendar whose owner withheld a permission looks
+                  identical to a working one from here, and the person best
+                  placed to fix it is the one reading this row.
+
+                  Quiet rather than prominent — it is a repair, not the reason
+                  anyone came to this page — but never hidden. Clicking it costs
+                  a trip through the consent screen and nothing else. */}
+              <Button
+                type="button"
+                variant={c.needsReconnect ? "destructive" : "ghost"}
+                size="sm"
+                title={
+                  c.needsReconnect
+                    ? `Reconnect ${c.grantEmail}`
+                    : `Sign in to ${c.grantEmail} again — use this if you changed which permissions you allowed`
+                }
+                onClick={() => connect(c.provider === "microsoft" ? "microsoft" : "google", c.id)}
+                disabled={busy !== null}
+                className={c.needsReconnect ? undefined : "text-muted-foreground"}
+              >
+                {busy === `fix:${c.id}` ? "Opening…" : "Reconnect"}
+              </Button>
 
               {calendars.length > 1 && (
                 <Button
