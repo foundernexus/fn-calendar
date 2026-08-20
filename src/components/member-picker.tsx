@@ -20,6 +20,22 @@ import type { MemberWithConnection } from "@/db/queries";
  * connected would make the whole point of collective availability checking
  * meaningless (there'd be nothing to check them against). */
 
+/** The address the invite will actually arrive at, which is NOT necessarily
+ * the one they're registered under.
+ *
+ * Someone registered as court@company.com who connected a personal Gmail gets
+ * the invite at the Gmail — booking deliberately sends to the connected
+ * calendar's address, because sending to the registered one would deliver an
+ * invite to a calendar that was never checked as free. Showing members.email
+ * here therefore named an address the session might never reach, and someone
+ * holding two calendars makes that likelier rather than rarer.
+ *
+ * Falls back to the registered address only when nothing is connected, which
+ * these pickers never show anyway. */
+function inviteAddress(m: MemberWithConnection) {
+  return m.grantEmail ?? m.email;
+}
+
 export function MemberSelect({
   id,
   members,
@@ -52,7 +68,7 @@ export function MemberSelect({
             className="w-full justify-between font-normal"
           >
             <span className={cn("truncate", !selected && "text-muted-foreground")}>
-              {selected ? `${selected.fullName} — ${selected.email}` : placeholder}
+              {selected ? `${selected.fullName} — ${inviteAddress(selected)}` : placeholder}
             </span>
             <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
           </Button>
@@ -67,7 +83,7 @@ export function MemberSelect({
               {members.map((m) => (
                 <CommandItem
                   key={m.id}
-                  value={`${m.fullName} ${m.email}`}
+                  value={`${m.fullName} ${m.email} ${inviteAddress(m)}`}
                   onSelect={() => {
                     onChange(m.id === value ? null : m.id);
                     setOpen(false);
@@ -75,7 +91,7 @@ export function MemberSelect({
                 >
                   <Check className={cn("size-4", m.id === value ? "opacity-100" : "opacity-0")} />
                   <span>{m.fullName}</span>
-                  <span className="text-muted-foreground">{m.email}</span>
+                  <span className="text-muted-foreground">{inviteAddress(m)}</span>
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -148,12 +164,12 @@ export function MemberMultiSelect({
                 return (
                   <CommandItem
                     key={m.id}
-                    value={`${m.fullName} ${m.email}`}
+                    value={`${m.fullName} ${m.email} ${inviteAddress(m)}`}
                     onSelect={() => toggle(m.id)}
                   >
                     <Check className={cn("size-4", checked ? "opacity-100" : "opacity-0")} />
                     <span>{m.fullName}</span>
-                    <span className="text-muted-foreground">{m.email}</span>
+                    <span className="text-muted-foreground">{inviteAddress(m)}</span>
                   </CommandItem>
                 );
               })}
