@@ -16,7 +16,11 @@ const plusJakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "fn-calendar",
+  // "fn-calendar" is the repository name, which is what people saw in their tab
+  // and in bookmarks. FounderNexus first so it stays recognisable once a
+  // browser truncates it — a narrow tab showing "FounderNexus…" still tells you
+  // whose tool this is, where "FN…" would not.
+  title: "FounderNexus Scheduler",
   description: "Find a time and send real calendar invites — FounderNexus expert sessions.",
 };
 
