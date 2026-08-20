@@ -1,4 +1,4 @@
-import type { MemberCalendar, MemberWithConnection } from "@/db/queries";
+import type { MemberCalendar } from "@/db/queries";
 
 /** One entry in the setup guide.
  *
@@ -156,46 +156,6 @@ export function buildMemberSteps({
   }
 
   return steps;
-}
-
-/** FounderNexus staff — both account owners and anyone marked Team. Driven off
- * the people list both admin pages already load, so the guide costs no extra
- * query. */
-export function buildAdminSteps({ people }: { people: MemberWithConnection[] }): OnboardingStep[] {
-  return [
-    {
-      id: "add-people",
-      kind: "task",
-      done: people.length > 0,
-      title: "Add the people you schedule",
-      summary: "Founders, advisors and team.",
-      detail: [
-        "Registers them so they can sign in. There's no automatic invite mail — you pass the link on yourself.",
-        "Founders are scheduled into sessions, advisors get their own dashboard, and team can run sessions and see this admin area.",
-      ],
-    },
-    {
-      id: "get-connected",
-      kind: "task",
-      done: people.some((p) => p.connected),
-      title: "Get their calendars connected",
-      summary: "Added and connected aren't the same.",
-      detail: [
-        "Until someone connects a calendar there's no way to know when they're free, so they can't be booked at all.",
-        "The People page shows who's still pending.",
-      ],
-    },
-    {
-      id: "booking",
-      kind: "info",
-      title: "Booking a session",
-      summary: "Only times that suit everyone are offered.",
-      detail: [
-        "A grey cell can be someone's conflict, not just their working hours.",
-        "Booking invites everyone at once; cancelling removes it everywhere.",
-      ],
-    },
-  ];
 }
 
 /** Progress over tasks only — info steps have nothing to complete, and

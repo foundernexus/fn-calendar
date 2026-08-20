@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildMemberSteps, buildAdminSteps, guideProgress } from "@/lib/onboarding";
-import type { MemberCalendar, MemberWithConnection } from "@/db/queries";
+import { buildMemberSteps, guideProgress } from "@/lib/onboarding";
+import type { MemberCalendar } from "@/db/queries";
 
 /** The guide's only real claim is that a tick means the thing is actually
  * done. These cover the places where that could quietly stop being true. */
@@ -16,21 +16,6 @@ function calendar(over: Partial<MemberCalendar> = {}): MemberCalendar {
   };
 }
 
-function person(over: Partial<MemberWithConnection> = {}): MemberWithConnection {
-  return {
-    id: 1,
-    email: "a@example.com",
-    fullName: "A Person",
-    connected: false,
-    needsReconnect: false,
-    isFacilitator: false,
-    isAdvisor: false,
-    provider: null,
-    grantEmail: null,
-    connections: [],
-    ...over,
-  };
-}
 
 function step(steps: ReturnType<typeof buildMemberSteps>, id: string) {
   const found = steps.find((s) => s.id === id);
@@ -169,27 +154,5 @@ describe("progress", () => {
     // Info steps can never be completed, so counting them would pin the guide
     // below 100% forever.
     expect(guideProgress(steps).total).toBe(steps.length - infoCount);
-  });
-});
-
-describe("admin steps", () => {
-  it("separates having added people from their being connected", () => {
-    const steps = buildAdminSteps({ people: [person(), person({ id: 2 })] });
-    const byId = (id: string) => steps.find((s) => s.id === id)!;
-    // This is the distinction the whole People page exists to make visible —
-    // two registered people, nobody bookable.
-    expect(byId("add-people").done).toBe(true);
-    expect(byId("get-connected").done).toBe(false);
-  });
-
-  it("ticks connected once anyone actually is", () => {
-    const steps = buildAdminSteps({ people: [person(), person({ id: 2, connected: true })] });
-    expect(steps.find((s) => s.id === "get-connected")!.done).toBe(true);
-  });
-
-  it("starts a brand new workspace with everything outstanding", () => {
-    const steps = buildAdminSteps({ people: [] });
-    expect(guideProgress(steps).done).toBe(0);
-    expect(guideProgress(steps).allRequiredDone).toBe(false);
   });
 });

@@ -4,8 +4,6 @@ import { MemberDirectory } from "@/components/member-directory";
 import { AddPersonDialog } from "@/components/add-person-dialog";
 import { CopyLinkButton } from "@/components/copy-link-button";
 import { requireAdminSession } from "@/lib/auth/admin";
-import { OnboardingGuide } from "@/components/onboarding-guide";
-import { buildAdminSteps } from "@/lib/onboarding";
 import { env } from "@/lib/env";
 
 // Same reasoning as /admin/find-a-time: gated by proxy.ts, reads live
@@ -21,9 +19,6 @@ export default async function MembersPage() {
 
   return (
     <div className="py-10">
-      {/* Shared with /admin/find-a-time — same steps, same storage key, so
-          dismissing it on one admin page dismisses it on both. */}
-      <OnboardingGuide steps={buildAdminSteps({ people: members })} storageKey="admin" />
       {/* "People", not "Members": this list holds founders, advisors, FN staff
           and — before long — prospects, and only one of those groups is
           actually a member. The route and the `members` table keep their
