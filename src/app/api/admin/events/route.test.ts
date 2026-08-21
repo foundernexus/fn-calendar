@@ -25,11 +25,19 @@ type CreateArgs = { participants: { email: string; name?: string }[] };
 
 const nylas = {
   createNylasEvent: vi.fn(async (_args: CreateArgs) => ({ eventId: "provider-event-1" })),
-  getCollectiveAvailability: vi.fn(async () => [] as { startTime: number; endTime: number }[]),
+  cancelSessionEvent: vi.fn(async (_args: unknown) => ({ ok: true })),
+  getCollectiveAvailability: vi.fn(async () => ({
+    slots: [] as { startTime: number; endTime: number }[],
+    unreadable: [] as string[],
+  })),
 };
 
 vi.mock("@/lib/calendar/events", () => ({
   createSessionEvent: (args: CreateArgs) => nylas.createNylasEvent(args),
+  // Used to take back a calendar event when the DB write that should have
+  // recorded it fails — without it that event stays in everyone's diary with
+  // nothing in the app able to reach it.
+  cancelSessionEvent: (args: unknown) => nylas.cancelSessionEvent(args),
 }));
 vi.mock("@/lib/calendar/availability", () => ({
   getCollectiveAvailability: () => nylas.getCollectiveAvailability(),
@@ -48,7 +56,10 @@ beforeEach(async () => {
   await harness.reset();
   vi.clearAllMocks();
   // Default: the slot is still free. Individual tests override.
-  nylas.getCollectiveAvailability.mockResolvedValue([{ startTime: SLOT, endTime: SLOT + 3600 }]);
+  nylas.getCollectiveAvailability.mockResolvedValue({
+    slots: [{ startTime: SLOT, endTime: SLOT + 3600 }],
+    unreadable: [],
+  });
   nylas.createNylasEvent.mockResolvedValue({ eventId: "provider-event-1" });
   vi.resetModules();
   mockCookies(await adminCookie());
@@ -138,6 +149,21 @@ describe("writing the session", () => {
     // The event row must be gone too. Before this was one transaction, the
     // request returned 200 for a session with no attendees.
     expect(await harness.db.select().from(events)).toHaveLength(0);
+
+    // And the calendar event has to be taken back. It was created before the
+    // DB write, so at this point it is a real meeting sitting in the lead's,
+    // the advisor's and the founder's diaries — with no row anywhere in the app
+    // able to show, move or cancel it. Rolling back the database while leaving
+    // that behind is not a rollback, it just moves the mess somewhere nobody
+    // is looking.
+    expect(nylas.cancelSessionEvent).toHaveBeenCalledTimes(1);
+    expect(nylas.cancelSessionEvent.mock.calls[0]![0]).toMatchObject({
+      providerEventId: "provider-event-1",
+    });
+
+    // Says which of the two actually happened: withdrawn means retry freely,
+    // stuck means check the calendar first or book it twice.
+    expect((await res.json()).error).toMatch(/withdrawn/i);
   });
 
   it("invites the connected calendar's address, not the registered one", async () => {
@@ -203,7 +229,7 @@ describe("duplicate protection", () => {
 describe("guards", () => {
   it("refuses a slot that is no longer free", async () => {
     const cast = await seedCast();
-    nylas.getCollectiveAvailability.mockResolvedValue([]);
+    nylas.getCollectiveAvailability.mockResolvedValue({ slots: [], unreadable: [] });
 
     const res = await post(body(cast));
 

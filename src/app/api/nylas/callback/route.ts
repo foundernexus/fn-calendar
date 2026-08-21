@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { calendarConnections } from "@/db/schema";
 import { getMemberById, getActiveConnections, pickInviteConnection } from "@/db/queries";
@@ -282,7 +282,22 @@ export async function GET(request: Request) {
   // Someone who already had a target keeps it: whatever they were using
   // before is written down explicitly so nothing can shift it later. Someone
   // connecting for the very first time gets this one.
-  if (!priorUsable.some((r) => r.is_primary)) {
+  // Asked of EVERY row rather than only the usable ones — same fix and same
+  // reason as the equivalent block in /api/auth/[provider]/callback, where the
+  // full explanation lives. Kept in step deliberately: the two share this
+  // logic, and fixing one and not the other is how they drift apart.
+  const [existingPin] = await db
+    .select({ id: calendarConnections.id })
+    .from(calendarConnections)
+    .where(
+      and(
+        eq(calendarConnections.memberId, statePayload.memberId),
+        eq(calendarConnections.isPrimary, true)
+      )
+    )
+    .limit(1);
+
+  if (!existingPin) {
     const pinned = priorTarget
       ? db
           .update(calendarConnections)

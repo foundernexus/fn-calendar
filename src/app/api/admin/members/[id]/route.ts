@@ -4,6 +4,8 @@ import { db } from "@/db";
 import { members, events, eventAttendees, calendarConnections } from "@/db/schema";
 import { requireAdminSession, isAdminEmail } from "@/lib/auth/admin";
 import { revokeNylasGrant } from "@/lib/nylas";
+import { revokeToken, asCalendarProvider } from "@/lib/calendar";
+import { decryptToken } from "@/lib/calendar/crypto";
 import { env } from "@/lib/env";
 
 /** Removes a member for good: revokes their calendar grant at Nylas, then
@@ -144,6 +146,34 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       } catch (err) {
         grantRevokeFailed = true;
         console.error("[admin/members/:id] Grant revoke failed", { memberId, grantId, err });
+      }
+    }
+
+    // Calendars connected straight to Google or Microsoft, which is now all of
+    // them. The comment above used to say their revocation "lands with the
+    // cutover" — the cutover happened, and this was left behind, so removing
+    // someone deleted our copy of their token while the app stayed authorised
+    // on their Google account indefinitely. Both member-side paths
+    // (/api/me/disconnect, DELETE /api/me/calendars) already hand the token
+    // back; an admin removing the same person should not do less.
+    //
+    // Best-effort, exactly as above: a provider that won't take a token back
+    // must not make someone permanently unremovable.
+    for (const connection of connections) {
+      if (!connection.refreshTokenEncrypted) continue;
+      try {
+        await revokeToken({
+          provider: asCalendarProvider(connection.provider),
+          refreshToken: decryptToken(connection.refreshTokenEncrypted),
+        });
+        grantsRevoked++;
+      } catch (err) {
+        grantRevokeFailed = true;
+        console.error("[admin/members/:id] Token revoke failed", {
+          memberId,
+          connectionId: connection.id,
+          err,
+        });
       }
     }
   } catch (err) {

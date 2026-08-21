@@ -39,6 +39,12 @@ const FAILURE_STATUS = {
   taken: "taken",
   /** Signed in fine, but unticked a permission we can't work without. */
   permissions: "permissions",
+  /** The authorisation code had already been redeemed — almost always a reload,
+   * a back button, or a double click on the consent screen, meaning the FIRST
+   * attempt succeeded. Kept distinct from `provider` because it is not a fault
+   * and telling someone it was one sends them chasing a problem that isn't
+   * there. */
+  used: "used",
 } as const;
 
 type FailureStatus = (typeof FAILURE_STATUS)[keyof typeof FAILURE_STATUS];
@@ -103,6 +109,32 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   try {
     exchanged = await exchangeCode(provider, code);
   } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+
+    // A code can only be redeemed once. Getting here with `invalid_grant`
+    // therefore means this exact callback URL was opened twice — a reload, the
+    // back button, or a double click on the "unverified app" interstitial — and
+    // the FIRST open is the one that worked. Observed in production on
+    // 2026-08-21: 12:33:15 succeeded, 12:33:23 replayed the same code, and the
+    // person who was by then correctly connected got told their calendar
+    // provider was misconfigured on our side.
+    //
+    // Deliberately NOT treated as a login. It is tempting to notice the member
+    // already has a working connection and just hand them a session — do not.
+    // The state token is minted by /api/connect/start, which is public and
+    // takes a bare email address, so anyone who knows a registered address can
+    // obtain a token carrying that member's id. Issuing a session on a FAILED
+    // exchange would turn that into a complete authentication bypass: the code
+    // exchange is the only thing in this route that proves the person at the
+    // other end owns the account. Say what happened, mint nothing.
+    if (/invalid_grant/i.test(detail)) {
+      console.warn("[auth/callback] authorisation code already redeemed", {
+        provider,
+        memberId: statePayload.memberId,
+      });
+      return failureRedirect(FAILURE_STATUS.used);
+    }
+
     // Never swallow this. It is the only place the real reason for a failed
     // connection is visible, and discarding it once made a hard-down login look
     // like an expired link for three days. GoogleApiError and MicrosoftApiError
@@ -110,7 +142,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     console.error("[auth/callback] code exchange failed", {
       provider,
       memberId: statePayload.memberId,
-      error: err instanceof Error ? err.message : String(err),
+      error: detail,
     });
     return failureRedirect(FAILURE_STATUS.provider);
   }
@@ -330,12 +362,44 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   //
   // Someone who already had a target keeps it; someone connecting for the very
   // first time gets this one.
-  if (!priorUsable.some((r) => r.is_primary)) {
+  // Asked of EVERY row, not just the usable ones.
+  //
+  // This used to read `!priorUsable.some((r) => r.is_primary)`, and the gap
+  // between those two sets is a real state: a row that is `connected` but
+  // carries a NULL refresh token — a leftover from the Nylas era — is excluded
+  // from priorUsable while still holding the flag. The unique index behind this
+  // (calendar_connections_one_primary_per_member, schema.ts) is partial on
+  // is_primary alone and knows nothing about status or tokens, so the guard
+  // opened and the write then collided with the very row it had overlooked.
+  // Seen in production on 2026-08-21: member 8, "Key (member_id)=(8) already
+  // exists", on every single reconnect.
+  //
+  // Because the failure is caught below rather than fatal, nobody saw an error.
+  // The symptom was that the pin never took, leaving the invite target to
+  // pickInviteConnection's fallback ordering — exactly the drift this pin
+  // exists to prevent.
+  //
+  // Reading the flag directly is also the honest question. "Has this member
+  // already chosen where sessions land?" is a fact about the rows, and
+  // answering it from a filtered subset is what made it wrong.
+  const [existingPin] = await db
+    .select({ id: calendarConnections.id })
+    .from(calendarConnections)
+    .where(
+      and(
+        eq(calendarConnections.memberId, statePayload.memberId),
+        eq(calendarConnections.isPrimary, true)
+      )
+    )
+    .limit(1);
+
+  if (!existingPin) {
+    const pinTo = priorTarget?.id ?? connectionId;
     try {
       await db
         .update(calendarConnections)
         .set({ isPrimary: true })
-        .where(eq(calendarConnections.id, priorTarget?.id ?? connectionId));
+        .where(eq(calendarConnections.id, pinTo));
     } catch (err) {
       // Not fatal: the fallback still returns a sensible, stable answer, and
       // the member can set it themselves on /me.

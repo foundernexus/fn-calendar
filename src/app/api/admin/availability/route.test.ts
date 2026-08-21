@@ -18,7 +18,10 @@ let harness: TestDb;
 type AvailArgs = { connections: { grantEmail: string }[] };
 
 const getCollectiveAvailability = vi.fn(
-  async (_a: AvailArgs) => [] as { emails: string[]; startTime: number; endTime: number }[]
+  async (_a: AvailArgs) => ({
+    slots: [] as { emails: string[]; startTime: number; endTime: number }[],
+    unreadable: [] as string[],
+  })
 );
 
 vi.mock("@/lib/calendar/availability", () => ({
@@ -38,10 +41,13 @@ afterAll(async () => {
 beforeEach(async () => {
   await harness.reset();
   vi.clearAllMocks();
-  getCollectiveAvailability.mockResolvedValue([
-    { emails: [], startTime: NINE, endTime: NINE + 3600 },
-    { emails: [], startTime: TEN, endTime: TEN + 3600 },
-  ]);
+  getCollectiveAvailability.mockResolvedValue({
+    slots: [
+      { emails: [], startTime: NINE, endTime: NINE + 3600 },
+      { emails: [], startTime: TEN, endTime: TEN + 3600 },
+    ],
+    unreadable: [],
+  });
   vi.resetModules();
   mockCookies(await adminCookie());
   await reinstallTestDb();
@@ -114,6 +120,52 @@ describe("who gets checked", () => {
     // "Checked 3 of 2 people" would be nonsense.
     expect(body.totalSelected).toBe(2);
     expect(body.checkedCount).toBe(2);
+  });
+
+  it("names anyone whose calendar couldn't be read, and still answers", async () => {
+    // A withheld permission on one guest used to end the whole search with a
+    // 502 — production, 2026-08-21: five participants, four calendars read
+    // successfully, all of it discarded. As more people connect, the odds that
+    // every calendar in a search is healthy only fall, so the tool would refuse
+    // to answer more and more often.
+    //
+    // Answering means those slots were computed WITHOUT that person, which is
+    // the danger the old behaviour existed to avoid. Naming them is the entire
+    // mitigation, so it is asserted here rather than left to the UI.
+    const { lead, founder } = await seedCast();
+    getCollectiveAvailability.mockResolvedValue({
+      slots: [{ emails: [], startTime: NINE, endTime: NINE + 3600 }],
+      unreadable: [founder.email],
+    });
+
+    const { res, body } = await search({
+      organizerMemberId: lead.id,
+      guestMemberIds: [founder.id],
+    });
+
+    expect(res.status).toBe(200);
+    expect(body.slots).toHaveLength(1);
+    expect(body.unreadableNames).toEqual([founder.fullName]);
+  });
+
+  it("still refuses outright when it's the session lead we can't read", async () => {
+    // The one exception. The session is created ON the lead's calendar, so
+    // every slot offered is a claim about their time specifically. Offering
+    // times we can't stand behind for the host isn't a degraded answer, it's a
+    // wrong one.
+    const { lead, founder } = await seedCast();
+    getCollectiveAvailability.mockResolvedValue({
+      slots: [{ emails: [], startTime: NINE, endTime: NINE + 3600 }],
+      unreadable: [lead.email],
+    });
+
+    const { res, body } = await search({
+      organizerMemberId: lead.id,
+      guestMemberIds: [founder.id],
+    });
+
+    expect(res.status).toBe(502);
+    expect(body.error).toMatch(/leading this session/i);
   });
 
   it("names anyone unconnected instead of silently dropping them", async () => {

@@ -6,9 +6,9 @@ import { requireAdminSession } from "@/lib/auth/admin";
 // Reads live session cookies and must never be statically cached.
 export const dynamic = "force-dynamic";
 
-/** Keyed to the FAILURE_STATUS values set by /api/nylas/callback. "error" is
- * kept as a generic fallback so older in-flight links (and any future caller)
- * still render feedback rather than silently bouncing. */
+/** Keyed to the FAILURE_STATUS values set by /api/auth/[provider]/callback.
+ * "error" is kept as a generic fallback so older in-flight links (and any
+ * future caller) still render feedback rather than silently bouncing. */
 const FAILURE_MESSAGES: Record<string, string> = {
   expired: "That sign-in link expired before you finished. Please try again.",
   provider:
@@ -22,7 +22,12 @@ const FAILURE_MESSAGES: Record<string, string> = {
    * choice — they didn't fail at signing in, they declined a permission, and
    * nothing changes until they know which one. */
   permissions:
-    "Your calendar wasn't connected, because one of the permissions was left unticked. We need to see the list of your calendars and when you're busy — that's how a time that suits everyone gets found. Please try again and leave both boxes ticked. We can't read what your meetings are, only when they are.",
+    "Your calendar wasn't connected, because a permission was left unticked. We need to see when you're busy — that's how a time that suits everyone gets found. Please try again and leave the box ticked. We can't see what your meetings are, only when they are.",
+  /** Not a failure. The code was already redeemed, which means the first
+   * attempt worked — see the note in the callback. Anyone who reaches this
+   * with a valid session is redirected into the app before ever reading it,
+   * so this text is only for the case where there genuinely is no session. */
+  used: "That sign-in link had already been used. If you just connected, you're all set — otherwise, sign in again below.",
   /** Not a failed sign-in at all — an admin action rejected because the 8-hour
    * session had run out. Distinct from `expired`, which is about the sign-in
    * link itself: this person was signed in a moment ago and simply needs to do
@@ -38,13 +43,21 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
   const errorMessage = status ? FAILURE_MESSAGES[status] : undefined;
   const hadError = !!errorMessage;
 
+  // `used` is the one status that must NOT block the redirect below. It means
+  // the authorisation code had already been redeemed, so the first attempt
+  // succeeded and this person is connected — showing them a notice and making
+  // them sign in again would be telling them to fix something that already
+  // works. The redirect is decided by their own session cookie, never by the
+  // failed exchange, so nothing is granted here that they didn't already hold.
+  const blocksRedirect = hadError && status !== "used";
+
   // A returning, already-logged-in person (admin or member) shouldn't have
   // to re-enter their email — send them straight to their real destination.
   // But NOT if they just landed here after a failed OAuth attempt (e.g.
   // Reconnect from /me with an expired link) — they still have their old
   // session, and silently bouncing them back with no feedback would hide
   // the failure and strand them in a retry loop.
-  if (!hadError) {
+  if (!blocksRedirect) {
     const adminSession = await requireAdminSession();
     if (adminSession) redirect("/admin/find-a-time");
     const memberSession = await requireMemberSession();
@@ -57,9 +70,17 @@ export default async function ConnectPage({ searchParams }: PageProps<"/connect"
           on every page rather than only here, and two of them on one screen
           read as an oversight. */}
       <h1 className="text-2xl font-bold text-foreground">Sign in</h1>
+      {/* Says what we actually request, which since the scope narrowing is far
+          less than this used to claim. Founders and advisors are asked for
+          free/busy only: no event details, and no write access at all, because
+          a session reaches them as an ordinary emailed invitation that needs no
+          permission from them. Overstating it here would undercut the whole
+          point of asking for less — this line is the first thing anyone reads,
+          including the advisor whose objection prompted the change. */}
       <p className="mt-2 text-sm text-muted-foreground">
         Enter your email, then pick the calendar you use. We only ever ask to
-        read your calendar and add events — never your email or contacts.
+        see when you&apos;re busy — never what your meetings are, and never your
+        email or contacts.
       </p>
       {errorMessage && (
         <p className="mt-6 rounded-md border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">

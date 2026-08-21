@@ -50,33 +50,44 @@ async function search(connections = [connection()]) {
 
 describe("collective availability", () => {
   it("returns slots when every calendar is clear", async () => {
-    expect((await search()).length).toBeGreaterThan(0);
+    expect((await search()).slots.length).toBeGreaterThan(0);
   });
 
-  it("fails the whole search when one calendar can't be read", async () => {
-    // The tempting alternative is to skip that person and return the rest. That
-    // turns "we don't know" into "they're free", and the visible result is a
-    // slot confidently offered on top of an existing meeting. A failed search
-    // is recoverable; a double-booking in someone's diary is not.
+  it("keeps searching when one calendar can't be read, and says which", async () => {
+    // This used to abandon the entire search, on the reasoning that skipping a
+    // calendar turns "we don't know" into "they're free". The reasoning holds —
+    // the word carrying it is *quietly*. What broke was the scale: on
+    // 2026-08-21 one participant with a withheld permission took down a search
+    // across five people, and every one of the other four calendars was read
+    // successfully and thrown away.
+    //
+    // So the danger moves rather than disappearing, and `unreadable` is the
+    // whole mitigation. A caller that drops it shows an admin times that were
+    // computed without someone in them, with nothing on screen to say so.
     fetchBusy.mockRejectedValueOnce(new Error("403 from provider"));
-    const { AvailabilityUnavailableError } = await import("@/lib/calendar/availability");
 
-    await expect(search([connection(), connection({ id: 2, grantEmail: "b@example.com" })]))
-      .rejects.toBeInstanceOf(AvailabilityUnavailableError);
+    const result = await search([
+      connection({ id: 1, grantEmail: "broken@example.com" }),
+      connection({ id: 2, grantEmail: "fine@example.com" }),
+    ]);
+
+    expect(result.unreadable).toEqual(["broken@example.com"]);
+    expect(result.slots.length).toBeGreaterThan(0);
   });
 
-  it("names the calendar that failed", async () => {
-    // So the admin is told which person to chase, not just that something broke.
-    fetchBusy.mockRejectedValueOnce(new Error("403"));
-    await expect(search([connection({ grantEmail: "broken@example.com" })])).rejects.toThrow(
-      /broken@example\.com/
-    );
-  });
-
-  it("fails when a token can't be refreshed", async () => {
-    // Same reasoning: an expired connection is unknown, not free.
+  it("reports a calendar whose token can't be refreshed", async () => {
+    // Same path, different cause: an expired connection is unknown, not free,
+    // and has to be named for the same reason.
     getAccessToken.mockRejectedValueOnce(new Error("has to be reconnected"));
-    await expect(search()).rejects.toThrow(/Couldn't read/);
+
+    const result = await search([connection({ grantEmail: "stale@example.com" })]);
+    expect(result.unreadable).toEqual(["stale@example.com"]);
+  });
+
+  it("reports nothing unreadable when every calendar answers", async () => {
+    // The other half of the contract. If this could return a false empty, the
+    // warning would vanish from the screen while the risk stayed.
+    expect((await search()).unreadable).toEqual([]);
   });
 
   it("checks every calendar a person holds, not just one", async () => {
@@ -100,7 +111,7 @@ describe("collective availability", () => {
         { start: at("2026-08-19T16:00:00Z"), end: at("2026-08-19T17:00:00Z") },
       ]);
 
-    const slots = await search([
+    const { slots } = await search([
       connection({ id: 1, grantEmail: "free@example.com" }),
       connection({ id: 2, grantEmail: "busy@example.com" }),
     ]);

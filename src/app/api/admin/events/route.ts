@@ -11,7 +11,7 @@ import {
   getMemberById,
   getMembersByIds,
 } from "@/db/queries";
-import { createSessionEvent } from "@/lib/calendar/events";
+import { createSessionEvent, cancelSessionEvent } from "@/lib/calendar/events";
 import { getCollectiveAvailability } from "@/lib/calendar/availability";
 import { computeIdempotencyKey } from "@/lib/idempotency";
 import { TIMEZONES, zonedDateTimeParts, AVAILABILITY_INTERVAL_MINUTES } from "@/lib/time";
@@ -216,7 +216,11 @@ export async function POST(request: Request) {
   const localEnd = zonedDateTimeParts(endsAtUnix, body.timezone);
   if (participantConnections.length > 0 && localStart.date === localEnd.date) {
     try {
-      const stillFree = await getCollectiveAvailability({
+      // Only the slots matter here. A participant we couldn't read is reported
+      // rather than thrown now, and this guard deliberately stays fail-open
+      // (see the note above) — it exists to catch a race, not to become a
+      // second way a booking can be refused.
+      const { slots: stillFree } = await getCollectiveAvailability({
         connections: participantConnections,
         startTime: body.startsAtUnix,
         endTime: endsAtUnix,
@@ -362,15 +366,45 @@ export async function POST(request: Request) {
     ]);
     inserted = eventRows[0];
   } catch (err) {
+    // Whatever went wrong below, a real event with real invitations is already
+    // sitting in everyone's calendar, and no DB row will reference it — so the
+    // app can neither show it, move it, nor cancel it. Take it back.
+    //
+    // Best-effort and never allowed to mask the original failure: if this also
+    // fails, the provider event id goes in the log so it can be removed by
+    // hand. Previously the orphan was only logged, which meant a failed booking
+    // still put a meeting in six people's diaries that nobody could cancel from
+    // inside the tool.
+    let orphanRemoved = false;
+    try {
+      await cancelSessionEvent({
+        connection: connectionCredentials(organizerConnection),
+        providerEventId: providerEvent.eventId,
+      });
+      orphanRemoved = true;
+    } catch (cancelErr) {
+      console.error("[admin/events] Couldn't remove the orphaned calendar event — remove it by hand", {
+        idempotencyKey,
+        providerEventId: providerEvent.eventId,
+        organizerConnectionId: organizerConnection.id,
+        cancelErr,
+      });
+    }
+
     if (isUniqueViolation(err)) {
       // A concurrent request beat us to the insert — this IS the actual
       // correctness guarantee (the pre-check above is only an optimization).
       // Our own calendar call above is now the "losing" duplicate: it created a
-      // real event that no DB row will ever reference. Logged so it's at
-      // least traceable, not silently lost.
-      console.error(
-        "[admin/events] Lost an idempotency race — orphaned calendar event, returning the winning row",
-        { idempotencyKey, orphanedProviderEventId: providerEvent.eventId }
+      // real event that no DB row will ever reference. The cleanup above has
+      // already tried to take it back, so the winning row is the only session
+      // left standing — which is the whole point of the idempotency key.
+      console.warn(
+        "[admin/events] Lost an idempotency race — returning the winning row",
+        {
+          idempotencyKey,
+          duplicateProviderEventId: providerEvent.eventId,
+          duplicateRemoved: orphanRemoved,
+        }
       );
       try {
         const [winner] = await db
@@ -391,12 +425,17 @@ export async function POST(request: Request) {
     console.error("[admin/events] DB insert failed after a real calendar event was created", {
       idempotencyKey,
       providerEventId: providerEvent.eventId,
+      orphanRemoved,
       err,
     });
     return NextResponse.json(
       {
-        error:
-          "The invite may have already gone out, but we couldn't save the record. Check calendars before retrying.",
+        // Says which of the two actually happened, because the follow-up
+        // differs: a withdrawn invite means retry, a stuck one means check the
+        // calendar first or people get the same session twice.
+        error: orphanRemoved
+          ? "We couldn't save the session, so the calendar invite was withdrawn. Nothing was booked — please try again."
+          : "The invite went out but we couldn't save the record, and we couldn't withdraw it either. Check the calendar before retrying, or you'll book it twice.",
       },
       { status: 500 }
     );

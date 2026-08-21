@@ -23,6 +23,11 @@ export type AvailabilityResult = {
   checkedCount: number;
   totalSelected: number;
   notConnectedNames: string[];
+  /** Connected, but their calendar couldn't be read — a withheld permission, a
+   * revoked token. Distinct from not connected, and more dangerous: these
+   * people were skipped, so the slots below don't account for them. Optional so
+   * a response from an older deploy still renders. */
+  unreadableNames?: string[];
   error?: string;
   /** True when Nylas found real calendar overlap but it all got filtered out
    * by someone's stated /me availability window or a guest's weekly session
@@ -93,6 +98,21 @@ export function ResultsList({
           </>
         )}
       </p>
+
+      {/* Deliberately loud, and deliberately not folded into the muted line
+          above. Someone here is connected — so nothing on screen would
+          otherwise suggest a problem — but their calendar was skipped, which
+          means every slot below is offered without knowing whether they're
+          free. That is the one thing an admin must not learn afterwards. */}
+      {(result.unreadableNames?.length ?? 0) > 0 && (
+        <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          Couldn&apos;t read {result.unreadableNames!.join(", ")}
+          {result.unreadableNames!.length === 1 ? "'s calendar" : "'s calendars"}, so the times below
+          don&apos;t take {result.unreadableNames!.length === 1 ? "it" : "them"} into account. Ask{" "}
+          {result.unreadableNames!.length === 1 ? "them" : "each of them"} to reconnect on their
+          settings page.
+        </p>
+      )}
 
       {result.slots.length === 0 && (result.bookedSlots?.length ?? 0) === 0 ? (
         <p className="mt-4 text-sm text-foreground">

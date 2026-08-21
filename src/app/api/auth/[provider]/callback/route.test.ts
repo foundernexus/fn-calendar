@@ -31,11 +31,17 @@ const FULL_GRANT = [
   "Calendars.ReadWrite",
 ];
 
+/** Set to make the code exchange fail instead of resolving. */
+let exchangeError: Error | null = null;
+
 vi.mock("@/lib/calendar", async () => {
   const actual = await vi.importActual<typeof import("@/lib/calendar")>("@/lib/calendar");
   return {
     ...actual,
-    exchangeCode: vi.fn(async () => ({ ...exchanged })),
+    exchangeCode: vi.fn(async () => {
+      if (exchangeError) throw exchangeError;
+      return { ...exchanged };
+    }),
   };
 });
 
@@ -50,6 +56,7 @@ beforeEach(async () => {
   vi.resetModules();
   mockCookies();
   await reinstallTestDb();
+  exchangeError = null;
   exchanged = {
     email: "",
     refreshToken: "refresh-token",
@@ -74,6 +81,57 @@ function statusOf(res: Response) {
 function destinationOf(res: Response) {
   return new URL(res.headers.get("location")!).pathname;
 }
+
+describe("a code that was already used", () => {
+  it("says so instead of blaming our configuration", async () => {
+    // A code redeems once. Reaching the exchange with invalid_grant therefore
+    // means this callback URL was opened twice — a reload, the back button, a
+    // double click on the unverified-app interstitial — and the FIRST open is
+    // the one that worked. Production, 2026-08-21: 12:33:15 succeeded, 12:33:23
+    // replayed the same code, and the person who was by then correctly
+    // connected was told their calendar provider was misconfigured on our side.
+    const member = await seedMember({ email: "m@foundernexus.com" });
+    exchangeError = new Error(
+      'Google code exchange failed (400): {"error": "invalid_grant", "error_description": "Bad Request"}'
+    );
+
+    const res = await callCallback(await connectState({ memberId: member.id }));
+
+    expect(statusOf(res)).toBe("used");
+    expect(statusOf(res)).not.toBe("provider");
+  });
+
+  it("hands out no session for a code it could not redeem", async () => {
+    // The security property, and the reason this is not "notice they're already
+    // connected and just log them in". The state token is minted by
+    // /api/connect/start, which is PUBLIC and takes a bare email address, so
+    // anyone who knows a registered address can obtain a token carrying that
+    // member's id. The code exchange is the only step in this route that proves
+    // the person at the other end owns the account. Issuing a session on a
+    // FAILED exchange would turn a friendlier error message into a complete
+    // authentication bypass.
+    const member = await seedMember({ email: OWNER_EMAIL });
+    await seedMember({ email: "other@foundernexus.com" });
+    exchangeError = new Error('invalid_grant');
+
+    const res = await callCallback(await connectState({ memberId: member.id }));
+
+    const cookies = res.headers.get("set-cookie") ?? "";
+    expect(cookies).not.toContain(MEMBER_COOKIE_NAME);
+    expect(cookies).not.toContain(ADMIN_COOKIE_NAME);
+    expect(await harness.db.select().from(calendarConnections)).toHaveLength(0);
+  });
+
+  it("still reports a genuine provider fault as one", async () => {
+    // The narrower message must not swallow the case it was carved out of.
+    const member = await seedMember({ email: "m@foundernexus.com" });
+    exchangeError = new Error("Google code exchange failed (401): invalid_client");
+
+    expect(statusOf(await callCallback(await connectState({ memberId: member.id })))).toBe(
+      "provider"
+    );
+  });
+});
 
 describe("identity", () => {
   it("refuses when the signed-in account is not the member being bound", async () => {

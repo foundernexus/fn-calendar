@@ -195,10 +195,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid date range." }, { status: 400 });
   }
 
-  let slots;
+  let collective;
   let bookedEvents;
   try {
-    [slots, bookedEvents] = await Promise.all([
+    [collective, bookedEvents] = await Promise.all([
       getCollectiveAvailability({
         connections: participantConnections,
         startTime,
@@ -218,12 +218,10 @@ export async function POST(request: Request) {
       getBookedEventsOverlapping(allSelectedIds, new Date(startTime * 1000), new Date(endTime * 1000)),
     ]);
   } catch (err) {
-    // `cause` is the whole point of logging this. AvailabilityUnavailableError's
-    // own message only names WHOSE calendar failed; the provider's response —
-    // the part that distinguishes a withheld permission from a revoked token
-    // from a disabled API — hangs off the cause. Without it this line says a
-    // person's name and nothing else, and diagnosing a 403 meant reading
-    // Vercel's request trace to find a single status code.
+    // Reaching here now means the whole lookup broke — a database failure, or
+    // something thrown outside the per-calendar work — rather than one
+    // participant's calendar being unreadable. That case is handled below,
+    // without failing the search.
     const cause = err instanceof Error ? err.cause : undefined;
     console.error("[admin/availability] Availability lookup failed", {
       startTime,
@@ -233,18 +231,41 @@ export async function POST(request: Request) {
       cause: cause instanceof Error ? cause.message : cause ? String(cause) : undefined,
     });
     return NextResponse.json(
+      { error: "Couldn't check calendars right now. Please try again." },
+      { status: 502 }
+    );
+  }
+
+  const { slots, unreadable } = collective;
+
+  // The session lead is the exception: their calendar is the one the session is
+  // created ON, and every slot offered is a claim about their time. Offering
+  // times we can't stand behind for the host is not a degraded answer, it's a
+  // wrong one — so this stays fatal, exactly as the whole search used to be.
+  const organizerEmails = new Set(
+    (connectionsByMemberId.get(body.organizerMemberId) ?? []).map((c) => c.grant_email)
+  );
+  const organizerUnreadable = unreadable.find((email) => organizerEmails.has(email));
+  if (organizerUnreadable) {
+    return NextResponse.json(
       {
-        // Names the calendar that failed when we know it — an admin can then
-        // chase the right person instead of retrying blindly. The error message
-        // already carries the address (see AvailabilityUnavailableError).
-        error:
-          err instanceof Error && err.name === "AvailabilityUnavailableError"
-            ? `${err.message}. They may need to reconnect it.`
-            : "Couldn't check calendars right now. Please try again.",
+        error: `Couldn't read ${organizerUnreadable}'s calendar, and they're leading this session. They'll need to reconnect it before you can book.`,
       },
       { status: 502 }
     );
   }
+
+  // Everyone else degrades: their calendar is skipped and they are named, so
+  // the admin decides whether to book around a person whose availability we
+  // couldn't confirm. Silently dropping them is the one thing that must not
+  // happen — see the note on CollectiveAvailability.
+  const memberNameByEmail = new Map<string, string>();
+  for (const id of allSelectedIds) {
+    for (const c of connectionsByMemberId.get(id) ?? []) {
+      memberNameByEmail.set(c.grant_email, membersById.get(id)?.fullName ?? c.grant_email);
+    }
+  }
+  const unreadableNames = [...new Set(unreadable.map((e) => memberNameByEmail.get(e) ?? e))];
 
   // Nylas only knows about real calendar free/busy — it has no idea a member
   // set "Mondays 2-5pm only" on /me. Every selected member (organizer, advisor
@@ -269,6 +290,10 @@ export async function POST(request: Request) {
     checkedCount,
     totalSelected: allSelectedIds.length,
     notConnectedNames,
+    // Connected, but we couldn't read them — a different problem from not being
+    // connected at all, and one the admin has to see: the slots below do NOT
+    // account for these people.
+    unreadableNames,
     // True only when Nylas found real calendar overlap but every one of
     // those slots got excluded by someone's stated /me availability window —
     // distinct from Nylas finding nothing at all, so the UI isn't stuck
