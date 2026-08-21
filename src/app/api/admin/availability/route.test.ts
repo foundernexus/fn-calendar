@@ -145,7 +145,37 @@ describe("who gets checked", () => {
 
     expect(res.status).toBe(200);
     expect(body.slots).toHaveLength(1);
-    expect(body.unreadableNames).toEqual([founder.fullName]);
+    // Always identifies the calendar by address. (This fixture's display name
+    // IS the address, so it renders as the bare address rather than "x (x)" —
+    // the name-plus-address form is pinned by the next test.)
+    expect(body.unreadableNames).toHaveLength(1);
+    expect(body.unreadableNames[0]).toContain(founder.email);
+  });
+
+  it("lists a broken calendar separately from the same person's working one", async () => {
+    // The exact shape of the advisor case: work calendar reads fine, personal
+    // one has never had the permission. Both belong to one member, so a
+    // per-person message would have to choose between naming him (wrong — half
+    // his time IS known) and staying silent (worse).
+    const { lead, founder } = await seedCast();
+    await seedConnection({
+      memberId: founder.id,
+      grantEmail: "personal@gmail.com",
+      grantId: "g-personal",
+    });
+    getCollectiveAvailability.mockResolvedValue({
+      slots: [{ emails: [], startTime: NINE, endTime: NINE + 3600 }],
+      unreadable: ["personal@gmail.com"],
+    });
+
+    const { body } = await search({
+      organizerMemberId: lead.id,
+      guestMemberIds: [founder.id],
+    });
+
+    expect(body.unreadableNames).toEqual([`${founder.fullName} (personal@gmail.com)`]);
+    // Still counted as checked: one of his two calendars was read.
+    expect(body.checkedCount).toBe(2);
   });
 
   it("still refuses outright when it's the session lead we can't read", async () => {

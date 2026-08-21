@@ -265,7 +265,16 @@ export async function POST(request: Request) {
       memberNameByEmail.set(c.grant_email, membersById.get(id)?.fullName ?? c.grant_email);
     }
   }
-  const unreadableNames = [...new Set(unreadable.map((e) => memberNameByEmail.get(e) ?? e))];
+  // Named per CALENDAR, not per person, and deduped by address rather than by
+  // name. Someone can hold several — a work account and a personal one — and
+  // only one of them be broken, which is exactly the case this was written for:
+  // an advisor whose work calendar reads fine while his personal one has never
+  // had the permission. Collapsing that to "Court Lorenzini" reads as "we can't
+  // see him at all" and hides which account anyone should go and fix.
+  const unreadableNames = [...new Set(unreadable)].map((email) => {
+    const name = memberNameByEmail.get(email);
+    return name && name !== email ? `${name} (${email})` : email;
+  });
 
   // Nylas only knows about real calendar free/busy — it has no idea a member
   // set "Mondays 2-5pm only" on /me. Every selected member (organizer, advisor

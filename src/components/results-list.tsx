@@ -106,10 +106,11 @@ export function ResultsList({
           free. That is the one thing an admin must not learn afterwards. */}
       {(result.unreadableNames?.length ?? 0) > 0 && (
         <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          Couldn&apos;t read {result.unreadableNames!.join(", ")}
-          {result.unreadableNames!.length === 1 ? "'s calendar" : "'s calendars"}, so the times below
-          don&apos;t take {result.unreadableNames!.length === 1 ? "it" : "them"} into account. Ask{" "}
-          {result.unreadableNames!.length === 1 ? "them" : "each of them"} to reconnect on their
+          {result.unreadableNames!.length === 1
+            ? "This calendar couldn't be read, so the times below don't account for it: "
+            : "These calendars couldn't be read, so the times below don't account for them: "}
+          <span className="font-medium">{result.unreadableNames!.join(", ")}</span>. Ask{" "}
+          {result.unreadableNames!.length === 1 ? "them" : "each of them"} to reconnect from their
           settings page.
         </p>
       )}
