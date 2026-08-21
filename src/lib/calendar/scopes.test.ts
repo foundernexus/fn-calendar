@@ -52,6 +52,39 @@ describe("what we check we got", () => {
     expect(missing).toEqual(["see when you're busy"]);
   });
 
+  it("lets a founder through on free/busy alone", () => {
+    // The whole point of the narrowing. Before this, someone who declined the
+    // calendar-list permission could not connect at all — the callback turned
+    // them away — which is exactly how an advisor got stuck twice. Now the
+    // missing list costs accuracy on calendars they keep separate, not access.
+    expect(
+      missingCapabilities("google", "read", ["https://www.googleapis.com/auth/calendar.freebusy"])
+    ).toEqual([]);
+  });
+
+  it("still requires the calendar list of a session lead", () => {
+    // The one group asked for it, and so the one group blocked without it:
+    // every other person's grid is built out of a session lead's free time.
+    expect(
+      missingCapabilities("google", "write", [
+        "https://www.googleapis.com/auth/calendar.freebusy",
+        "https://www.googleapis.com/auth/calendar.events",
+      ])
+    ).toEqual(["see the list of your calendars"]);
+  });
+
+  it("keeps honouring a broad grant made before the narrowing", () => {
+    // Everyone who connected earlier holds calendar.readonly. It covers both
+    // capabilities, and telling those people their working calendar is broken
+    // would be a self-inflicted outage.
+    expect(
+      missingCapabilities("google", "write", [
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
+      ])
+    ).toEqual([]);
+  });
+
   it("rejects Calendars.ReadBasic, which cannot actually read free/busy", () => {
     // Microsoft documents it as the least-privileged permission for
     // getSchedule. A personal Outlook account holding exactly that scope got

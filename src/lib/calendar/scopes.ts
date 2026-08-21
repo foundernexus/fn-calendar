@@ -34,6 +34,16 @@ const CAPABILITIES: Record<"google" | "microsoft", Record<CalendarAccess, readon
   google: {
     read: [
       {
+        need: "see when you're busy",
+        satisfiedBy: [`${GOOGLE}calendar.freebusy`, `${GOOGLE}calendar.readonly`, `${GOOGLE}calendar`],
+      },
+    ],
+    write: [
+      {
+        // Only session leads are asked for this, and only they are blocked
+        // without it — see the note on requestedScopes. A founder or advisor who
+        // granted it in the past keeps it and gets the wider read; one who never
+        // grants it is read from `primary` alone and is not turned away.
         need: "see the list of your calendars",
         satisfiedBy: [
           `${GOOGLE}calendar.calendarlist.readonly`,
@@ -41,12 +51,6 @@ const CAPABILITIES: Record<"google" | "microsoft", Record<CalendarAccess, readon
           `${GOOGLE}calendar`,
         ],
       },
-      {
-        need: "see when you're busy",
-        satisfiedBy: [`${GOOGLE}calendar.freebusy`, `${GOOGLE}calendar.readonly`, `${GOOGLE}calendar`],
-      },
-    ],
-    write: [
       {
         need: "add sessions to your calendar",
         satisfiedBy: [`${GOOGLE}calendar.events`, `${GOOGLE}calendar`],
@@ -96,12 +100,29 @@ export function requestedScopes(provider: "google" | "microsoft", access: Calend
       access === "write" ? "Calendars.ReadWrite" : "Calendars.Read",
     ];
   }
-  const scopes = [
-    `${GOOGLE}calendar.calendarlist.readonly`,
-    `${GOOGLE}calendar.freebusy`,
-    `${GOOGLE}userinfo.email`,
-  ];
-  if (access === "write") scopes.push(`${GOOGLE}calendar.events`);
+  const scopes = [`${GOOGLE}calendar.freebusy`, `${GOOGLE}userinfo.email`];
+  if (access === "write") {
+    // calendar.calendarlist.readonly is asked of session leads only.
+    //
+    // Google's freeBusy takes no wildcard: it answers about the calendars you
+    // name and nothing else, so reading a second calendar means enumerating the
+    // list first. Microsoft needs no equivalent — getSchedule against your own
+    // address already covers the whole mailbox — so this scope is a workaround
+    // for one provider's API, not something the product needs.
+    //
+    // It was on everyone's consent screen and read as "you can see every
+    // calendar I subscribe to", which is close enough to true to be worth
+    // refusing: it returns the NAMES of a spouse's or a family calendar, and an
+    // advisor said no to it twice. What it costs to drop: events kept on a
+    // second calendar the person owns are invisible, and we may book over them.
+    // What it does not cost: anything on the main calendar. Invitations land
+    // there, and so does an appointment a partner enters into their calendar —
+    // between them that is nearly every commitment that actually blocks someone.
+    //
+    // Session leads keep it because the grid is built on their availability and
+    // they are four internal people, none of whom object.
+    scopes.push(`${GOOGLE}calendar.calendarlist.readonly`, `${GOOGLE}calendar.events`);
+  }
   return scopes;
 }
 

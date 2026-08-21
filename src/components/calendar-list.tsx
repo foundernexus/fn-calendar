@@ -16,7 +16,19 @@ import type { MemberCalendar } from "@/db/queries";
  * are free, but the invite lands in one place — writing to all of them would
  * put the same session in their diary several times as entries that cancel
  * independently of each other. */
-export function CalendarList({ calendars }: { calendars: MemberCalendar[] }) {
+export function CalendarList({
+  calendars,
+  checksEveryCalendar = false,
+}: {
+  calendars: MemberCalendar[];
+  /** Whether we can look past the main calendar inside each connected account.
+   *
+   * False for founders and advisors, who are no longer asked for the permission
+   * that lists an account's calendars. The gap that leaves is small but silent —
+   * nothing tells anyone their second calendar went unread — so it is stated
+   * here rather than left to be discovered by a double booking. */
+  checksEveryCalendar?: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -101,6 +113,13 @@ export function CalendarList({ calendars }: { calendars: MemberCalendar[] }) {
           ? "All of these are checked before you're offered a time. Sessions are added to the one marked below."
           : "Checked before you're offered a time, and where your sessions are added. Add another if you keep work and personal separate."}
       </p>
+      {!checksEveryCalendar && calendars.length > 0 && (
+        <p className="mt-2 text-sm text-muted-foreground">
+          Inside each account we check your main calendar, including anything someone else books
+          into it. A separate calendar you created isn&apos;t checked — keep anything that should
+          block a session on your main one.
+        </p>
+      )}
 
       {calendars.length > 0 && (
         <ul className="mt-4 divide-y divide-border">

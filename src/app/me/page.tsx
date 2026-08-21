@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireMemberSession } from "@/lib/auth/member";
 import { getMemberAvailability, getMemberConnectionState } from "@/db/queries";
+import { calendarAccessFor } from "@/lib/calendar/access";
 import { MemberSettingsForm } from "@/components/member-settings-form";
 import { OnboardingGuide } from "@/components/onboarding-guide";
 import { buildMemberSteps } from "@/lib/onboarding";
@@ -26,6 +27,12 @@ export default async function MePage() {
     isAdvisor: false,
   });
 
+  // The same rule that decides what the consent screen asks for decides what
+  // this page can honestly promise — read it from one place rather than
+  // hard-coding "members are read-tier", which stops being true the moment
+  // someone is made a facilitator.
+  const access = await calendarAccessFor(session.member);
+
   return (
     <div className="mx-auto max-w-5xl py-10">
       <OnboardingGuide steps={steps} storageKey="member" />
@@ -48,6 +55,7 @@ export default async function MePage() {
           }))}
           connection={connectionState.connection}
           calendars={connectionState.calendars}
+          checksEveryCalendar={access === "write"}
           needsReconnect={connectionState.needsReconnect}
         />
       </div>

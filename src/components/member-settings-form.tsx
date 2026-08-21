@@ -99,6 +99,7 @@ export function MemberSettingsForm({
   initialAvailability,
   connection: initialConnection,
   calendars,
+  checksEveryCalendar = false,
   needsReconnect,
 }: {
   fullName: string;
@@ -108,6 +109,8 @@ export function MemberSettingsForm({
   /** Every calendar this member holds. All are checked for conflicts; the one
    * flagged isInviteTarget receives sessions. */
   calendars: MemberCalendar[];
+  /** Passed through to CalendarList — see the note on its prop. */
+  checksEveryCalendar?: boolean;
   /** They were connected before, but that connection now belongs to a
    * different Nylas app (e.g. we switched Sandbox/Production tiers) and no
    * longer works — distinct from never having connected at all, so the copy
@@ -365,7 +368,7 @@ export function MemberSettingsForm({
         </div>
       </div>
 
-        <CalendarList calendars={calendars} />
+        <CalendarList calendars={calendars} checksEveryCalendar={checksEveryCalendar} />
       </div>
 
       <div

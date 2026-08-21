@@ -176,12 +176,11 @@ export async function refreshGoogleToken(refreshToken: string) {
   };
 }
 
-/** Busy periods across every calendar this account can see.
+/** Busy periods across every calendar this token can reach.
  *
  * Two calls, not one: freeBusy only reports on calendars you name, so the
- * calendar list is fetched first. Asking only for "primary" was how a member's
- * second work calendar could sit there full of meetings while the app declared
- * them free.
+ * calendar list is fetched first where we are allowed to. Where we are not, that
+ * is one calendar — `primary` — and the difference is invisible from here.
  *
  * Google caps a freeBusy query at 50 calendars, so the list is chunked. */
 export async function fetchGoogleBusy(params: {
@@ -190,9 +189,11 @@ export async function fetchGoogleBusy(params: {
   endTime: number;
 }): Promise<BusyInterval[]> {
   const calendarIds = await listGoogleCalendarIds(params.accessToken);
-  if (calendarIds.length === 0) return [];
 
   const busy: BusyInterval[] = [];
+  let readCount = 0;
+  const failed: string[] = [];
+
   for (let i = 0; i < calendarIds.length; i += 50) {
     const chunk = calendarIds.slice(i, i + 50);
     const res = await googleFetch(
@@ -215,11 +216,17 @@ export async function fetchGoogleBusy(params: {
       calendars: Record<string, { busy?: { start: string; end: string }[]; errors?: unknown[] }>;
     };
 
-    for (const entry of Object.values(data.calendars ?? {})) {
-      // A per-calendar error (access revoked, calendar deleted) is reported
-      // inside a 200 response. Treated as "nothing known", never as "free":
-      // the caller merges these into a busy set, and silently dropping a
-      // calendar we failed to read would offer a slot we can't vouch for.
+    for (const [id, entry] of Object.entries(data.calendars ?? {})) {
+      // A per-calendar error (access revoked, calendar deleted, a subscription
+      // whose owner withdrew it) is reported INSIDE a 200 response, with `busy`
+      // simply absent. Reading only `busy` therefore turned a calendar we could
+      // not see into a calendar with nothing on it, which is the one mistake a
+      // scheduling tool must not make: it offers a slot it cannot vouch for.
+      if (entry.errors?.length) {
+        failed.push(id);
+        continue;
+      }
+      readCount += 1;
       for (const block of entry.busy ?? []) {
         busy.push({
           start: Math.floor(Date.parse(block.start) / 1000),
@@ -228,17 +235,53 @@ export async function fetchGoogleBusy(params: {
       }
     }
   }
+
+  if (failed.length > 0) {
+    console.warn(
+      `[google] freeBusy could not read ${failed.length} calendar(s): ${failed.join(", ")}`
+    );
+  }
+  // Nothing readable at all means we know nothing about this person, which is
+  // not the same as them being free. Fail loudly so the grid marks the
+  // connection broken instead of showing a wide-open week.
+  if (readCount === 0) {
+    throw new Error(
+      `Google returned no readable calendars (asked for ${calendarIds.length}, all failed)`
+    );
+  }
   return busy;
 }
 
+/** The calendars to ask freeBusy about.
+ *
+ * Founders and advisors are no longer asked for calendar.calendarlist.readonly,
+ * so this 403s for them and `primary` is the answer — see the note in
+ * scopes.ts for what that trades away. The failure is caught rather than
+ * predicted from the granted scopes because the two can disagree: someone who
+ * connected before the narrowing still holds the broader grant and should keep
+ * the wider read, and a scope can be revoked at myaccount.google.com without
+ * anything here being told. Asking the API is the only account that stays true.
+ *
+ * Deliberately not filtered by `selected`: that flag is whether the calendar is
+ * ticked in Google's own sidebar, which is a display preference. A calendar
+ * hidden from view still holds appointments that make the person unavailable. */
 async function listGoogleCalendarIds(accessToken: string) {
-  const res = await googleFetch(
-    `${CALENDAR_API}/users/me/calendarList?minAccessRole=freeBusyReader&maxResults=250`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-    "calendarList"
-  );
-  const data = (await res.json()) as { items?: { id: string; selected?: boolean }[] };
-  return (data.items ?? []).map((c) => c.id);
+  try {
+    const res = await googleFetch(
+      `${CALENDAR_API}/users/me/calendarList?minAccessRole=freeBusyReader&maxResults=250`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+      "calendarList"
+    );
+    const data = (await res.json()) as { items?: { id: string }[] };
+    const ids = (data.items ?? []).map((c) => c.id);
+    return ids.length > 0 ? ids : ["primary"];
+  } catch (err) {
+    console.info(
+      "[google] calendar list unavailable, reading primary only:",
+      err instanceof Error ? err.message : err
+    );
+    return ["primary"];
+  }
 }
 
 export async function createGoogleEvent(params: {

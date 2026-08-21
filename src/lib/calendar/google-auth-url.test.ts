@@ -37,17 +37,30 @@ describe("the Google consent URL", () => {
     expect(url.searchParams.get("access_type")).toBe("offline");
   });
 
-  it("puts only the narrow read scopes in front of a founder or advisor", async () => {
+  it("asks a founder or advisor for free/busy and nothing else", async () => {
+    // Two lines on the consent screen: when you're busy, and your address.
+    //
+    // calendar.calendarlist.readonly is the one being kept out. It reads as
+    // "every calendar I subscribe to" — which is close enough to what it does
+    // that an advisor refused it twice, since it returns the NAMES of a
+    // spouse's or family calendar. Dropping it costs us calendars the person
+    // owns but keeps separate from their main one; it costs us nothing on the
+    // main calendar itself, which is where invitations and anything a partner
+    // books for them already land.
     const scopes = (await authUrl("read")).searchParams.get("scope")!.split(" ");
     expect(scopes).toContain("https://www.googleapis.com/auth/calendar.freebusy");
-    expect(scopes).toContain("https://www.googleapis.com/auth/calendar.calendarlist.readonly");
+    expect(scopes).toContain("https://www.googleapis.com/auth/userinfo.email");
+    expect(scopes).not.toContain("https://www.googleapis.com/auth/calendar.calendarlist.readonly");
     expect(scopes).not.toContain("https://www.googleapis.com/auth/calendar.readonly");
     expect(scopes).not.toContain("https://www.googleapis.com/auth/calendar.events");
   });
 
-  it("adds write for a session lead, whose calendar hosts the session", async () => {
+  it("adds write and the calendar list for a session lead", async () => {
+    // The grid is built on a session lead's availability, so they are the one
+    // person for whom a missed second calendar is worth an extra consent line.
     const scopes = (await authUrl("write")).searchParams.get("scope")!.split(" ");
     expect(scopes).toContain("https://www.googleapis.com/auth/calendar.events");
+    expect(scopes).toContain("https://www.googleapis.com/auth/calendar.calendarlist.readonly");
     expect(scopes).not.toContain("https://www.googleapis.com/auth/calendar.readonly");
   });
 });
