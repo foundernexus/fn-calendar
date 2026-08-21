@@ -168,8 +168,15 @@ function EditPersonForm({
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="edit-role">Role</Label>
-          <Select value={role} onValueChange={(v) => setRole(v as PersonRole)}>
-            <SelectTrigger id="edit-role">
+          {/* `items` is what the trigger renders, not the SelectItem children —
+              without it SelectValue falls back to the raw value and the closed
+              dropdown reads "founder" instead of "Founder". */}
+          <Select
+            items={Object.fromEntries(availableRoles.map((r) => [r, ROLES[r].label]))}
+            value={role}
+            onValueChange={(v) => v && setRole(v as PersonRole)}
+          >
+            <SelectTrigger id="edit-role" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
