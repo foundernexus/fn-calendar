@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, Clock, Trash2 } from "lucide-react";
+import { AlertTriangle, Clock, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EditPersonDialog } from "@/components/edit-person-dialog";
 import { ProviderIcon } from "@/components/provider-icon";
 import type { MemberWithConnection } from "@/db/queries";
 import { handleExpiredSession } from "@/lib/session-expired";
@@ -98,6 +99,7 @@ export function MemberDirectory({
 }) {
   const router = useRouter();
   const [removing, setRemoving] = useState<MemberWithConnection | null>(null);
+  const [editing, setEditing] = useState<MemberWithConnection | null>(null);
 
   const counts = {
     connected: members.filter((m) => statusOf(m) === "connected").length,
@@ -242,16 +244,46 @@ export function MemberDirectory({
                                   </div>
                                 </TableCell>
                                 <TableCell>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    title={`Remove ${m.fullName}`}
-                                    onClick={() => setRemoving(m)}
-                                  >
-                                    <Trash2 className="text-muted-foreground" />
-                                    <span className="sr-only">Remove {m.fullName}</span>
-                                  </Button>
+                                  <div className="flex justify-end gap-1">
+                                    {/* Open to any admin. Fixing a name is not
+                                        an act of authority, and until this
+                                        existed the only way to correct one was
+                                        to remove the person and add them again
+                                        — which revokes their calendar, drops
+                                        their availability, and is refused
+                                        outright once they've been in a session.
+                                        The role lives in the same dialog; the
+                                        server still refuses a Team change from
+                                        anyone but an owner. */}
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon-sm"
+                                      title={`Edit ${m.fullName}`}
+                                      onClick={() => setEditing(m)}
+                                    >
+                                      <Pencil className="text-muted-foreground" />
+                                      <span className="sr-only">Edit {m.fullName}</span>
+                                    </Button>
+                                    {/* Owner-only, and now actually hidden for
+                                        anyone else. The prop was passed in and
+                                        never read, so Team members were shown a
+                                        button that always ended in a 403 — the
+                                        server was doing its job while the page
+                                        invited them to fail. */}
+                                    {canRemove && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        title={`Remove ${m.fullName}`}
+                                        onClick={() => setRemoving(m)}
+                                      >
+                                        <Trash2 className="text-muted-foreground" />
+                                        <span className="sr-only">Remove {m.fullName}</span>
+                                      </Button>
+                                    )}
+                                  </div>
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -276,6 +308,14 @@ export function MemberDirectory({
           }}
         />
       )}
+
+      {/* One dialog for the whole table rather than one per row: the fields are
+          re-seeded from whichever person is being edited. */}
+      <EditPersonDialog
+        person={editing}
+        canSetTeam={canRemove}
+        onClose={() => setEditing(null)}
+      />
     </div>
   );
 }

@@ -31,7 +31,7 @@ type CreatedMember = { id: number; email: string; fullName: string };
  * picks rather than the pair of booleans the database stores: nobody is
  * choosing "is a facilitator AND an advisor", they're choosing which of three
  * lists this person belongs in. The flags are derived on submit. */
-const ROLES = {
+export const ROLES = {
   founder: {
     label: "Founder",
     hint: "Scheduled into sessions as a participant. The default.",

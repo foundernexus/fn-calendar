@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { eq, or, and, sql as raw } from "drizzle-orm";
 import { db } from "@/db";
 import { members, events, eventAttendees, calendarConnections } from "@/db/schema";
@@ -7,6 +8,92 @@ import { revokeNylasGrant } from "@/lib/nylas";
 import { revokeToken, asCalendarProvider } from "@/lib/calendar";
 import { decryptToken } from "@/lib/calendar/crypto";
 import { env } from "@/lib/env";
+
+const editSchema = z.object({
+  fullName: z.string().trim().min(1, "Enter a name.").max(200),
+  // Optional so a rename doesn't have to restate the role, and so a client that
+  // only knows how to edit names keeps working.
+  isAdvisor: z.boolean().optional(),
+  isFacilitator: z.boolean().optional(),
+});
+
+/** Corrects a person's name or role.
+ *
+ * Email is deliberately NOT editable here. It is the join between this row and
+ * everything else about them: the address they sign in with, the one the
+ * callback matches an OAuth account against, and the fallback an invitation is
+ * sent to. Changing it would leave a connected calendar bound to an address the
+ * member no longer has, and they would silently stop being recognised at
+ * sign-in. Somebody with the wrong address needs removing and re-adding, which
+ * is a different, deliberately heavier action.
+ *
+ * Renaming is open to any admin. Changing the Team flag is owner-only, for the
+ * same reason granting it at creation is: it hands out admin access. Advisor is
+ * a routing label, not a permission, so it isn't restricted. */
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await requireAdminSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const memberId = Number((await params).id);
+  if (!Number.isInteger(memberId) || memberId <= 0) {
+    return NextResponse.json({ error: "Invalid member id." }, { status: 400 });
+  }
+
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
+  const parsed = editSchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Invalid request." },
+      { status: 400 }
+    );
+  }
+  const body = parsed.data;
+
+  let current;
+  try {
+    [current] = await db.select().from(members).where(eq(members.id, memberId)).limit(1);
+  } catch (err) {
+    console.error("[admin/members/:id] Edit lookup failed", { memberId, err });
+    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
+  }
+  if (!current) {
+    return NextResponse.json({ error: "That person no longer exists." }, { status: 404 });
+  }
+
+  // Only when it actually CHANGES — a Team admin renaming a colleague who is
+  // already Team shouldn't be refused for leaving the flag as it was.
+  const changesTeamFlag =
+    body.isFacilitator !== undefined && body.isFacilitator !== current.isFacilitator;
+  if (changesTeamFlag && session.tier !== "owner") {
+    return NextResponse.json(
+      { error: "Only an account owner can change who's on the team." },
+      { status: 403 }
+    );
+  }
+
+  try {
+    const [updated] = await db
+      .update(members)
+      .set({
+        fullName: body.fullName,
+        ...(body.isAdvisor === undefined ? {} : { isAdvisor: body.isAdvisor }),
+        ...(body.isFacilitator === undefined ? {} : { isFacilitator: body.isFacilitator }),
+      })
+      .where(eq(members.id, memberId))
+      .returning();
+    return NextResponse.json({ member: updated });
+  } catch (err) {
+    console.error("[admin/members/:id] Edit failed", { memberId, err });
+    return NextResponse.json({ error: "Couldn't save the changes. Please try again." }, { status: 500 });
+  }
+}
 
 /** Removes a member for good: revokes their calendar grant at Nylas, then
  * deletes the row (their connections and stated availability cascade with it).
