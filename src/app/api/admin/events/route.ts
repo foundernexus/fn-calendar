@@ -12,9 +12,12 @@ import {
   getMembersByIds,
 } from "@/db/queries";
 import { createSessionEvent, cancelSessionEvent } from "@/lib/calendar/events";
-import { getCollectiveAvailability } from "@/lib/calendar/availability";
+import {
+  participantsOutsideStatedHours,
+  slotStillFree,
+} from "@/lib/calendar/booking-guards";
 import { computeIdempotencyKey } from "@/lib/idempotency";
-import { TIMEZONES, zonedDateTimeParts, AVAILABILITY_INTERVAL_MINUTES } from "@/lib/time";
+import { TIMEZONES } from "@/lib/time";
 import { requireAdminSession } from "@/lib/auth/admin";
 
 const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [string, ...string[]];
@@ -201,54 +204,67 @@ export async function POST(request: Request) {
 
   const endsAtUnix = body.startsAtUnix + body.durationMinutes * 60;
 
-  // Re-check that the slot is still free, immediately before booking it.
-  // Availability was only ever checked at SEARCH time, and the start time
-  // arrives from the client — a grid left open while someone else took the
-  // slot, or two admins working at once, produced a confident double booking,
-  // because Nylas creates events over conflicts without complaint.
+  const participantIds = [
+    body.organizerMemberId,
+    ...(advisorMember ? [advisorMember.id] : []),
+    ...guestMemberIds,
+  ];
+
+  // Nobody gets booked outside the hours they set for themselves.
   //
-  // Fails OPEN on purpose. If the check itself errors, or the slot straddles
-  // local midnight (where a one-day open-hours window can't express it), the
-  // booking proceeds with a logged warning. A bug in this guard must never be
-  // able to block real bookings — it exists to catch a race, not to become a
-  // second thing that can go wrong.
-  const localStart = zonedDateTimeParts(body.startsAtUnix, body.timezone);
-  const localEnd = zonedDateTimeParts(endsAtUnix, body.timezone);
-  if (participantConnections.length > 0 && localStart.date === localEnd.date) {
-    try {
-      // Only the slots matter here. A participant we couldn't read is reported
-      // rather than thrown now, and this guard deliberately stays fail-open
-      // (see the note above) — it exists to catch a race, not to become a
-      // second way a booking can be refused.
-      const { slots: stillFree } = await getCollectiveAvailability({
-        connections: participantConnections,
-        startTime: body.startsAtUnix,
-        endTime: endsAtUnix,
-        durationMinutes: body.durationMinutes,
-        intervalMinutes: AVAILABILITY_INTERVAL_MINUTES,
-        timezone: body.timezone,
-        // Open hours spanning exactly this slot, so only real calendar busy
-        // time can rule it out — not anyone's stated preferences, which were
-        // already applied at search time and are the admin's to override here.
-        workingHoursStart: localStart.time,
-        workingHoursEnd: localEnd.time,
-        excludeWeekends: false,
-      });
-      if (!stillFree.some((s) => s.startTime === body.startsAtUnix)) {
-        return NextResponse.json(
-          {
-            error:
-              "That time isn't free any more — someone's calendar changed since you searched. Search again to see what's left.",
-          },
-          { status: 409 }
-        );
-      }
-    } catch (err) {
-      console.warn("[admin/events] Slot re-check failed, booking anyway", {
-        idempotencyKey,
-        err,
-      });
-    }
+  // This used to be a search-time filter only, and a comment here called stated
+  // hours "the admin's to override here". They were overridable in the literal
+  // sense: a start time reaching this route by any path other than clicking a
+  // fresh grid cell — a tab left open, the reschedule flow, a retried request —
+  // booked straight through them. Confirmed by running it, not by reading it: a
+  // member whose only stated window was Mondays was booked on a Wednesday and
+  // the request returned 200.
+  //
+  // See booking-guards.ts for why this one refuses and the next one doesn't.
+  let outsideTheirHours: string[];
+  try {
+    outsideTheirHours = await participantsOutsideStatedHours({
+      memberIds: participantIds,
+      startUnix: body.startsAtUnix,
+      endUnix: endsAtUnix,
+    });
+  } catch (err) {
+    console.error("[admin/events] Couldn't read stated availability", { idempotencyKey, err });
+    return NextResponse.json(
+      { error: "Couldn't check everyone's stated hours. Please try again." },
+      { status: 500 }
+    );
+  }
+  if (outsideTheirHours.length > 0) {
+    return NextResponse.json(
+      {
+        error: `${outsideTheirHours.join(", ")} ${
+          outsideTheirHours.length === 1 ? "has" : "have"
+        } said they're not available then. Pick a time from the grid, or ask them to update their hours.`,
+      },
+      { status: 409 }
+    );
+  }
+
+  // Then: is it still clear on their actual calendars? Fails open — see
+  // booking-guards.ts for why this one may not refuse and the one above must.
+  if (
+    !(await slotStillFree({
+      memberIds: participantIds,
+      startUnix: body.startsAtUnix,
+      endUnix: endsAtUnix,
+      durationMinutes: body.durationMinutes,
+      timezone: body.timezone,
+      context: "admin/events",
+    }))
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "That time isn't free any more — someone's calendar changed since you searched. Search again to see what's left.",
+      },
+      { status: 409 }
+    );
   }
 
   let providerEvent;

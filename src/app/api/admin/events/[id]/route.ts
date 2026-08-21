@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { events, eventAttendees, calendarConnections } from "@/db/schema";
 import { getActiveConnections, groupConnectionsByMember, pickInviteConnection } from "@/db/queries";
 import { requireAdminSession } from "@/lib/auth/admin";
+import { participantsOutsideStatedHours, slotStillFree } from "@/lib/calendar/booking-guards";
 // Nylas stays imported purely as the bridge for sessions booked before the
 // switch — see resolveEventTarget. It goes when the last of them has passed.
 import { cancelNylasEvent, rescheduleNylasEvent } from "@/lib/nylas";
@@ -201,6 +202,61 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const endsAtUnix = body.startsAtUnix + body.durationMinutes * 60;
+
+  // Moving a session had no checks at all — not the stated hours, not the
+  // calendars. Booking has had both for a while, and the gap was never a
+  // decision: rescheduling simply grew up separately, so a session could be
+  // dragged onto a time a founder had blocked, or onto one somebody had taken
+  // since the grid was drawn, and the invite update went out regardless.
+  //
+  // Everyone on the session, not just the guests: an advisor's and the lead's
+  // own hours count the same as anyone else's.
+  const participantIds = [event.organizerMemberId, ...attendees.map((a) => a.memberId)];
+
+  let outsideTheirHours: string[];
+  try {
+    outsideTheirHours = await participantsOutsideStatedHours({
+      memberIds: participantIds,
+      startUnix: body.startsAtUnix,
+      endUnix: endsAtUnix,
+    });
+  } catch (err) {
+    console.error("[admin/events/:id] Couldn't read stated availability", { eventId, err });
+    return NextResponse.json(
+      { error: "Couldn't check everyone's stated hours. Please try again." },
+      { status: 500 }
+    );
+  }
+  if (outsideTheirHours.length > 0) {
+    return NextResponse.json(
+      {
+        error: `${outsideTheirHours.join(", ")} ${
+          outsideTheirHours.length === 1 ? "has" : "have"
+        } said they're not available then. Pick a time from the grid, or ask them to update their hours.`,
+      },
+      { status: 409 }
+    );
+  }
+
+  // Fails open, exactly as it does when booking — see booking-guards.ts.
+  if (
+    !(await slotStillFree({
+      memberIds: participantIds,
+      startUnix: body.startsAtUnix,
+      endUnix: endsAtUnix,
+      durationMinutes: body.durationMinutes,
+      timezone: event.timezone,
+      context: "admin/events/:id",
+    }))
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "That time isn't free any more — someone's calendar changed since you searched. Search again to see what's left.",
+      },
+      { status: 409 }
+    );
+  }
 
   try {
     if (target.kind === "direct") {
