@@ -101,6 +101,25 @@ export function AvailabilityGrid({
   // The viewer's own events are mapped the same way. An all-day entry is left
   // out on purpose: it would paint every row of the day and bury the meetings
   // that actually explain the gaps.
+  // All-day entries are collected separately rather than painted into cells:
+  // spread across every row they would bury the meetings that actually explain
+  // the gaps. They go under the day heading instead — which matters, because an
+  // all-day block is exactly what someone noticed missing here. Google marks
+  // these free by default, so free/busy never reports them and the day still
+  // reads as open; seeing it is the whole point.
+  const allDayByDate = new Map<string, string[]>();
+  for (const own of ownEvents) {
+    if (!own.allDay) continue;
+    // An all-day event ends at midnight on the FOLLOWING day, so its own end is
+    // one second short of being counted as a day of its own.
+    let cursor = zonedDateTimeParts(own.startUnix, timezone).date;
+    const lastDate = zonedDateTimeParts(own.endUnix - 1, timezone).date;
+    for (let guard = 0; guard < 60 && cursor <= lastDate; guard++) {
+      allDayByDate.set(cursor, [...(allDayByDate.get(cursor) ?? []), own.title]);
+      cursor = addDaysToDateString(cursor, 1);
+    }
+  }
+
   const ownByCell = new Map<string, string>();
   for (const own of ownEvents) {
     if (own.allDay) continue;
@@ -192,6 +211,14 @@ export function AvailabilityGrid({
                 className="border-b border-l border-border px-2 py-2 text-center text-xs font-medium text-foreground"
               >
                 {formatDateLabel(day)}
+                {(allDayByDate.get(day)?.length ?? 0) > 0 && (
+                  <span
+                    className="mt-0.5 block truncate text-[10px] leading-tight font-normal text-muted-foreground"
+                    title={allDayByDate.get(day)!.join(", ")}
+                  >
+                    {allDayByDate.get(day)!.join(", ")}
+                  </span>
+                )}
               </div>
             ))}
 
