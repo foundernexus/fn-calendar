@@ -284,7 +284,16 @@ export async function createMicrosoftEvent(params: {
   endTime: number;
   timezone: string;
   participants: { name?: string; email: string }[];
+  /** Graph describes recurrence with its own pattern/range object rather than
+   * an RRULE, so this isn't a matter of passing the string through. Refused
+   * outright rather than quietly creating a single meeting where six were
+   * asked for — every session lead is on Google today, and a silent one-off
+   * would only be found when the second month never arrived. */
+  recurrenceRule?: string;
 }) {
+  if (params.recurrenceRule) {
+    throw new Error("Repeating sessions aren't supported on Microsoft calendars yet.");
+  }
   const res = await graphFetch(
     `${GRAPH}/me/events`,
     {

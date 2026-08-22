@@ -167,6 +167,20 @@ export const calendarConnections = pgTable(
 
 export const events = pgTable("events", {
   id: serial("id").primaryKey(),
+  /** How often this session repeats, as an RFC 5545 rule — the string we hand
+   * the provider, e.g. `RRULE:FREQ=WEEKLY;INTERVAL=4;COUNT=6`. Null for the
+   * ordinary one-off, which is nearly all of them.
+   *
+   * Stored so the app can say "this cancels all six" before someone cancels all
+   * six. Nothing else reads it: the later occurrences are real events in real
+   * calendars, so free/busy reports them and the grid greys them out without
+   * anyone here expanding a series.
+   *
+   * Deliberately no per-occurrence rows. Moving one instance of a series is
+   * something Google already does well, in the calendar everyone involved
+   * already has open; matching it here would mean tracking exceptions and
+   * giving up this table as the answer to "when is this session". */
+  recurrenceRule: text("recurrence_rule"),
   title: text("title").notNull(),
   description: text("description"),
   startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),

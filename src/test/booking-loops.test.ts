@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import { createTestDb, reinstallTestDb, type TestDb } from "@/test/db";
+import { events } from "@/db/schema";
 import {
   adminCookie,
   memberCookie,
@@ -18,16 +19,32 @@ import {
 
 let harness: TestDb;
 
-type CreateArgs = { participants: { email: string; name?: string }[] };
+type CreateArgs = {
+  participants: { email: string; name?: string }[];
+  recurrenceRule?: string;
+};
 
 const cal = {
   create: vi.fn(async (_a: CreateArgs) => ({ eventId: "provider-event-1" })),
   cancel: vi.fn(async (_a: unknown) => ({ ok: true })),
   move: vi.fn(async (_a: unknown) => ({ ok: true })),
-  availability: vi.fn(async () => ({
-    slots: [] as { startTime: number; endTime: number }[],
+  /** The two candidate slots a search should surface, PLUS the window it was
+   * asked about.
+   *
+   * The echo is what makes a repeating booking testable: the guard asks about
+   * one narrow window per date, and a fixed list would report every date after
+   * the first as busy — a difference only visible once something asks about
+   * more than one date. */
+  availability: vi.fn(async (args?: { startTime: number; endTime: number }) => ({
+    slots: [
+      { startTime: SLOT, endTime: SLOT + 3600 },
+      { startTime: LATER, endTime: LATER + 3600 },
+      ...(args ? [{ startTime: args.startTime, endTime: args.endTime }] : []),
+    ],
     unreadable: [] as string[],
   })),
+  /** Dates the availability mock should report as taken. */
+  busyDates: new Set<number>(),
 };
 
 vi.mock("@/lib/calendar/events", () => ({
@@ -36,7 +53,10 @@ vi.mock("@/lib/calendar/events", () => ({
   moveSessionEvent: (a: unknown) => cal.move(a),
 }));
 vi.mock("@/lib/calendar/availability", () => ({
-  getCollectiveAvailability: () => cal.availability(),
+  getCollectiveAvailability: (args: { startTime: number; endTime: number }) =>
+    cal.busyDates.has(args.startTime)
+      ? Promise.resolve({ slots: [], unreadable: [] as string[] })
+      : cal.availability(args),
 }));
 
 /** Wednesday 2026-09-02, 10:00 Pacific. */
@@ -52,13 +72,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await harness.reset();
   vi.clearAllMocks();
-  cal.availability.mockResolvedValue({
-    slots: [
-      { startTime: SLOT, endTime: SLOT + 3600 },
-      { startTime: LATER, endTime: LATER + 3600 },
-    ],
-    unreadable: [],
-  });
+  cal.busyDates.clear();
   cal.create.mockResolvedValue({ eventId: "provider-event-1" });
   vi.resetModules();
   mockCookies(await adminCookie());
@@ -433,5 +447,54 @@ describe("E3/E5 — the People list reflects adds and removals", () => {
     const { getMembersWithConnectionStatus } = await import("@/db/queries");
     const all = await getMembersWithConnectionStatus();
     expect(all.find((m) => m.id === c.founder.id)).toBeUndefined();
+  });
+});
+
+describe("a repeating session", () => {
+  /** Four weeks on from SLOT, at the same wall-clock time. */
+  const FOUR_WEEKS = Math.floor(
+    Date.parse("2026-09-30T17:00:00Z") / 1000
+  );
+
+  it("is one event carrying a rule, not six bookings", async () => {
+    // The founder gets ONE invitation. Six separate bookings would land six
+    // emails at once, which was the objection that decided this design.
+    const c = await cast();
+    const { res, body } = await book(c, { repeatEveryWeeks: 4, repeatCount: 6 });
+
+    expect(res.status).toBe(200);
+    expect(cal.create).toHaveBeenCalledTimes(1);
+    expect(cal.create.mock.calls[0]![0]).toMatchObject({
+      recurrenceRule: "RRULE:FREQ=WEEKLY;INTERVAL=4;COUNT=6",
+    });
+
+    // Stored so the app can say "this cancels all six" before it does.
+    const [row] = await harness.db.select().from(events);
+    expect(row.recurrenceRule).toBe("RRULE:FREQ=WEEKLY;INTERVAL=4;COUNT=6");
+    expect(body.event.id).toBe(row.id);
+  });
+
+  it("refuses when a LATER date is taken, and books nothing", async () => {
+    // The point of checking ahead. The first date is on screen and free; the
+    // second is a month away, and finding out then means an apology.
+    const c = await cast();
+    cal.busyDates.add(FOUR_WEEKS);
+
+    const { res, body } = await book(c, { repeatEveryWeeks: 4, repeatCount: 3 });
+
+    expect(res.status).toBe(409);
+    expect(body.error).toMatch(/2026-09-30/);
+    // Nothing reached anyone's calendar — the refusal happens before the
+    // provider is touched, so there is no invitation to withdraw.
+    expect(cal.create).not.toHaveBeenCalled();
+    expect(await harness.db.select().from(events)).toHaveLength(0);
+  });
+
+  it("stays a one-off when nobody asks for a repeat", async () => {
+    const c = await cast();
+    await book(c);
+    expect(cal.create.mock.calls[0]![0]).toMatchObject({ recurrenceRule: undefined });
+    const [row] = await harness.db.select().from(events);
+    expect(row.recurrenceRule).toBeNull();
   });
 });

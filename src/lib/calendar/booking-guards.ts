@@ -8,6 +8,8 @@ import { getCollectiveAvailability } from "@/lib/calendar/availability";
 import {
   slotMatchesMemberAvailability,
   zonedDateTimeParts,
+  zonedDateTimeToUnix,
+  addDaysToDateString,
   AVAILABILITY_INTERVAL_MINUTES,
   type AvailabilityWindow,
 } from "@/lib/time";
@@ -149,4 +151,72 @@ export async function slotStillFree(params: {
     console.warn(`[${params.context}] Slot re-check failed, proceeding anyway`, err);
     return true;
   }
+}
+
+/** When a repeating session actually falls, in unix seconds.
+ *
+ * Walked in local dates rather than by adding 28 × 86400 seconds, because a
+ * fortnight or a month will cross a daylight-saving boundary sooner or later and
+ * arithmetic on seconds would quietly move a ten o'clock call to nine. The
+ * provider repeats at the same wall-clock time; the check in front of it has to
+ * agree, or it would be checking hours nobody is going to be booked into.
+ *
+ * The first entry is the slot that was clicked, so a count of 6 means six
+ * sessions in total, not six more. */
+export function occurrenceTimes(params: {
+  startUnix: number;
+  durationMinutes: number;
+  intervalWeeks: number;
+  count: number;
+  timezone: string;
+}): { startUnix: number; endUnix: number }[] {
+  const first = zonedDateTimeParts(params.startUnix, params.timezone);
+  const out: { startUnix: number; endUnix: number }[] = [];
+  for (let i = 0; i < params.count; i++) {
+    const date = addDaysToDateString(first.date, i * params.intervalWeeks * 7);
+    const startUnix = zonedDateTimeToUnix(date, first.time, params.timezone);
+    if (!Number.isFinite(startUnix)) continue;
+    out.push({ startUnix, endUnix: startUnix + params.durationMinutes * 60 });
+  }
+  return out;
+}
+
+/** Every occurrence that can't be booked, as human dates.
+ *
+ * Runs the same two checks a single booking gets, for each date in the series,
+ * and in parallel — six sequential round trips to Google would put the dialog
+ * several seconds behind a tick box.
+ *
+ * The point of doing this up front: a repeating session is the one booking where
+ * a clash is invisible at the moment you make it. The first date is on screen;
+ * the fourth is four months away, and finding out then means an apology. */
+export async function unbookableOccurrences(params: {
+  memberIds: number[];
+  occurrences: { startUnix: number; endUnix: number }[];
+  durationMinutes: number;
+  timezone: string;
+}): Promise<string[]> {
+  const results = await Promise.all(
+    params.occurrences.map(async (o) => {
+      const [outsideHours, free] = await Promise.all([
+        participantsOutsideStatedHours({
+          memberIds: params.memberIds,
+          startUnix: o.startUnix,
+          endUnix: o.endUnix,
+        }),
+        slotStillFree({
+          memberIds: params.memberIds,
+          startUnix: o.startUnix,
+          endUnix: o.endUnix,
+          durationMinutes: params.durationMinutes,
+          timezone: params.timezone,
+          context: "admin/events:recurring",
+        }),
+      ]);
+      if (outsideHours.length === 0 && free) return null;
+      const { date } = zonedDateTimeParts(o.startUnix, params.timezone);
+      return outsideHours.length > 0 ? `${date} (${outsideHours.join(", ")})` : date;
+    })
+  );
+  return results.filter((r): r is string => r !== null);
 }

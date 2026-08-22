@@ -101,6 +101,9 @@ export async function createEvent(params: {
    * already accepted; Microsoft ignores it, because Graph derives the organiser
    * from the mailbox being written to and the behaviour there is untested. */
   organizerEmail?: string;
+  /** RFC 5545 rule for a repeating session. Google only — see
+   * createMicrosoftEvent. */
+  recurrenceRule?: string;
 }) {
   return params.provider === "microsoft"
     ? createMicrosoftEvent(params)

@@ -295,6 +295,9 @@ export async function createGoogleEvent(params: {
   participants: { name?: string; email: string }[];
   /** Whose calendar this is being created on. */
   organizerEmail?: string;
+  /** RFC 5545 rule for a repeating session, e.g.
+   * `RRULE:FREQ=WEEKLY;INTERVAL=4;COUNT=6`. Absent for a one-off. */
+  recurrenceRule?: string;
 }) {
   const organizer = params.organizerEmail?.trim().toLowerCase();
   const res = await googleFetch(
@@ -314,6 +317,11 @@ export async function createGoogleEvent(params: {
         // An admin-pasted URL of unknown provider goes in `location`, not a
         // typed conferencing object — it shows on the invite whatever it is.
         location: params.meetingUrl,
+        // A repeating session is ONE event carrying a rule, not many events.
+        // The people on it get a single invitation, and their calendar handles
+        // skipping or moving an individual occurrence — which it does well, in
+        // the app they already have open.
+        ...(params.recurrenceRule ? { recurrence: [params.recurrenceRule] } : {}),
         start: { dateTime: new Date(params.startTime * 1000).toISOString(), timeZone: params.timezone },
         end: { dateTime: new Date(params.endTime * 1000).toISOString(), timeZone: params.timezone },
         // The session lead is listed like everyone else — they're leading it,

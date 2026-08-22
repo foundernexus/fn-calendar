@@ -15,6 +15,8 @@ import { createSessionEvent, cancelSessionEvent } from "@/lib/calendar/events";
 import {
   participantsOutsideStatedHours,
   slotStillFree,
+  occurrenceTimes,
+  unbookableOccurrences,
 } from "@/lib/calendar/booking-guards";
 import { computeIdempotencyKey } from "@/lib/idempotency";
 import { TIMEZONES } from "@/lib/time";
@@ -38,6 +40,12 @@ const bodySchema = z.object({
     error: "Duration must be 15, 30, 45, or 60 minutes.",
   }),
   timezone: z.enum(TIMEZONE_VALUES, { error: "Unsupported timezone." }),
+  // Fortnightly or four-weekly, rather than "monthly". A recurring 1:1 lives on
+  // a fixed weekday at a fixed time; "monthly" would have to choose between
+  // "the 15th" and "the first Monday", and both drift against that rhythm.
+  repeatEveryWeeks: z.union([z.literal(2), z.literal(4)]).optional(),
+  /** Total sessions including the one being booked, so 6 means six. */
+  repeatCount: z.number().int().min(2).max(12).optional(),
 });
 
 /** drizzle-orm wraps every driver error in `DrizzleQueryError`, which has no
@@ -267,9 +275,55 @@ export async function POST(request: Request) {
     );
   }
 
+  // A repeating session is checked all the way to its last date before anything
+  // is created. It is the one booking whose clashes are invisible at the moment
+  // you make it: the first date is on the screen in front of you, the fourth is
+  // four months out, and finding out then means an apology rather than a fix.
+  //
+  // Refuses outright rather than booking what fits and skipping the rest. Six
+  // sessions minus two is not what anyone asked for, and a series with holes in
+  // it is worse than being told to pick a different time.
+  let recurrenceRule: string | undefined;
+  if (body.repeatEveryWeeks && body.repeatCount) {
+    const occurrences = occurrenceTimes({
+      startUnix: body.startsAtUnix,
+      durationMinutes: body.durationMinutes,
+      intervalWeeks: body.repeatEveryWeeks,
+      count: body.repeatCount,
+      timezone: body.timezone,
+    });
+    let blocked: string[];
+    try {
+      blocked = await unbookableOccurrences({
+        memberIds: participantIds,
+        occurrences,
+        durationMinutes: body.durationMinutes,
+        timezone: body.timezone,
+      });
+    } catch (err) {
+      console.error("[admin/events] Couldn't check the repeat dates", { idempotencyKey, err });
+      return NextResponse.json(
+        { error: "Couldn't check the later dates. Please try again." },
+        { status: 500 }
+      );
+    }
+    if (blocked.length > 0) {
+      return NextResponse.json(
+        {
+          error: `${blocked.join(", ")} ${
+            blocked.length === 1 ? "isn't" : "aren't"
+          } free for everyone. Pick another time, or repeat fewer times.`,
+        },
+        { status: 409 }
+      );
+    }
+    recurrenceRule = `RRULE:FREQ=WEEKLY;INTERVAL=${body.repeatEveryWeeks};COUNT=${body.repeatCount}`;
+  }
+
   let providerEvent;
   try {
     providerEvent = await createSessionEvent({
+      recurrenceRule,
       connection: connectionCredentials(organizerConnection),
       title: body.title,
       description: body.description,
@@ -366,6 +420,11 @@ export async function POST(request: Request) {
         // moving has to go back to this exact connection, or it 404s at the
         // provider while the meeting sits in everyone's diary.
         organizerConnectionId: organizerConnection.id,
+        // Recorded so the app can say "this cancels all six" before it does.
+        // Nothing else reads it — the later occurrences are real events in real
+        // calendars, so free/busy greys them out without anyone expanding a
+        // series here.
+        recurrenceRule: recurrenceRule ?? null,
         idempotencyKey,
       })
         .returning(),
