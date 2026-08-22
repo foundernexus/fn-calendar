@@ -548,14 +548,12 @@ export function FindATimeForm({
           slot={dialogSlot}
           organizerMemberId={searchedParams.organizerMemberId}
           organizerName={searchedParams.organizerName}
-          // The lead's standing room for a call of this length, if they keep
-          // one. Karin holds a different link for a fifteen-minute member
-          // check-in than for a thirty-minute intro, which is why this is
-          // looked up by duration rather than being one default per person.
+          // The lead's standing meeting room, if they keep one. A personal room
+          // is a single room, so it doesn't vary by session length — this is
+          // only a starting value and can be replaced for a one-off.
           defaultMeetingUrl={
-            members.find((m) => m.id === searchedParams.organizerMemberId)?.meetingLinks?.[
-              String(Math.round((dialogSlot.endUnix - dialogSlot.startUnix) / 60))
-            ] ?? ""
+            members.find((m) => m.id === searchedParams.organizerMemberId)?.meetingLinks
+              ?.default ?? ""
           }
           advisorMemberId={searchedParams.advisorMemberId ?? null}
           advisorName={searchedParams.advisorName ?? null}

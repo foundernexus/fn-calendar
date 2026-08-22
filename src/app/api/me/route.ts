@@ -23,9 +23,14 @@ const dayEntrySchema = z
  * settings UI stops offering "add block" at the same limit. */
 const MAX_BLOCKS_PER_DAY = 3;
 
-/** Lengths a session can be booked at — the same set the booking form offers.
- * A standing link is held per length, so the keys are constrained to these. */
-const DURATIONS = ["15", "30", "45", "60"] as const;
+/** Keys a standing meeting link can be stored under.
+ *
+ * "default" is the one the form writes and the only one anybody uses: a
+ * personal meeting room is a single room, so the same link serves every call
+ * whatever its length. The per-length keys are still accepted because the
+ * column briefly held them and the shape cost nothing to keep — if a reason to
+ * vary the link by length ever turns up, it fits without a migration. */
+const LINK_KEYS = ["default", "15", "30", "45", "60"] as const;
 
 /** Quiet time either side of a meeting. Capped at an hour: past that it stops
  * being a buffer and becomes availability, which belongs in the weekly hours
@@ -39,7 +44,7 @@ const bodySchema = z.object({
   bufferBeforeMinutes: bufferSchema.optional(),
   bufferAfterMinutes: bufferSchema.optional(),
   meetingLinks: z
-    .record(z.enum(DURATIONS), z.string().trim().url("Enter a valid link.").or(z.literal("")))
+    .record(z.enum(LINK_KEYS), z.string().trim().url("Enter a valid link.").or(z.literal("")))
     .optional(),
   availability: z
     .array(dayEntrySchema)

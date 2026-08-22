@@ -29,9 +29,10 @@ type DayState = { enabled: boolean; blocks: Block[] };
  * back-to-back, not a scheduling language. */
 const BUFFER_CHOICES = [0, 5, 10, 15, 30] as const;
 
-/** Session lengths a standing link can be held for — mirrors DURATIONS in the
- * booking form. */
-const MEETING_LINK_DURATIONS = [15, 30, 45, 60] as const;
+/** The one key a standing meeting link is stored under. A personal meeting
+ * room is a single room — the same link serves a fifteen-minute check-in and a
+ * sixty-minute session alike. */
+const MEETING_LINK_KEY = "default";
 
 /** Mirrors MAX_BLOCKS_PER_DAY in api/me/route.ts — the server rejects more, so
  * the "Add block" button has to stop offering them at the same number. */
@@ -412,7 +413,7 @@ export function MemberSettingsForm({
           because it modifies them: the hours say when you COULD be booked, this
           says how close to something else. */}
       <div className="mt-5 rounded-lg border border-border bg-card p-6 shadow-card">
-        <p className="text-base font-semibold text-foreground">Gaps around meetings</p>
+        <p className="text-base font-semibold text-foreground">Buffer times</p>
         <p className="mt-1 text-sm text-muted-foreground">
           Keep time free either side of anything already in your calendar. Slots that would land
           right against another meeting stop being offered — to everyone, including admins.
@@ -452,31 +453,22 @@ export function MemberSettingsForm({
       {/* Standing meeting links, for whoever creates the invite. */}
       {canLeadSessions && (
         <div className="mt-5 rounded-lg border border-border bg-card p-6 shadow-card">
-          <p className="text-base font-semibold text-foreground">Your meeting links</p>
+          <p className="text-base font-semibold text-foreground">Your meeting link</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            One per session length, filled in automatically when you book. Leave a length blank if
-            you don&apos;t have a standing room for it.
+            Filled in automatically whenever you book a session. You can still change it on any
+            individual booking.
           </p>
-          <div className="mt-4 flex flex-col gap-3">
-            {MEETING_LINK_DURATIONS.map((minutes) => (
-              <div key={minutes} className="flex flex-wrap items-center gap-3">
-                <Label htmlFor={`link-${minutes}`} className="w-20 shrink-0">
-                  {minutes} min
-                </Label>
-                <Input
-                  id={`link-${minutes}`}
-                  type="url"
-                  inputMode="url"
-                  placeholder="https://zoom.us/j/…"
-                  className="min-w-0 flex-1"
-                  value={meetingLinks[String(minutes)] ?? ""}
-                  onChange={(e) =>
-                    setMeetingLinks((prev) => ({ ...prev, [String(minutes)]: e.target.value }))
-                  }
-                />
-              </div>
-            ))}
-          </div>
+          <Input
+            id="meeting-link"
+            type="url"
+            inputMode="url"
+            placeholder="https://zoom.us/j/…"
+            className="mt-4"
+            value={meetingLinks[MEETING_LINK_KEY] ?? ""}
+            onChange={(e) =>
+              setMeetingLinks((prev) => ({ ...prev, [MEETING_LINK_KEY]: e.target.value }))
+            }
+          />
         </div>
       )}
 
