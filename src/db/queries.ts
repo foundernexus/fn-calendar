@@ -474,6 +474,10 @@ export type MemberWithConnection = {
    * Session lead picker. Independent of both: someone can be an advisor and a
    * facilitator, or neither. */
   isAdvisor: boolean;
+  /** Standing meeting links keyed by session length, e.g. `{ "30": "..." }`.
+   * Carried so the booking form can prefill the lead's link for the length
+   * being booked. */
+  meetingLinks: Record<string, string>;
   /** The calendar that RECEIVES sessions, not "the" calendar — a member can
    * hold several. Null when none are usable. */
   provider: string | null;
@@ -511,6 +515,10 @@ export async function getMembersWithConnectionStatus(): Promise<MemberWithConnec
         usable.length === 0 && rows.some((r) => r.connection_status === "connected"),
       isFacilitator: m.isFacilitator,
       isAdvisor: m.isAdvisor,
+      // Only carried so the booking form can prefill the meeting link for
+      // whoever is leading. Everyone's links travel to the client, which is
+      // fine: these are join URLs for meetings this admin is about to be in.
+      meetingLinks: m.meetingLinks,
       provider: invite?.provider ?? null,
       grantEmail: invite?.grant_email ?? null,
       connections: usable.map((r) => ({

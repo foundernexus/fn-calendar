@@ -56,6 +56,13 @@ export default async function MePage() {
           connection={connectionState.connection}
           calendars={connectionState.calendars}
           checksEveryCalendar={access === "write"}
+          // Same tier that decides how much calendar access we ask for decides
+          // whether standing meeting links are worth showing: they only matter
+          // to whoever creates the invite.
+          canLeadSessions={access === "write"}
+          initialBufferBefore={session.member.bufferBeforeMinutes}
+          initialBufferAfter={session.member.bufferAfterMinutes}
+          initialMeetingLinks={session.member.meetingLinks}
           needsReconnect={connectionState.needsReconnect}
         />
       </div>

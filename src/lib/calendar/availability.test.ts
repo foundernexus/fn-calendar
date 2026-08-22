@@ -22,7 +22,15 @@ beforeEach(() => {
 
 const at = (iso: string) => Math.floor(Date.parse(iso) / 1000);
 
-function connection(over: Partial<{ id: number; provider: string; grantEmail: string }> = {}) {
+function connection(
+  over: Partial<{
+    id: number;
+    provider: string;
+    grantEmail: string;
+    bufferBeforeMinutes: number;
+    bufferAfterMinutes: number;
+  }> = {}
+) {
   return {
     id: 1,
     provider: "google",
@@ -117,5 +125,45 @@ describe("collective availability", () => {
     ]);
     // 09:00 PT is 16:00 UTC — busy for the second person, so nobody gets it.
     expect(slots.map((s) => s.startTime)).not.toContain(at("2026-08-19T16:00:00Z"));
+  });
+});
+
+describe("gaps around meetings", () => {
+  it("keeps a slot free of the buffer either side of a real meeting", async () => {
+    // 10:00–11:00 PT is 17:00–18:00 UTC. With 30 minutes kept clear afterwards,
+    // the 11:00 slot is no longer offered even though the calendar is empty
+    // then — which is the whole point: a Nexus Partner needs the gap to write
+    // the follow-up before the next call starts.
+    fetchBusy.mockResolvedValue([
+      { start: at("2026-08-19T17:00:00Z"), end: at("2026-08-19T18:00:00Z") },
+    ]);
+
+    const { slots } = await search([connection({ bufferAfterMinutes: 30 })]);
+    const starts = slots.map((s) => s.startTime);
+
+    expect(starts).not.toContain(at("2026-08-19T18:00:00Z")); // 11:00, inside the gap
+    expect(starts).toContain(at("2026-08-19T19:00:00Z")); // 12:00, clear of it
+  });
+
+  it("blocks the slot that would end right as a meeting starts", async () => {
+    // The other side. A 60-minute slot at 09:00 ends exactly when the 10:00
+    // meeting begins, which is precisely the back-to-back this prevents.
+    fetchBusy.mockResolvedValue([
+      { start: at("2026-08-19T17:00:00Z"), end: at("2026-08-19T18:00:00Z") },
+    ]);
+
+    const { slots } = await search([connection({ bufferBeforeMinutes: 15 })]);
+    expect(slots.map((s) => s.startTime)).not.toContain(at("2026-08-19T16:00:00Z"));
+  });
+
+  it("changes nothing for someone who set no buffer", async () => {
+    // The default, and it has to stay the default: a founder scheduled into the
+    // occasional session never asked for their availability to be narrowed.
+    fetchBusy.mockResolvedValue([
+      { start: at("2026-08-19T17:00:00Z"), end: at("2026-08-19T18:00:00Z") },
+    ]);
+
+    const { slots } = await search([connection()]);
+    expect(slots.map((s) => s.startTime)).toContain(at("2026-08-19T18:00:00Z"));
   });
 });

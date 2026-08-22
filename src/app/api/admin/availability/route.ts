@@ -181,7 +181,21 @@ export async function POST(request: Request) {
     ...new Map(
       allSelectedIds
         .flatMap((id) => connectionsByMemberId.get(id) ?? [])
-        .map((c) => [c.grant_email, connectionCredentials(c)] as const)
+        .map(
+          (c) =>
+            [
+              c.grant_email,
+              {
+                ...connectionCredentials(c),
+                // The buffer belongs to the person, not the calendar, so it
+                // comes off the member who owns this connection — someone with
+                // a work and a personal calendar keeps the same quiet time
+                // either side of both.
+                bufferBeforeMinutes: membersById.get(c.member_id)?.bufferBeforeMinutes ?? 0,
+                bufferAfterMinutes: membersById.get(c.member_id)?.bufferAfterMinutes ?? 0,
+              },
+            ] as const
+        )
     ).values(),
   ];
 

@@ -4,7 +4,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { TimezoneSelect } from "@/components/timezone-select";
@@ -16,6 +24,14 @@ import type { MemberCalendar } from "@/db/queries";
 
 type Block = { startTime: string; endTime: string };
 type DayState = { enabled: boolean; blocks: Block[] };
+
+/** Buffer lengths on offer. Short list on purpose — this is a nudge away from
+ * back-to-back, not a scheduling language. */
+const BUFFER_CHOICES = [0, 5, 10, 15, 30] as const;
+
+/** Session lengths a standing link can be held for — mirrors DURATIONS in the
+ * booking form. */
+const MEETING_LINK_DURATIONS = [15, 30, 45, 60] as const;
 
 /** Mirrors MAX_BLOCKS_PER_DAY in api/me/route.ts — the server rejects more, so
  * the "Add block" button has to stop offering them at the same number. */
@@ -100,6 +116,10 @@ export function MemberSettingsForm({
   connection: initialConnection,
   calendars,
   checksEveryCalendar = false,
+  canLeadSessions = false,
+  initialBufferBefore = 0,
+  initialBufferAfter = 0,
+  initialMeetingLinks = {},
   needsReconnect,
 }: {
   fullName: string;
@@ -111,6 +131,14 @@ export function MemberSettingsForm({
   calendars: MemberCalendar[];
   /** Passed through to CalendarList — see the note on its prop. */
   checksEveryCalendar?: boolean;
+  /** Whether this person can be picked as a session lead. Gates the standing
+   * meeting links, which only mean anything to whoever creates the invite. */
+  canLeadSessions?: boolean;
+  /** Quiet time kept either side of their meetings, in minutes. */
+  initialBufferBefore?: number;
+  initialBufferAfter?: number;
+  /** Standing meeting links keyed by session length, e.g. `{ "15": "..." }`. */
+  initialMeetingLinks?: Record<string, string>;
   /** They were connected before, but that connection now belongs to a
    * different Nylas app (e.g. we switched Sandbox/Production tiers) and no
    * longer works — distinct from never having connected at all, so the copy
@@ -134,6 +162,9 @@ export function MemberSettingsForm({
       return null;
     }
   });
+  const [bufferBefore, setBufferBefore] = useState(initialBufferBefore);
+  const [bufferAfter, setBufferAfter] = useState(initialBufferAfter);
+  const [meetingLinks, setMeetingLinks] = useState<Record<string, string>>(initialMeetingLinks);
   const [days, setDays] = useState<Record<number, DayState>>(() =>
     defaultDays(initialAvailability, initialTimezone === null)
   );
@@ -212,7 +243,13 @@ export function MemberSettingsForm({
       const res = await fetch("/api/me", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ timezone, availability }),
+        body: JSON.stringify({
+          timezone,
+          availability,
+          bufferBeforeMinutes: bufferBefore,
+          bufferAfterMinutes: bufferAfter,
+          ...(canLeadSessions ? { meetingLinks } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -370,6 +407,78 @@ export function MemberSettingsForm({
 
         <CalendarList calendars={calendars} checksEveryCalendar={checksEveryCalendar} />
       </div>
+
+      {/* Quiet time either side of meetings. Sits above the weekly hours
+          because it modifies them: the hours say when you COULD be booked, this
+          says how close to something else. */}
+      <div className="mt-5 rounded-lg border border-border bg-card p-6 shadow-card">
+        <p className="text-base font-semibold text-foreground">Gaps around meetings</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Keep time free either side of anything already in your calendar. Slots that would land
+          right against another meeting stop being offered — to everyone, including admins.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-6">
+          {(
+            [
+              ["Before", bufferBefore, setBufferBefore] as const,
+              ["After", bufferAfter, setBufferAfter] as const,
+            ] satisfies readonly (readonly [string, number, (n: number) => void])[]
+          ).map(([label, value, set]) => (
+            <div key={label} className="flex flex-col gap-1.5">
+              <Label htmlFor={`buffer-${label}`}>{label}</Label>
+              <Select
+                items={Object.fromEntries(
+                  BUFFER_CHOICES.map((m) => [String(m), m === 0 ? "None" : `${m} min`])
+                )}
+                value={String(value)}
+                onValueChange={(v) => v && set(Number(v))}
+              >
+                <SelectTrigger id={`buffer-${label}`} className="w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BUFFER_CHOICES.map((m) => (
+                    <SelectItem key={m} value={String(m)}>
+                      {m === 0 ? "None" : `${m} min`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Standing meeting links, for whoever creates the invite. */}
+      {canLeadSessions && (
+        <div className="mt-5 rounded-lg border border-border bg-card p-6 shadow-card">
+          <p className="text-base font-semibold text-foreground">Your meeting links</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            One per session length, filled in automatically when you book. Leave a length blank if
+            you don&apos;t have a standing room for it.
+          </p>
+          <div className="mt-4 flex flex-col gap-3">
+            {MEETING_LINK_DURATIONS.map((minutes) => (
+              <div key={minutes} className="flex flex-wrap items-center gap-3">
+                <Label htmlFor={`link-${minutes}`} className="w-20 shrink-0">
+                  {minutes} min
+                </Label>
+                <Input
+                  id={`link-${minutes}`}
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://zoom.us/j/…"
+                  className="min-w-0 flex-1"
+                  value={meetingLinks[String(minutes)] ?? ""}
+                  onChange={(e) =>
+                    setMeetingLinks((prev) => ({ ...prev, [String(minutes)]: e.target.value }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div
         data-tour="availability"

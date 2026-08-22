@@ -89,11 +89,33 @@ export async function slotStillFree(params: {
   if (localStart.date !== localEnd.date) return true;
 
   try {
-    const connections = await getActiveConnections([...new Set(params.memberIds)]);
+    const ids = [...new Set(params.memberIds)];
+    const [connections, members] = await Promise.all([
+      getActiveConnections(ids),
+      // Buffers again, so a slot refused by the grid can't be reached by
+      // booking it directly. Without this the quiet time would be a display
+      // rule at search and nothing at all at write.
+      getMembersByIds(ids),
+    ]);
+    const buffersByMember = new Map(
+      members.map((m) => [m.id, { before: m.bufferBeforeMinutes, after: m.bufferAfterMinutes }])
+    );
     // Deduped by address: two members sharing an account would otherwise be
     // queried twice, and one member's two calendars must both be clear.
     const participants = [
-      ...new Map(connections.map((c) => [c.grant_email, connectionCredentials(c)] as const)).values(),
+      ...new Map(
+        connections.map(
+          (c) =>
+            [
+              c.grant_email,
+              {
+                ...connectionCredentials(c),
+                bufferBeforeMinutes: buffersByMember.get(c.member_id)?.before ?? 0,
+                bufferAfterMinutes: buffersByMember.get(c.member_id)?.after ?? 0,
+              },
+            ] as const
+        )
+      ).values(),
     ];
     if (participants.length === 0) return true;
 

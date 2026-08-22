@@ -23,8 +23,24 @@ const dayEntrySchema = z
  * settings UI stops offering "add block" at the same limit. */
 const MAX_BLOCKS_PER_DAY = 3;
 
+/** Lengths a session can be booked at — the same set the booking form offers.
+ * A standing link is held per length, so the keys are constrained to these. */
+const DURATIONS = ["15", "30", "45", "60"] as const;
+
+/** Quiet time either side of a meeting. Capped at an hour: past that it stops
+ * being a buffer and becomes availability, which belongs in the weekly hours
+ * above where it is visible rather than hidden in a number. */
+const bufferSchema = z.number().int().min(0).max(60);
+
 const bodySchema = z.object({
   timezone: z.string().refine(isSupportedTimezone, "Unsupported timezone."),
+  // Optional throughout so an older client that only knows how to save hours
+  // keeps working, and doesn't silently wipe a buffer it never sent.
+  bufferBeforeMinutes: bufferSchema.optional(),
+  bufferAfterMinutes: bufferSchema.optional(),
+  meetingLinks: z
+    .record(z.enum(DURATIONS), z.string().trim().url("Enter a valid link.").or(z.literal("")))
+    .optional(),
   availability: z
     .array(dayEntrySchema)
     .max(7 * MAX_BLOCKS_PER_DAY)
@@ -86,9 +102,30 @@ export async function PATCH(request: Request) {
   const memberId = session.memberId;
 
   try {
+    // Buffers and links ride along in the same statement as the timezone, so a
+    // single Save means what it says. Only written when sent — an absent field
+    // is "this client didn't ask", not "clear it".
     const saveTimezone = db
       .update(members)
-      .set({ timezone: body.timezone })
+      .set({
+        timezone: body.timezone,
+        ...(body.bufferBeforeMinutes === undefined
+          ? {}
+          : { bufferBeforeMinutes: body.bufferBeforeMinutes }),
+        ...(body.bufferAfterMinutes === undefined
+          ? {}
+          : { bufferAfterMinutes: body.bufferAfterMinutes }),
+        ...(body.meetingLinks === undefined
+          ? {}
+          : {
+              // Blanks are dropped rather than stored as "". A cleared field
+              // means "I have no standing link for this length", and an empty
+              // string would later be prefilled into the booking form as one.
+              meetingLinks: Object.fromEntries(
+                Object.entries(body.meetingLinks).filter(([, url]) => url && url.trim() !== "")
+              ),
+            }),
+      })
       .where(eq(members.id, memberId));
 
     // Replace this member's blocks wholesale rather than upserting per day.

@@ -14,6 +14,10 @@ export type AvailabilityConnection = {
   refreshTokenEncrypted: string | null;
   accessTokenEncrypted: string | null;
   accessTokenExpiresAt: Date | null;
+  /** Quiet time this person keeps either side of anything in their calendar,
+   * in minutes. Absent means none — see members.bufferBeforeMinutes. */
+  bufferBeforeMinutes?: number;
+  bufferAfterMinutes?: number;
 };
 
 /** Thrown when a participant's calendar could not be read at all.
@@ -90,7 +94,20 @@ export async function getCollectiveAvailability(params: {
         startTime: params.startTime,
         endTime: params.endTime,
       });
-      return { email: connection.grantEmail, busy };
+      // Each busy period is widened by this person's own buffer before anyone
+      // asks whether a slot fits. Doing it here rather than in the slot maths
+      // keeps the buffer a property of the PERSON — two people on the same
+      // session can hold different ones, and the answer has to respect both.
+      //
+      // A buffer deliberately does not extend past the ends of the search
+      // window; it only pushes candidate slots away from real meetings.
+      const before = (connection.bufferBeforeMinutes ?? 0) * 60;
+      const after = (connection.bufferAfterMinutes ?? 0) * 60;
+      const padded =
+        before === 0 && after === 0
+          ? busy
+          : busy.map((b) => ({ start: b.start - before, end: b.end + after }));
+      return { email: connection.grantEmail, busy: padded };
     })
   );
 

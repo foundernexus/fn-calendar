@@ -217,6 +217,28 @@ export function AvailabilityGrid({
         </div>
       )}
 
+      {/* There was no legend at all, and the first person outside the team to
+          open this read it exactly backwards — she took the coloured cells for
+          blocked time and the plain ones for free, which is the opposite. She
+          was right to guess that way round: a coloured block on a calendar
+          normally means something is IN it. The colours stay (they match the
+          rest of the app) and the grid now says which is which instead of
+          leaving it to be inferred. */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <span className="size-3.5 shrink-0 rounded-xs border border-border bg-accent" />
+          Everyone free — click to book
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="size-3.5 shrink-0 rounded-xs border border-border bg-secondary" />
+          Someone&apos;s busy
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="size-3.5 shrink-0 rounded-xs border border-border bg-card ring-1 ring-inset ring-foreground/15" />
+          Already booked here
+        </span>
+      </div>
+
       {hiddenBooked.length > 0 && (
         <div className="mt-4 rounded-lg border border-border bg-secondary/40 p-3">
           <p className="text-xs font-medium tracking-[0.04em] text-muted-foreground uppercase">

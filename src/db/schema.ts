@@ -9,6 +9,7 @@ import {
   uniqueIndex,
   index,
   boolean,
+  jsonb,
 } from "drizzle-orm/pg-core";
 
 export const memberRoleEnum = pgEnum("member_role", ["member", "admin"]);
@@ -61,6 +62,32 @@ export const members = pgTable("members", {
   // migration against production buys nothing here, and the column is where
   // the number would live if the idea ever comes back.
   weeklySessionCap: integer("weekly_session_cap").notNull().default(5),
+  // Quiet time kept either side of anything already in this person's calendar,
+  // in minutes. Applied when their free time is worked out, so a slot butted up
+  // against an existing meeting is simply never offered.
+  //
+  // This exists because of what a Nexus Partner's day is actually made of: back
+  // to back calls, each of which needs a tailored follow-up written afterwards.
+  // Without a gap that work slides to the evening — "I got this email sent out
+  // at like 8 o'clock at night" — and the next call starts before the last one
+  // has been dealt with.
+  //
+  // Zero for everyone by default. A founder being scheduled into the occasional
+  // session has no reason to want it, and a default that silently narrows
+  // people's availability would be the wrong kind of helpful.
+  bufferBeforeMinutes: integer("buffer_before_minutes").notNull().default(0),
+  bufferAfterMinutes: integer("buffer_after_minutes").notNull().default(0),
+  // Standing meeting links, keyed by session length in minutes:
+  // `{ "15": "https://zoom.us/j/...", "30": "..." }`.
+  //
+  // Keyed by length rather than a single default because that is how these are
+  // actually held: a Nexus Partner has one standing room for a fifteen-minute
+  // member check-in and a different one for a thirty-minute intro. One field
+  // would have covered neither of them properly.
+  //
+  // jsonb rather than a column per length so adding a duration doesn't cost a
+  // migration. Validated on write — see /api/me.
+  meetingLinks: jsonb("meeting_links").$type<Record<string, string>>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

@@ -26,6 +26,7 @@ export function CreateEventDialog({
   guestMemberIds,
   guestNames,
   timezone,
+  defaultMeetingUrl = "",
   onOpenChange,
   onCreated,
 }: {
@@ -38,6 +39,9 @@ export function CreateEventDialog({
   guestMemberIds: number[];
   guestNames: string[];
   timezone: string;
+  /** The session lead's standing link for this length, if they hold one. Only
+   * a starting value — an admin can replace it for a one-off. */
+  defaultMeetingUrl?: string;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
 }) {
@@ -47,7 +51,7 @@ export function CreateEventDialog({
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [meetingUrl, setMeetingUrl] = useState("");
+  const [meetingUrl, setMeetingUrl] = useState(defaultMeetingUrl);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
