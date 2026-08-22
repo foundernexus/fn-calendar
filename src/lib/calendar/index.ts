@@ -95,6 +95,10 @@ export async function createEvent(params: {
   endTime: number;
   timezone: string;
   participants: { name?: string; email: string }[];
+  /** Whose calendar the event lands on. Google uses it to mark that person as
+   * already accepted; Microsoft ignores it, because Graph derives the organiser
+   * from the mailbox being written to and the behaviour there is untested. */
+  organizerEmail?: string;
 }) {
   return params.provider === "microsoft"
     ? createMicrosoftEvent(params)

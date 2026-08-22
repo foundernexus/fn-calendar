@@ -293,7 +293,10 @@ export async function createGoogleEvent(params: {
   endTime: number;
   timezone: string;
   participants: { name?: string; email: string }[];
+  /** Whose calendar this is being created on. */
+  organizerEmail?: string;
 }) {
+  const organizer = params.organizerEmail?.trim().toLowerCase();
   const res = await googleFetch(
     // sendUpdates=all is what actually emails the invitations. Without it the
     // event appears on the organiser's calendar and nobody else ever hears
@@ -313,7 +316,24 @@ export async function createGoogleEvent(params: {
         location: params.meetingUrl,
         start: { dateTime: new Date(params.startTime * 1000).toISOString(), timeZone: params.timezone },
         end: { dateTime: new Date(params.endTime * 1000).toISOString(), timeZone: params.timezone },
-        attendees: params.participants.map((p) => ({ email: p.email, displayName: p.name })),
+        // The session lead is listed like everyone else — they're leading it,
+        // not merely implied by owning the calendar — but they are marked as
+        // already accepted.
+        //
+        // Without responseStatus Google defaults every attendee to
+        // "needsAction", including the person the event was just created FOR.
+        // The result: a session lead looking at their own calendar sees an
+        // invitation they appear not to have answered, for a meeting they are
+        // hosting, that they will never be emailed about because Google does
+        // not invite an organiser to their own event. Nothing was broken, but
+        // it read as broken, which for a scheduling tool is close enough.
+        attendees: params.participants.map((p) => ({
+          email: p.email,
+          displayName: p.name,
+          ...(organizer && p.email.trim().toLowerCase() === organizer
+            ? { responseStatus: "accepted" as const }
+            : {}),
+        })),
       }),
     },
     "event create"

@@ -15,6 +15,10 @@ import { createEvent, updateEvent, deleteEvent, asCalendarProvider } from "@/lib
 export type EventConnection = {
   id: number;
   provider: string;
+  /** The address this calendar was connected under — the organiser's, since the
+   * event is created on this calendar. connectionCredentials already returns
+   * it; it was simply never declared here. */
+  grantEmail: string;
   refreshTokenEncrypted: string | null;
   accessTokenEncrypted: string | null;
   accessTokenExpiresAt: Date | null;
@@ -41,6 +45,10 @@ export async function createSessionEvent(params: {
     endTime: params.endTime,
     timezone: params.timezone,
     participants: params.participants,
+    // The event is created ON this connection's calendar, so its address IS
+    // the organiser's. Passed down so the provider can be told that person has
+    // already agreed to be there — see createGoogleEvent.
+    organizerEmail: params.connection.grantEmail,
   });
 }
 
