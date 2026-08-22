@@ -23,14 +23,25 @@ const dayEntrySchema = z
  * settings UI stops offering "add block" at the same limit. */
 const MAX_BLOCKS_PER_DAY = 3;
 
-/** Keys a standing meeting link can be stored under.
+/** Where a standing meeting link is stored inside members.meeting_links.
  *
- * "default" is the one the form writes and the only one anybody uses: a
- * personal meeting room is a single room, so the same link serves every call
- * whatever its length. The per-length keys are still accepted because the
- * column briefly held them and the shape cost nothing to keep — if a reason to
- * vary the link by length ever turns up, it fits without a migration. */
-const LINK_KEYS = ["default", "15", "30", "45", "60"] as const;
+ * The column is jsonb and was briefly keyed by session length. It is one link —
+ * a personal meeting room is a single room — so the wire format is now a plain
+ * string and the shape of the column is an implementation detail nobody outside
+ * this file has to know about. The column stays jsonb: it costs nothing, and it
+ * is what lets this change happen without a migration. */
+const LINK_KEY = "default";
+
+/** Deliberately lenient. This is a link someone pastes from Zoom, Meet or
+ * whatever their team uses, and the only thing worth refusing is something that
+ * plainly isn't a link at all. z.string().url() rejected a perfectly good Zoom
+ * URL once already; being strict here buys nothing and costs someone their
+ * afternoon. */
+const meetingUrlSchema = z
+  .string()
+  .trim()
+  .max(2000)
+  .refine((v) => v === "" || /^https?:\/\/\S+$/i.test(v), "Enter a link starting with https://");
 
 /** Quiet time either side of a meeting. Capped at an hour: past that it stops
  * being a buffer and becomes availability, which belongs in the weekly hours
@@ -43,9 +54,7 @@ const bodySchema = z.object({
   // keeps working, and doesn't silently wipe a buffer it never sent.
   bufferBeforeMinutes: bufferSchema.optional(),
   bufferAfterMinutes: bufferSchema.optional(),
-  meetingLinks: z
-    .record(z.enum(LINK_KEYS), z.string().trim().url("Enter a valid link.").or(z.literal("")))
-    .optional(),
+  meetingUrl: meetingUrlSchema.optional(),
   availability: z
     .array(dayEntrySchema)
     .max(7 * MAX_BLOCKS_PER_DAY)
@@ -120,15 +129,12 @@ export async function PATCH(request: Request) {
         ...(body.bufferAfterMinutes === undefined
           ? {}
           : { bufferAfterMinutes: body.bufferAfterMinutes }),
-        ...(body.meetingLinks === undefined
+        ...(body.meetingUrl === undefined
           ? {}
           : {
-              // Blanks are dropped rather than stored as "". A cleared field
-              // means "I have no standing link for this length", and an empty
-              // string would later be prefilled into the booking form as one.
-              meetingLinks: Object.fromEntries(
-                Object.entries(body.meetingLinks).filter(([, url]) => url && url.trim() !== "")
-              ),
+              // A blank clears it rather than storing "". An empty string would
+              // be prefilled into the booking form as if it were a link.
+              meetingLinks: body.meetingUrl === "" ? {} : { [LINK_KEY]: body.meetingUrl },
             }),
       })
       .where(eq(members.id, memberId));

@@ -334,3 +334,85 @@ describe("connection state", () => {
     expect(state.calendars.find((c) => c.needsReconnect)!.grantEmail).toBe("broken@example.com");
   });
 });
+
+describe("a standing meeting link", () => {
+  /** The shape people actually paste: a Zoom room with a password on the query
+   * string. The first version of this validator rejected exactly this and said
+   * only "Invalid input", which is how it reached someone's screen. */
+  const ZOOM = "https://us02web.zoom.us/j/7207524964?pwd=jCUa62cohZTM583XztVgHg75aFZe6u.1";
+
+  async function save(memberId: number, meetingUrl: string) {
+    return saveSettings(memberId, {
+      timezone: "America/Los_Angeles",
+      availability: [],
+      meetingUrl,
+    });
+  }
+
+  it("accepts a real Zoom link", async () => {
+    const member = await seedMember({ email: "karin@foundernexus.com" });
+    const res = await save(member.id, ZOOM);
+    expect(res.status).toBe(200);
+
+    const [row] = await harness.db.select().from(members).where(eq(members.id, member.id));
+    expect(row.meetingLinks).toEqual({ default: ZOOM });
+  });
+
+  it("clears the link when the field is emptied", async () => {
+    // Stored as {} rather than { default: "" } — an empty string would be
+    // prefilled into the booking form as though it were a link.
+    const member = await seedMember({ email: "karin@foundernexus.com" });
+    await save(member.id, ZOOM);
+    await save(member.id, "");
+
+    const [row] = await harness.db.select().from(members).where(eq(members.id, member.id));
+    expect(row.meetingLinks).toEqual({});
+  });
+
+  it("leaves the link alone when the client doesn't send one", async () => {
+    // An absent field means "this client didn't ask", not "clear it" — the
+    // advisor panel saves hours without ever knowing about links.
+    const member = await seedMember({ email: "karin@foundernexus.com" });
+    await save(member.id, ZOOM);
+    await saveSettings(member.id, { timezone: "America/Los_Angeles", availability: [] });
+
+    const [row] = await harness.db.select().from(members).where(eq(members.id, member.id));
+    expect(row.meetingLinks).toEqual({ default: ZOOM });
+  });
+
+  it("says what's wrong when it isn't a link", async () => {
+    const member = await seedMember({ email: "karin@foundernexus.com" });
+    const res = await save(member.id, "zoom room 7207524964");
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/https/i);
+  });
+});
+
+describe("buffer times", () => {
+  it("saves the gap kept either side of a meeting", async () => {
+    const member = await seedMember({ email: "karin@foundernexus.com" });
+    const res = await saveSettings(member.id, {
+      timezone: "America/Los_Angeles",
+      availability: [],
+      bufferBeforeMinutes: 15,
+      bufferAfterMinutes: 30,
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await harness.db.select().from(members).where(eq(members.id, member.id));
+    expect(row.bufferBeforeMinutes).toBe(15);
+    expect(row.bufferAfterMinutes).toBe(30);
+  });
+
+  it("refuses a buffer longer than an hour", async () => {
+    // Past an hour it stops being a buffer and becomes availability, which
+    // belongs in the weekly hours where it's visible.
+    const member = await seedMember({ email: "karin@foundernexus.com" });
+    const res = await saveSettings(member.id, {
+      timezone: "America/Los_Angeles",
+      availability: [],
+      bufferAfterMinutes: 120,
+    });
+    expect(res.status).toBe(400);
+  });
+});

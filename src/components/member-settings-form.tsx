@@ -257,7 +257,7 @@ export function MemberSettingsForm({
             ? {
                 bufferBeforeMinutes: bufferBefore,
                 bufferAfterMinutes: bufferAfter,
-                meetingLinks,
+                meetingUrl: meetingLinks[MEETING_LINK_KEY] ?? "",
               }
             : {}),
         }),
