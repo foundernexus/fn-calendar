@@ -382,6 +382,9 @@ export async function POST(request: Request) {
       startUnix: Math.floor(e.startsAt.getTime() / 1000),
       endUnix: Math.floor(e.endsAt.getTime() / 1000),
       title: e.title,
+      // Carried so the cancel dialog can say how many sessions it is about to
+      // take with it. Cancelling here acts on the whole series.
+      recurrenceRule: e.recurrenceRule,
       organizerMemberId: e.organizerMemberId,
       // Sent with the slot rather than fetched when the dialog opens: there
       // are only ever a handful of booked sessions overlapping one search, and

@@ -67,6 +67,9 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
       // Needed to reschedule: the grid has to be able to repopulate the search
       // with exactly the people this session already has.
       organizerMemberId: events.organizerMemberId,
+      // Needed to warn before cancelling: cancelling acts on the whole series,
+      // and a booked cell gives no hint that the date behind it is one of six.
+      recurrenceRule: events.recurrenceRule,
     })
     .from(events)
     .leftJoin(eventAttendees, eq(eventAttendees.eventId, events.id))

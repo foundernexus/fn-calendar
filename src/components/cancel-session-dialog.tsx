@@ -77,6 +77,14 @@ export function CancelSessionDialog({
     }
   }
 
+  // How many sessions this actually is. Cancelling here acts on the whole
+  // series, not on the date that was clicked — the thing somebody would
+  // otherwise discover by wiping a year of a member's 1:1s while meaning to
+  // clear one afternoon.
+  const seriesCount = booked.recurrenceRule
+    ? Number(/COUNT=(\d+)/.exec(booked.recurrenceRule)?.[1] ?? 0)
+    : 0;
+
   return (
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -84,6 +92,17 @@ export function CancelSessionDialog({
           <DialogTitle>{booked.title}</DialogTitle>
           <DialogDescription>{when}</DialogDescription>
         </DialogHeader>
+
+        {booked.recurrenceRule && (
+          <p className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            This session repeats. Cancelling removes{" "}
+            <span className="font-medium">
+              {seriesCount > 0 ? `all ${seriesCount} of them` : "every date in the series"}
+            </span>
+            , not just this one. To drop a single date, decline or delete it in the calendar
+            instead.
+          </p>
+        )}
 
         {/* Who this actually hits. Cancelling used to name only the session,
             so an admin confirming it had no idea from this screen how many
