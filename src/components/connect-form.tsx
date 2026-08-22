@@ -112,6 +112,19 @@ export function ConnectForm({ initialEmail }: { initialEmail?: string }) {
           <span className="text-foreground">Advanced</span> →{" "}
           <span className="text-foreground">Continue</span>.
         </p>
+        {/* The two-step shape of Google's consent, said before it happens.
+            Google asks in two screens: identity first, sensitive permissions
+            second. The first one lists your email ADDRESS with an envelope icon
+            beside it, which reads exactly like a request to read your mail —
+            and the calendar permission isn't on that screen at all, so anyone
+            careful enough to check stops there believing we asked for the wrong
+            thing entirely. Two people have now done that; the second only
+            reported it because he happens to be the boss. */}
+        <p className="mt-1">
+          Google asks in two steps. The first screen shows your email{" "}
+          <span className="text-foreground">address</span> — that&apos;s so we know whose calendar
+          this is, not access to your mail. The calendar permission is on the second screen.
+        </p>
         <p className="mt-1">
           You&apos;re granting calendar access only — no email, no files, no contacts.
         </p>
