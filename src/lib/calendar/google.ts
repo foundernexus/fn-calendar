@@ -1,5 +1,5 @@
 import { env } from "@/lib/env";
-import type { BusyInterval } from "@/lib/calendar/slots";
+import type { BusyInterval, OwnEvent } from "@/lib/calendar/slots";
 import { requestedScopes, type CalendarAccess } from "@/lib/calendar/scopes";
 
 /** Google Calendar, spoken to directly.
@@ -397,4 +397,70 @@ export async function revokeGoogleToken(refreshToken: string) {
   if (!res.ok && res.status !== 400) {
     throw new GoogleApiError(res.status, await res.text().catch(() => ""), "token revoke");
   }
+}
+
+/** What the signed-in person actually has on, titles included.
+ *
+ * Deliberately separate from fetchGoogleBusy, and used for one thing only: so
+ * whoever is booking can see their OWN day while they pick a slot. "10:00 is
+ * free" and "10:00 is free but you're with Court at 10:30" lead to different
+ * decisions, and until now the second was a trip to another tab.
+ *
+ * Never called for anyone but the person looking at the screen. Reading a
+ * participant's event titles would be a different product with a different
+ * consent screen — free/busy is all we ask of them and all we take.
+ *
+ * Needs calendar.events, which session leads already grant so their sessions
+ * can be created. No new permission, and no reason to ask a founder for one. */
+export async function fetchGoogleOwnEvents(params: {
+  accessToken: string;
+  startTime: number;
+  endTime: number;
+}): Promise<OwnEvent[]> {
+  const url = new URL(`${CALENDAR_API}/calendars/primary/events`);
+  url.searchParams.set("timeMin", new Date(params.startTime * 1000).toISOString());
+  url.searchParams.set("timeMax", new Date(params.endTime * 1000).toISOString());
+  // Expands a recurring series into its instances — without it a weekly 1:1
+  // comes back as one master event and shows up on the wrong day, or no day.
+  url.searchParams.set("singleEvents", "true");
+  url.searchParams.set("orderBy", "startTime");
+  url.searchParams.set("maxResults", "250");
+
+  const res = await googleFetch(
+    url.toString(),
+    { headers: { Authorization: `Bearer ${params.accessToken}` } },
+    "own events"
+  );
+  const data = (await res.json()) as {
+    items?: {
+      summary?: string;
+      status?: string;
+      start?: { dateTime?: string; date?: string };
+      end?: { dateTime?: string; date?: string };
+    }[];
+  };
+
+  const events: OwnEvent[] = [];
+  for (const item of data.items ?? []) {
+    if (item.status === "cancelled") continue;
+    // An all-day event carries `date` instead of `dateTime`. Google marks these
+    // free by default, which is why they never appear in free/busy — the whole
+    // reason a blocked-out day could still read as available.
+    const allDay = !!item.start?.date;
+    const startRaw = item.start?.dateTime ?? item.start?.date;
+    const endRaw = item.end?.dateTime ?? item.end?.date;
+    if (!startRaw || !endRaw) continue;
+    const start = Math.floor(Date.parse(startRaw) / 1000);
+    const end = Math.floor(Date.parse(endRaw) / 1000);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    events.push({
+      start,
+      end,
+      // Google omits `summary` on events with no title. "Busy" is what its own
+      // interface shows in that case.
+      title: item.summary?.trim() || "Busy",
+      allDay,
+    });
+  }
+  return events;
 }

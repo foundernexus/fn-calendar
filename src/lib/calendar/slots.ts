@@ -140,3 +140,10 @@ export function computeCollectiveSlots(params: {
   slots.sort((a, b) => a.startTime - b.startTime);
   return slots.filter((slot, i) => i === 0 || slot.startTime !== slots[i - 1].startTime);
 }
+
+/** One entry from the signed-in person's own calendar, title included.
+ *
+ * That title is the whole difference from BusyInterval, and the reason this is
+ * only ever fetched for the person looking at the screen: free/busy is all we
+ * ask of anyone else, and all we take. */
+export type OwnEvent = { start: number; end: number; title: string; allDay: boolean };

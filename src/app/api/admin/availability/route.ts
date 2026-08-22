@@ -6,8 +6,11 @@ import {
   getMembersByIds,
   getMemberAvailabilityForMembers,
   getBookedEventsOverlapping,
+  getMemberByEmail,
 } from "@/db/queries";
 import { getCollectiveAvailability } from "@/lib/calendar/availability";
+import { fetchOwnEvents, asCalendarProvider } from "@/lib/calendar";
+import { getAccessToken } from "@/lib/calendar/tokens";
 import { connectionCredentials } from "@/db/queries";
 import {
   zonedDateTimeToUnix,
@@ -285,6 +288,49 @@ export async function POST(request: Request) {
   // an advisor whose work calendar reads fine while his personal one has never
   // had the permission. Collapsing that to "Court Lorenzini" reads as "we can't
   // see him at all" and hides which account anyone should go and fix.
+  // What the person doing the booking has on themselves.
+  //
+  // Asked for by name: "I see that there's availability at 3 o'clock, I'm gonna
+  // check what exactly I have at 3 o'clock… I don't want a meeting directly
+  // before I meet with Court." The grid could say a slot was free but not what
+  // it sat next to, so answering that meant another tab.
+  //
+  // ONLY ever the signed-in person's own calendar. A participant's titles are
+  // not ours to show — free/busy is all we ask of them and all we take — and
+  // this route is reached by admins, so "signed in" and "on the screen" are the
+  // same person.
+  //
+  // Fails open in every direction. This is context beside a decision, not part
+  // of the decision, and a search that refused to run because someone's own
+  // calendar hiccuped would be a worse tool than one that shows nothing here.
+  let ownEvents: { startUnix: number; endUnix: number; title: string; allDay: boolean }[] = [];
+  try {
+    const viewer = await getMemberByEmail(session.email);
+    if (viewer) {
+      const viewerConnections = await getActiveConnections([viewer.id]);
+      const perAccount = await Promise.all(
+        viewerConnections.map(async (c) => {
+          const credentials = connectionCredentials(c);
+          return fetchOwnEvents({
+            provider: asCalendarProvider(c.provider),
+            accessToken: await getAccessToken(credentials),
+            startTime,
+            endTime,
+          });
+        })
+      );
+      ownEvents = perAccount
+        .flat()
+        .map((e) => ({ startUnix: e.start, endUnix: e.end, title: e.title, allDay: e.allDay }))
+        .sort((a, b) => a.startUnix - b.startUnix);
+    }
+  } catch (err) {
+    console.info(
+      "[admin/availability] Couldn't read the viewer's own calendar:",
+      err instanceof Error ? err.message : err
+    );
+  }
+
   const unreadableNames = [...new Set(unreadable)].map((email) => {
     const name = memberNameByEmail.get(email);
     return name && name !== email ? `${name} (${email})` : email;
@@ -313,6 +359,9 @@ export async function POST(request: Request) {
     checkedCount,
     totalSelected: allSelectedIds.length,
     notConnectedNames,
+    // The viewer's own day, so a free slot can be judged against what sits
+    // beside it. Never anyone else's — see where this is built.
+    ownEvents,
     // Connected, but we couldn't read them — a different problem from not being
     // connected at all, and one the admin has to see: the slots below do NOT
     // account for these people.

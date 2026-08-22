@@ -1,5 +1,5 @@
 import { env } from "@/lib/env";
-import type { BusyInterval } from "@/lib/calendar/slots";
+import type { BusyInterval, OwnEvent } from "@/lib/calendar/slots";
 import { requestedScopes, type CalendarAccess } from "@/lib/calendar/scopes";
 
 /** Microsoft Outlook / Microsoft 365, spoken to directly through Graph.
@@ -357,4 +357,55 @@ export async function deleteMicrosoftEvent(params: { accessToken: string; eventI
  * so instead of implying we revoked it. */
 export async function revokeMicrosoftToken(_refreshToken: string) {
   return { revokedAtProvider: false as const };
+}
+
+/** The signed-in person's own day, titles included — see fetchGoogleOwnEvents
+ * for what this is for and why it is never called for anyone else.
+ *
+ * calendarView rather than /me/events: it expands a recurring series into the
+ * instances that actually fall in the window, which is what someone glancing at
+ * Tuesday needs. /me/events would hand back the series master instead.
+ *
+ * Needs Calendars.ReadWrite, which session leads already grant so their
+ * sessions can be created. */
+export async function fetchMicrosoftOwnEvents(params: {
+  accessToken: string;
+  startTime: number;
+  endTime: number;
+}): Promise<OwnEvent[]> {
+  const url = new URL(`${GRAPH}/me/calendarView`);
+  url.searchParams.set("startDateTime", graphDateTime(params.startTime));
+  url.searchParams.set("endDateTime", graphDateTime(params.endTime));
+  url.searchParams.set("$select", "subject,start,end,isAllDay,showAs");
+  url.searchParams.set("$top", "250");
+  url.searchParams.set("$orderby", "start/dateTime");
+
+  const res = await graphFetch(
+    url.toString(),
+    {
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+        // Same reason as getSchedule: without this Graph answers in the
+        // mailbox's own zone and omits the offset, so everything parses as
+        // server-local and shifts by hours.
+        Prefer: 'outlook.timezone="UTC"',
+      },
+    },
+    "own events"
+  );
+  const data = (await res.json()) as {
+    value?: {
+      subject?: string;
+      isAllDay?: boolean;
+      start: { dateTime: string };
+      end: { dateTime: string };
+    }[];
+  };
+
+  return (data.value ?? []).map((e) => ({
+    start: Math.floor(Date.parse(asUtc(e.start.dateTime)) / 1000),
+    end: Math.floor(Date.parse(asUtc(e.end.dateTime)) / 1000),
+    title: e.subject?.trim() || "Busy",
+    allDay: !!e.isAllDay,
+  }));
 }

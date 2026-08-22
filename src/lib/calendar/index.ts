@@ -6,6 +6,7 @@ import {
   updateGoogleEvent,
   deleteGoogleEvent,
   revokeGoogleToken,
+  fetchGoogleOwnEvents,
 } from "@/lib/calendar/google";
 import {
   buildMicrosoftAuthUrl,
@@ -15,8 +16,9 @@ import {
   updateMicrosoftEvent,
   deleteMicrosoftEvent,
   revokeMicrosoftToken,
+  fetchMicrosoftOwnEvents,
 } from "@/lib/calendar/microsoft";
-import type { BusyInterval } from "@/lib/calendar/slots";
+import type { BusyInterval, OwnEvent } from "@/lib/calendar/slots";
 import type { CalendarAccess } from "@/lib/calendar/scopes";
 
 /** One shape for both providers, so nothing outside this folder has to know
@@ -143,4 +145,19 @@ export async function revokeToken(params: {
   }
   await revokeGoogleToken(params.refreshToken);
   return { revokedAtProvider: true };
+}
+
+export type { OwnEvent };
+
+/** The signed-in person's own day, so they can see what a free slot sits next
+ * to before they book into it. */
+export async function fetchOwnEvents(params: {
+  provider: CalendarProvider;
+  accessToken: string;
+  startTime: number;
+  endTime: number;
+}): Promise<OwnEvent[]> {
+  return params.provider === "microsoft"
+    ? fetchMicrosoftOwnEvents(params)
+    : fetchGoogleOwnEvents(params);
 }

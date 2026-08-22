@@ -18,6 +18,16 @@ export type BookedSlot = {
   attendees: BookedAttendee[];
 };
 
+/** One entry from the viewer's OWN calendar. Never anyone else's — the grid
+ * shows these so a gap can be read as "I'm with Court then" rather than just
+ * grey. */
+export type OwnEventSummary = {
+  startUnix: number;
+  endUnix: number;
+  title: string;
+  allDay: boolean;
+};
+
 export type AvailabilityResult = {
   slots: Slot[];
   checkedCount: number;
@@ -28,6 +38,9 @@ export type AvailabilityResult = {
    * people were skipped, so the slots below don't account for them. Optional so
    * a response from an older deploy still renders. */
   unreadableNames?: string[];
+  /** The viewer's own calendar for the searched range. Optional so a response
+   * from an older deploy still renders. */
+  ownEvents?: OwnEventSummary[];
   error?: string;
   /** True when Nylas found real calendar overlap but it all got filtered out
    * by someone's stated /me availability window or a guest's weekly session
@@ -123,17 +136,28 @@ export function ResultsList({
         </p>
       ) : (
         <div className="mt-4">
-          <div className="mb-3 flex items-center gap-4 text-xs text-muted-foreground">
+          {/* The first person outside the team to open this grid read it
+              backwards — she took the coloured cells for blocked time and the
+              plain ones for free. Reasonably: a coloured block on a calendar
+              normally means something is IN it. The legend existed but said
+              only "Everyone free" and "Not available", which doesn't tell you
+              which square is which until you've already guessed. */}
+          <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <span className="inline-block size-3 rounded-xs border border-border bg-accent" /> Everyone free
+              <span className="inline-block size-3 shrink-0 rounded-xs border border-border bg-accent" />
+              Everyone free — click to book
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="inline-block size-3 rounded-xs border border-border bg-secondary" /> Not available
+              <span className="inline-block size-3 shrink-0 rounded-xs border border-border bg-secondary" />
+              Someone&apos;s busy
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="inline-block size-3 rounded-xs border border-border bg-card" /> Already
-              booked
+              <span className="inline-block size-3 shrink-0 rounded-xs border border-border bg-card ring-1 ring-inset ring-foreground/15" />
+              Already booked here
             </span>
+            {(result.ownEvents?.length ?? 0) > 0 && (
+              <span>Grey cells show what&apos;s in your own calendar.</span>
+            )}
           </div>
           <AvailabilityGrid
             slots={result.slots}
@@ -144,6 +168,7 @@ export function ResultsList({
             workingHoursEnd={searchedParams.workingHoursEnd}
             excludeWeekends={searchedParams.excludeWeekends}
             timezone={searchedParams.timezone}
+            ownEvents={result.ownEvents ?? []}
             onSelectSlot={onSelectSlot}
             onSelectBooked={onSelectBooked}
           />

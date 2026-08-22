@@ -11,7 +11,7 @@ import {
   zonedDateTimeParts,
   AVAILABILITY_INTERVAL_MINUTES,
 } from "@/lib/time";
-import type { Slot, BookedSlot } from "@/components/results-list";
+import type { Slot, BookedSlot, OwnEventSummary } from "@/components/results-list";
 
 function getDaysInRange(startDate: string, endDate: string) {
   const days: string[] = [];
@@ -37,11 +37,16 @@ export function AvailabilityGrid({
   workingHoursEnd,
   excludeWeekends,
   timezone,
+  ownEvents = [],
   onSelectSlot,
   onSelectBooked,
 }: {
   slots: Slot[];
   bookedSlots: BookedSlot[];
+  /** The viewer's OWN calendar, titles included — never anyone else's. Answers
+   * the question the grid couldn't: not "am I free at 3" but "what is it that
+   * I'm not free for". */
+  ownEvents?: OwnEventSummary[];
   startDate: string;
   endDate: string;
   workingHoursStart: string;
@@ -92,6 +97,30 @@ export function AvailabilityGrid({
   // an exact-match row. A booked event spanning midnight in this timezone
   // (never happens for anything created through this tool — max duration is
   // 60 min) is defensively skipped rather than guessed at.
+  //
+  // The viewer's own events are mapped the same way. An all-day entry is left
+  // out on purpose: it would paint every row of the day and bury the meetings
+  // that actually explain the gaps.
+  const ownByCell = new Map<string, string>();
+  for (const own of ownEvents) {
+    if (own.allDay) continue;
+    const start = zonedDateTimeParts(own.startUnix, timezone);
+    const end = zonedDateTimeParts(own.endUnix, timezone);
+    if (start.date !== end.date) continue;
+    const startMinutes = timeToMinutes(start.time);
+    const endMinutes = timeToMinutes(end.time);
+    for (const time of timeRows) {
+      const rowStart = timeToMinutes(time);
+      const rowEnd = rowStart + AVAILABILITY_INTERVAL_MINUTES;
+      if (rowStart < endMinutes && rowEnd > startMinutes) {
+        // First one wins, so a long meeting keeps its title on every row it
+        // covers rather than being overwritten by whatever comes after it.
+        const key = `${start.date}_${time}`;
+        if (!ownByCell.has(key)) ownByCell.set(key, own.title);
+      }
+    }
+  }
+
   const bookedByCell = new Map<string, BookedSlot>();
   for (const booked of bookedSlots) {
     const start = zonedDateTimeParts(booked.startUnix, timezone);
@@ -195,20 +224,29 @@ export function AvailabilityGrid({
                     );
                   }
                   const slot = slotsByCell.get(`${day}_${time}`);
+                  // Only ever shown on a cell that ISN'T offered — the point is
+                  // to explain a gap, and a title over a bookable slot would
+                  // just be in the way of clicking it.
+                  const mine = slot ? undefined : ownByCell.get(`${day}_${time}`);
                   return (
                     <button
                       key={`${day}_${time}`}
                       type="button"
                       disabled={!slot}
                       onClick={() => slot && onSelectSlot(slot)}
-                      title={slot?.label}
-                      aria-label={slot?.label ?? `${formatDateLabel(day)} ${formatTimeLabel(time)} — not available`}
+                      title={slot?.label ?? mine}
+                      aria-label={
+                        slot?.label ??
+                        `${formatDateLabel(day)} ${formatTimeLabel(time)} — not available${mine ? `: ${mine}` : ""}`
+                      }
                       className={
                         slot
                           ? "border-b border-l border-border bg-accent py-1.5 transition-colors hover:bg-primary hover:text-primary-foreground"
-                          : "border-b border-l border-border bg-secondary py-1.5"
+                          : "min-w-0 truncate border-b border-l border-border bg-secondary px-1.5 py-1.5 text-left text-[11px] leading-tight text-muted-foreground"
                       }
-                    />
+                    >
+                      {mine}
+                    </button>
                   );
                 })}
               </div>
@@ -216,28 +254,6 @@ export function AvailabilityGrid({
           </div>
         </div>
       )}
-
-      {/* There was no legend at all, and the first person outside the team to
-          open this read it exactly backwards — she took the coloured cells for
-          blocked time and the plain ones for free, which is the opposite. She
-          was right to guess that way round: a coloured block on a calendar
-          normally means something is IN it. The colours stay (they match the
-          rest of the app) and the grid now says which is which instead of
-          leaving it to be inferred. */}
-      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          <span className="size-3.5 shrink-0 rounded-xs border border-border bg-accent" />
-          Everyone free — click to book
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="size-3.5 shrink-0 rounded-xs border border-border bg-secondary" />
-          Someone&apos;s busy
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="size-3.5 shrink-0 rounded-xs border border-border bg-card ring-1 ring-inset ring-foreground/15" />
-          Already booked here
-        </span>
-      </div>
 
       {hiddenBooked.length > 0 && (
         <div className="mt-4 rounded-lg border border-border bg-secondary/40 p-3">
