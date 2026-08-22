@@ -34,8 +34,8 @@ const bodySchema = z.object({
   description: z.string().trim().optional(),
   meetingUrl: z.string().trim().url("Enter a valid URL.").optional().or(z.literal("")),
   startsAtUnix: z.number().int().positive({ error: "Pick a valid time slot." }),
-  durationMinutes: z.union([z.literal(30), z.literal(45), z.literal(60)], {
-    error: "Duration must be 30, 45, or 60 minutes.",
+  durationMinutes: z.union([z.literal(15), z.literal(30), z.literal(45), z.literal(60)], {
+    error: "Duration must be 15, 30, 45, or 60 minutes.",
   }),
   timezone: z.enum(TIMEZONE_VALUES, { error: "Unsupported timezone." }),
 });

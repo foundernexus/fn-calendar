@@ -6,6 +6,13 @@ import { usePathname } from "next/navigation";
 const LINKS = [
   { href: "/admin/find-a-time", label: "Schedule" },
   { href: "/admin/members", label: "People" },
+  // Admins have always had a member session too — a successful connection is
+  // the login, whoever you are — so /me worked for them all along. It was
+  // simply never linked, which meant the people whose availability the whole
+  // grid is built around had no way to reach the page where they set it. A
+  // Nexus Partner's own hours matter more than anyone's: they are on calls all
+  // day and are the lead on nearly every booking.
+  { href: "/me", label: "My availability" },
 ];
 
 /** Client-side purely so it can read the current path — the header itself

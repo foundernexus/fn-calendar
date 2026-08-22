@@ -30,7 +30,10 @@ import { TIMEZONES, spellOutDate } from "@/lib/time";
 import { TimeSelect } from "@/components/time-select";
 import { handleExpiredSession } from "@/lib/session-expired";
 
-const DURATIONS = [30, 45, 60] as const;
+// 15 is here because a Nexus Partner's monthly member check-in is a quarter
+// hour, and it was the length they asked for twice. Slots are still offered on
+// the grid's 30-minute rows — a 15-minute call simply ends halfway down one.
+const DURATIONS = [15, 30, 45, 60] as const;
 
 /** Local date, not UTC — `toISOString()` would return tomorrow's date for
  * anyone west of UTC in the evening (e.g. 6pm PT is already after midnight
@@ -64,7 +67,13 @@ export function FindATimeForm({
   // session (own dashboard, own session cap, its own attendee role), so
   // booking one as an ordinary guest is never what's intended. Marking
   // someone as an advisor is what moves them from one field to the other.
-  const guestCandidates = connectedMembers.filter((m) => !m.isAdvisor);
+  // Founders, by the same definition the People page uses (roleOf in
+  // member-directory: advisor wins, then team, then founder). This used to
+  // exclude advisors only, so anyone marked Team appeared in BOTH the session
+  // lead picker and the founder list — FounderNexus staff listed as founders of
+  // the companies they run sessions for. Two rules for the word "founder" in
+  // one app, and the People page had the right one.
+  const guestCandidates = connectedMembers.filter((m) => !m.isAdvisor && !m.isFacilitator);
 
   // The person scheduling the session is usually the one leading it, so they
   // start selected. This used to be facilitators[0], which is whoever sorts

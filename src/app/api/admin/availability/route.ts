@@ -39,7 +39,7 @@ const bodySchema = z
       .refine((ids) => new Set(ids).size === ids.length, "Duplicate founder selected."),
     startDate: z.string().refine(isValidDateString, "Invalid start date."),
     endDate: z.string().refine(isValidDateString, "Invalid end date."),
-    durationMinutes: z.union([z.literal(30), z.literal(45), z.literal(60)]),
+    durationMinutes: z.union([z.literal(15), z.literal(30), z.literal(45), z.literal(60)]),
     workingHoursStart: z
       .string()
       .refine(isValidTimeString, "Invalid start time.")
