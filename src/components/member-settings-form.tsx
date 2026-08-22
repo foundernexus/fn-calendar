@@ -117,7 +117,7 @@ export function MemberSettingsForm({
   connection: initialConnection,
   calendars,
   checksEveryCalendar = false,
-  canLeadSessions = false,
+  isTeam = false,
   initialBufferBefore = 0,
   initialBufferAfter = 0,
   initialMeetingLinks = {},
@@ -132,9 +132,15 @@ export function MemberSettingsForm({
   calendars: MemberCalendar[];
   /** Passed through to CalendarList — see the note on its prop. */
   checksEveryCalendar?: boolean;
-  /** Whether this person can be picked as a session lead. Gates the standing
-   * meeting links, which only mean anything to whoever creates the invite. */
-  canLeadSessions?: boolean;
+  /** FounderNexus staff — the people who run sessions and live in this tool all
+   * day. Gates buffer times and the standing meeting link, which exist for a
+   * Nexus Partner's day of back-to-back calls and mean nothing to a founder who
+   * is scheduled into the occasional session.
+   *
+   * Both were shown to everyone at first, which nobody had asked for. A founder
+   * connects a calendar and states their hours; every further control on that
+   * page is one more thing for them to wonder about. */
+  isTeam?: boolean;
   /** Quiet time kept either side of their meetings, in minutes. */
   initialBufferBefore?: number;
   initialBufferAfter?: number;
@@ -247,9 +253,13 @@ export function MemberSettingsForm({
         body: JSON.stringify({
           timezone,
           availability,
-          bufferBeforeMinutes: bufferBefore,
-          bufferAfterMinutes: bufferAfter,
-          ...(canLeadSessions ? { meetingLinks } : {}),
+          ...(isTeam
+            ? {
+                bufferBeforeMinutes: bufferBefore,
+                bufferAfterMinutes: bufferAfter,
+                meetingLinks,
+              }
+            : {}),
         }),
       });
       const data = await res.json();
@@ -411,7 +421,10 @@ export function MemberSettingsForm({
 
       {/* Quiet time either side of meetings. Sits above the weekly hours
           because it modifies them: the hours say when you COULD be booked, this
-          says how close to something else. */}
+          says how close to something else.
+
+          Team only, like the meeting link below — see the isTeam prop. */}
+      {isTeam && (
       <div className="mt-5 rounded-lg border border-border bg-card p-6 shadow-card">
         <p className="text-base font-semibold text-foreground">Buffer times</p>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -449,9 +462,10 @@ export function MemberSettingsForm({
           ))}
         </div>
       </div>
+      )}
 
-      {/* Standing meeting links, for whoever creates the invite. */}
-      {canLeadSessions && (
+      {/* The standing meeting link, for whoever creates the invite. */}
+      {isTeam && (
         <div className="mt-5 rounded-lg border border-border bg-card p-6 shadow-card">
           <p className="text-base font-semibold text-foreground">Your meeting link</p>
           <p className="mt-1 text-sm text-muted-foreground">
