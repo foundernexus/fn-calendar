@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { events, eventAttendees, sessionConflicts } from "@/db/schema";
 import { parseRecurrence, occurrencesBetween } from "@/lib/calendar/recurrence";
 import { getExceptions, applyExceptions } from "@/lib/occurrences";
-import { participantsOutsideStatedHours, slotStillFree } from "@/lib/calendar/booking-guards";
+import { participantsOutsideStatedHours, occurrenceClashes } from "@/lib/calendar/booking-guards";
 
 /** How far ahead to look.
  *
@@ -94,23 +94,24 @@ export async function detectSeriesConflicts(now = new Date()) {
       // that is working.
       if (occurrence.originalStartUnix === Math.floor(event.startsAt.getTime() / 1000)) continue;
 
-      const [outsideHours, free] = await Promise.all([
+      // occurrenceClashes, NOT slotStillFree. This session is already in
+      // everyone's calendar at this exact time, so "is the slot free" answers
+      // no for every date of every series — see the note on that function.
+      const [outsideHours, clashes] = await Promise.all([
         participantsOutsideStatedHours({
           memberIds,
           startUnix: occurrence.startUnix,
           endUnix: occurrence.endUnix,
         }),
-        slotStillFree({
+        occurrenceClashes({
           memberIds,
           startUnix: occurrence.startUnix,
           endUnix: occurrence.endUnix,
-          durationMinutes,
-          timezone: event.timezone,
           context: "conflicts",
         }),
       ]);
 
-      const clear = outsideHours.length === 0 && free;
+      const clear = outsideHours.length === 0 && clashes.length === 0;
       // Keyed by where the RULE puts the date, not where it currently sits.
       // Moving a date must resolve the question already raised about it rather
       // than leaving the old one open and asking a second one.
@@ -134,13 +135,13 @@ export async function detectSeriesConflicts(now = new Date()) {
         continue;
       }
 
-      // `slotStillFree` fails open — it says true when it could not establish
-      // otherwise — so reaching here means somebody's stated hours ruled it out
-      // or a calendar genuinely reported a clash. Never a network hiccup.
-      const names =
-        outsideHours.length > 0
-          ? outsideHours.join(", ")
-          : "someone on this session is now busy";
+      // Both checks fail open — an unreadable calendar reports nothing — so
+      // reaching here means somebody's stated hours ruled the date out, or a
+      // calendar genuinely showed something over it. Never a network hiccup.
+      //
+      // Named people rather than "someone on this session is now busy": the
+      // question Karin actually has is who to talk to.
+      const names = outsideHours.length > 0 ? outsideHours.join(", ") : clashes.join(", ");
 
       await db
         .insert(sessionConflicts)

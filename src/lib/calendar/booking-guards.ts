@@ -5,6 +5,8 @@ import {
   connectionCredentials,
 } from "@/db/queries";
 import { getCollectiveAvailability } from "@/lib/calendar/availability";
+import { getAccessToken } from "@/lib/calendar/tokens";
+import { fetchBusy, asCalendarProvider } from "@/lib/calendar";
 // Recurrence maths lives in one place — see the note there about walking local
 // dates rather than adding seconds.
 export { occurrenceTimes } from "@/lib/calendar/recurrence";
@@ -151,6 +153,91 @@ export async function slotStillFree(params: {
   } catch (err) {
     console.warn(`[${params.context}] Slot re-check failed, proceeding anyway`, err);
     return true;
+  }
+}
+
+/** How much slack before two identical-looking busy blocks count as different.
+ * Providers round and re-encode times; a minute of drift is not a clash. */
+const CLASH_TOLERANCE_SECONDS = 60;
+
+/** Who is busy with something OTHER than this session, by name.
+ *
+ * Only for checking a session that ALREADY EXISTS — the daily look-ahead over
+ * repeating dates. `slotStillFree` cannot answer this and must not be used for
+ * it: once a series is booked, every one of its dates sits in every
+ * participant's calendar, so "is this slot free" is permanently "no". Asked
+ * that way, the daily check would raise a conflict against every date of every
+ * series, and a list that is wrong every morning is a list Karin stops reading.
+ *
+ * What this asks instead: does anyone's busy time reach BEYOND the session's own
+ * window? Somebody putting a 09:45–10:45 meeting over a 10:00–10:30 session is
+ * caught, which is the shape a real clash usually has.
+ *
+ * The limit, stated plainly because nobody should later think this is airtight:
+ * a clash occupying EXACTLY the same start and end is invisible here. Free/busy
+ * reports that somebody is busy, never what with, so a block identical to our
+ * own cannot be told apart from our own. Distinguishing them needs read access
+ * to every participant's actual events, which is precisely the permission this
+ * app gave up so founders only have to grant free/busy.
+ *
+ * Fails open, like every other calendar check here: a calendar we couldn't read
+ * raises nothing. A false alarm costs more than a missed one, because the whole
+ * value of this list is that everything on it is worth looking at. */
+export async function occurrenceClashes(params: {
+  memberIds: number[];
+  startUnix: number;
+  endUnix: number;
+  context: string;
+}): Promise<string[]> {
+  try {
+    const ids = [...new Set(params.memberIds)];
+    const [connections, members] = await Promise.all([
+      getActiveConnections(ids),
+      getMembersByIds(ids),
+    ]);
+    const nameByMember = new Map(members.map((m) => [m.id, m.fullName || m.email]));
+
+    // Deduped by address: one member holding two calendars is two reads, but
+    // two members sharing an account must not be asked twice.
+    const byEmail = new Map<string, (typeof connections)[number]>();
+    for (const c of connections) if (!byEmail.has(c.grant_email)) byEmail.set(c.grant_email, c);
+
+    // A window wider than the session, or a meeting that merely overhangs it
+    // would come back clipped to our own edges and look identical to ours.
+    const window = 2 * 3600;
+
+    const results = await Promise.allSettled(
+      [...byEmail.values()].map(async (connection) => {
+        const accessToken = await getAccessToken(connectionCredentials(connection));
+        const busy = await fetchBusy({
+          provider: asCalendarProvider(connection.provider),
+          accessToken,
+          email: connection.grant_email,
+          startTime: params.startUnix - window,
+          endTime: params.endUnix + window,
+        });
+
+        const overlapping = busy.filter(
+          (b) => b.start < params.endUnix && b.end > params.startUnix
+        );
+        const beyondOurs = overlapping.some(
+          (b) =>
+            b.start < params.startUnix - CLASH_TOLERANCE_SECONDS ||
+            b.end > params.endUnix + CLASH_TOLERANCE_SECONDS
+        );
+        return beyondOurs ? (nameByMember.get(connection.member_id) ?? null) : null;
+      })
+    );
+
+    const names = new Set<string>();
+    for (const r of results) {
+      // A rejected read is a calendar we couldn't see, not a clash.
+      if (r.status === "fulfilled" && r.value) names.add(r.value);
+    }
+    return [...names];
+  } catch (err) {
+    console.warn(`[${params.context}] Clash check failed, reporting nothing`, err);
+    return [];
   }
 }
 

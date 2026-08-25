@@ -11,13 +11,14 @@ import { sessionConflicts } from "@/db/schema";
 
 let harness: TestDb;
 
-/** Whether the calendars say the slot is still clear. Set per test. */
-let slotIsFree = true;
+/** Anyone whose calendar shows something OTHER than this session over the
+ * date. Set per test. */
+let clashingNames: string[] = [];
 /** Anyone whose stated weekly hours rule the slot out. Set per test. */
 let outsideHours: string[] = [];
 
 vi.mock("@/lib/calendar/booking-guards", () => ({
-  slotStillFree: () => Promise.resolve(slotIsFree),
+  occurrenceClashes: () => Promise.resolve(clashingNames),
   participantsOutsideStatedHours: () => Promise.resolve(outsideHours),
 }));
 
@@ -30,7 +31,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await harness.reset();
   vi.clearAllMocks();
-  slotIsFree = true;
+  clashingNames = [];
   outsideHours = [];
   vi.resetModules();
   await reinstallTestDb();
@@ -90,7 +91,7 @@ describe("the daily look-ahead", () => {
     // of the fourth date months later. Without something looking, nobody finds
     // out until the day.
     await seedSeries();
-    slotIsFree = false;
+    clashingNames = ["Yuan Sun"];
 
     const summary = await run();
     const conflicts = await openConflicts();
@@ -112,7 +113,7 @@ describe("the daily look-ahead", () => {
 
   it("raises a date once, not once per day until somebody deals with it", async () => {
     await seedSeries();
-    slotIsFree = false;
+    clashingNames = ["Yuan Sun"];
 
     await run();
     const first = (await openConflicts()).length;
@@ -125,10 +126,10 @@ describe("the daily look-ahead", () => {
     // Resolved rather than deleted, so the list can say it went away instead of
     // the row quietly vanishing overnight.
     await seedSeries();
-    slotIsFree = false;
+    clashingNames = ["Yuan Sun"];
     await run();
 
-    slotIsFree = true;
+    clashingNames = [];
     const summary = await run();
 
     expect(summary.resolved).toBeGreaterThan(0);
@@ -139,7 +140,7 @@ describe("the daily look-ahead", () => {
     // Only a series has dates nobody has looked at. A single booking was
     // checked when it was made and belongs to whoever made it.
     await seedSeries({ rule: null });
-    slotIsFree = false;
+    clashingNames = ["Yuan Sun"];
 
     const summary = await run();
     expect(summary.series).toBe(0);
@@ -151,7 +152,7 @@ describe("the daily look-ahead", () => {
     // Half-understanding that would raise warnings about dates that are not in
     // the series at all.
     await seedSeries({ rule: "RRULE:FREQ=MONTHLY;BYDAY=2TU" });
-    slotIsFree = false;
+    clashingNames = ["Yuan Sun"];
 
     const summary = await run();
     expect(summary.occurrences).toBe(0);
@@ -162,7 +163,7 @@ describe("the daily look-ahead", () => {
     // The first date of a series was checked at booking time. Reporting it
     // would put a conflict on the one row that is working.
     const { event } = await seedSeries();
-    slotIsFree = false;
+    clashingNames = ["Yuan Sun"];
 
     await run();
     const firstDate = event.startsAt.getTime();
