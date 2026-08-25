@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "if [ \"$VERCEL_ENV\" = production ]; then npm run db:migrate; fi && next build"
+  "buildCommand": "if [ \"$VERCEL_ENV\" = production ]; then npm run db:migrate; fi && next build",
+  "crons": [
+    {
+      "path": "/api/cron/conflicts",
+      "schedule": "0 13 * * *"
+    }
+  ]
 }

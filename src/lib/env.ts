@@ -28,6 +28,11 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().default(""),
   MICROSOFT_CLIENT_ID: z.string().default(""),
   MICROSOFT_CLIENT_SECRET: z.string().default(""),
+  // What Vercel Cron sends as a bearer token. Defaulted to empty rather than
+  // required: the app runs perfectly well without the daily conflict check, and
+  // a missing value here should not stop anyone signing in. The route itself
+  // refuses to run when it is blank — see api/cron/conflicts.
+  CRON_SECRET: z.string().default(""),
   /** "common" admits both work and personal Microsoft accounts, matching how
    * the Azure app registration is configured. A tenant GUID here would lock
    * out every founder using a personal Outlook address. */
