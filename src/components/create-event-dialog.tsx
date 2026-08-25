@@ -25,9 +25,17 @@ import {
 import type { Slot } from "@/components/results-list";
 import { handleExpiredSession } from "@/lib/session-expired";
 
-/** How many sessions a series can hold. Twelve four-weekly is roughly a year,
- * which is as far ahead as booking someone's calendar is a kindness. */
-const REPEAT_COUNTS = [3, 6, 12] as const;
+/** How long a series runs. Twelve four-weekly is roughly a year; "forever" is
+ * the standing 1:1 that nobody intends to stop, and re-booking every twelve
+ * months is admin nobody was asking for. */
+const REPEAT_OPTIONS = {
+  "3": "3 sessions",
+  "6": "6 sessions",
+  "12": "12 sessions",
+  forever: "Until cancelled",
+} as const;
+
+type RepeatFor = keyof typeof REPEAT_OPTIONS;
 
 export function CreateEventDialog({
   slot,
@@ -68,7 +76,7 @@ export function CreateEventDialog({
   // Nexus Partner's monthly rhythm with a member.
   const [repeats, setRepeats] = useState(false);
   const [repeatEveryWeeks, setRepeatEveryWeeks] = useState(4);
-  const [repeatCount, setRepeatCount] = useState(6);
+  const [repeatFor, setRepeatFor] = useState<RepeatFor>("6");
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -88,7 +96,17 @@ export function CreateEventDialog({
           startsAtUnix: slot.startUnix,
           durationMinutes,
           timezone,
-          ...(repeats ? { repeatEveryWeeks, repeatCount } : {}),
+          // "Forever" is sent as its own flag rather than as a missing count.
+          // A dropped field must read as "no repeat", never as "book this into
+          // someone's calendar indefinitely".
+          ...(repeats
+            ? {
+                repeatEveryWeeks,
+                ...(repeatFor === "forever"
+                  ? { repeatForever: true }
+                  : { repeatCount: Number(repeatFor) }),
+              }
+            : {}),
         }),
       });
       const data = await res.json();
@@ -170,28 +188,30 @@ export function CreateEventDialog({
                   </Select>
                   <span>for</span>
                   <Select
-                    items={Object.fromEntries(REPEAT_COUNTS.map((n) => [String(n), `${n} sessions`]))}
-                    value={String(repeatCount)}
-                    onValueChange={(v) => v && setRepeatCount(Number(v))}
+                    items={REPEAT_OPTIONS}
+                    value={repeatFor}
+                    onValueChange={(v) => v && setRepeatFor(v as RepeatFor)}
                   >
                     <SelectTrigger className="w-36">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {REPEAT_COUNTS.map((n) => (
-                        <SelectItem key={n} value={String(n)}>
-                          {n} sessions
+                      {Object.entries(REPEAT_OPTIONS).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-                {/* Said before booking rather than discovered afterwards: every
-                    date is checked, and one invitation covers the series. */}
+                {/* Said before booking rather than discovered afterwards: what
+                    gets checked, and that one invitation covers the series. */}
                 <p className="text-xs text-muted-foreground">
-                  Every date is checked before anything is booked. Everyone gets one invitation for
-                  the whole series — skipping or moving a single date is done in the calendar
-                  itself.
+                  {repeatFor === "forever"
+                    ? "The first year of dates is checked before anything is booked. After that the series keeps going, and any clash that appears is flagged on the day it turns up."
+                    : "Every date is checked before anything is booked."}{" "}
+                  Everyone gets one invitation for the whole series — skipping or moving a single
+                  date is done in the calendar itself.
                 </p>
               </>
             )}

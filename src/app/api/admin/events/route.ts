@@ -47,7 +47,20 @@ const bodySchema = z.object({
   repeatEveryWeeks: z.union([z.literal(2), z.literal(4)]).optional(),
   /** Total sessions including the one being booked, so 6 means six. */
   repeatCount: z.number().int().min(2).max(12).optional(),
+  /** A series with no end — the standing 1:1 nobody intends to stop. Asked for
+   * explicitly rather than inferred from a missing count, so a client that
+   * drops a field books nothing instead of booking forever. */
+  repeatForever: z.boolean().optional(),
 });
+
+/** How far ahead a series with no end gets checked before it is booked.
+ *
+ * A year, because that is the point past which a clash is not really
+ * foreseeable: people change jobs, calendars get rebuilt, and refusing to book
+ * a standing 1:1 over something eighteen months out would be refusing on
+ * fiction. Everything beyond this is the daily conflict job's problem, which is
+ * what that job exists for. */
+const CHECKED_AHEAD_WEEKS = 52;
 
 /** drizzle-orm wraps every driver error in `DrizzleQueryError`, which has no
  * `code` of its own — the real Postgres error (with `code: "23505"` for a
@@ -284,13 +297,22 @@ export async function POST(request: Request) {
   // Refuses outright rather than booking what fits and skipping the rest. Six
   // sessions minus two is not what anyone asked for, and a series with holes in
   // it is worse than being told to pick a different time.
+  //
+  // A series with no end cannot have every date checked — there is no last one.
+  // The first year is checked instead, and the daily conflict job carries it
+  // from there. That is a deliberate trade: the alternative is making somebody
+  // re-book a standing 1:1 every twelve months, and a rhythm that needs
+  // renewing is a rhythm that lapses.
   let recurrenceRule: string | undefined;
-  if (body.repeatEveryWeeks && body.repeatCount) {
+  const endless = body.repeatEveryWeeks !== undefined && body.repeatForever === true;
+  const repeatCount = endless ? undefined : body.repeatCount;
+
+  if (body.repeatEveryWeeks && (endless || repeatCount)) {
     const occurrences = occurrenceTimes({
       startUnix: body.startsAtUnix,
       durationMinutes: body.durationMinutes,
       intervalWeeks: body.repeatEveryWeeks,
-      count: body.repeatCount,
+      count: repeatCount ?? Math.floor(CHECKED_AHEAD_WEEKS / body.repeatEveryWeeks),
       timezone: body.timezone,
     });
     let blocked: string[];
@@ -313,12 +335,14 @@ export async function POST(request: Request) {
         {
           error: `${blocked.join(", ")} ${
             blocked.length === 1 ? "isn't" : "aren't"
-          } free for everyone. Pick another time, or repeat fewer times.`,
+          } free for everyone. Pick another time${endless ? "." : ", or repeat fewer times."}`,
         },
         { status: 409 }
       );
     }
-    recurrenceRule = `RRULE:FREQ=WEEKLY;INTERVAL=${body.repeatEveryWeeks};COUNT=${body.repeatCount}`;
+    recurrenceRule = endless
+      ? `RRULE:FREQ=WEEKLY;INTERVAL=${body.repeatEveryWeeks}`
+      : `RRULE:FREQ=WEEKLY;INTERVAL=${body.repeatEveryWeeks};COUNT=${repeatCount}`;
   }
 
   let providerEvent;

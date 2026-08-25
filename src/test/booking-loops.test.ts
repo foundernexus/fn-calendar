@@ -497,4 +497,46 @@ describe("a repeating session", () => {
     const [row] = await harness.db.select().from(events);
     expect(row.recurrenceRule).toBeNull();
   });
+
+  it("writes no COUNT for a series with no end", async () => {
+    // A standing 1:1 nobody intends to stop. Omitting COUNT is what makes it
+    // endless in the calendar, rather than us picking a year and hoping
+    // somebody remembers to re-book.
+    const c = await cast();
+    const { res } = await book(c, { repeatEveryWeeks: 4, repeatForever: true });
+
+    expect(res.status).toBe(200);
+    expect(cal.create.mock.calls[0]![0]).toMatchObject({
+      recurrenceRule: "RRULE:FREQ=WEEKLY;INTERVAL=4",
+    });
+    const [row] = await harness.db.select().from(events);
+    expect(row.recurrenceRule).toBe("RRULE:FREQ=WEEKLY;INTERVAL=4");
+  });
+
+  it("still checks ahead on an endless series", async () => {
+    // There is no last date to check, so the first year is checked instead.
+    // Without this the endless option would be the one way to book straight
+    // over somebody's existing commitments.
+    const c = await cast();
+    cal.busyDates.add(FOUR_WEEKS);
+
+    const { res } = await book(c, { repeatEveryWeeks: 4, repeatForever: true });
+
+    expect(res.status).toBe(409);
+    expect(cal.create).not.toHaveBeenCalled();
+    expect(await harness.db.select().from(events)).toHaveLength(0);
+  });
+
+  it("does not book forever just because a count went missing", async () => {
+    // The failure this guards against is silent and expensive: a client bug
+    // that drops repeatCount must produce a one-off, never an endless series
+    // sitting in a member's calendar with nobody aware it was created.
+    const c = await cast();
+    const { res } = await book(c, { repeatEveryWeeks: 4 });
+
+    expect(res.status).toBe(200);
+    expect(cal.create.mock.calls[0]![0]).toMatchObject({ recurrenceRule: undefined });
+    const [row] = await harness.db.select().from(events);
+    expect(row.recurrenceRule).toBeNull();
+  });
 });
