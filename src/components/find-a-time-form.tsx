@@ -25,8 +25,9 @@ import {
 import { CreateEventDialog } from "@/components/create-event-dialog";
 import { CancelSessionDialog } from "@/components/cancel-session-dialog";
 import { RescheduleSessionDialog } from "@/components/reschedule-session-dialog";
-import type { MemberWithConnection } from "@/db/queries";
-import { TIMEZONES, spellOutDate } from "@/lib/time";
+import { ConflictList } from "@/components/conflict-list";
+import type { MemberWithConnection, OpenConflict } from "@/db/queries";
+import { TIMEZONES, spellOutDate, addDaysToDateString } from "@/lib/time";
 import { TimeSelect } from "@/components/time-select";
 import { handleExpiredSession } from "@/lib/session-expired";
 
@@ -50,8 +51,13 @@ function defaultDateString(daysFromNow: number) {
 export function FindATimeForm({
   members,
   signedInEmail,
+  conflicts = [],
 }: {
   members: MemberWithConnection[];
+  /** Dates in repeating sessions that stopped working since they were booked.
+   * Found by the daily check; shown here because this is the page a Nexus
+   * Partner already opens. */
+  conflicts?: OpenConflict[];
   /** Whoever is looking at this page. Only used to preselect them as the
    * session lead — every other decision on this form is theirs to make. */
   signedInEmail?: string;
@@ -89,15 +95,15 @@ export function FindATimeForm({
       ? facilitators.find((m) => m.email.toLowerCase() === signedInEmail.toLowerCase())
       : undefined) ?? facilitators[0];
 
-  const [organizerMemberId, setOrganizerMemberId] = useState<number | null>(
+  const [organizerMemberIdState, setOrganizerMemberId] = useState<number | null>(
     defaultOrganizer?.id ?? null
   );
   // Optional — most sessions won't have one.
-  const [advisorMemberId, setAdvisorMemberId] = useState<number | null>(null);
-  const [guestMemberIds, setGuestMemberIds] = useState<number[]>([]);
-  const [startDate, setStartDate] = useState(defaultDateString(0));
-  const [endDate, setEndDate] = useState(defaultDateString(14));
-  const [durationMinutes, setDurationMinutes] = useState(60);
+  const [advisorMemberIdState, setAdvisorMemberId] = useState<number | null>(null);
+  const [guestMemberIdsState, setGuestMemberIds] = useState<number[]>([]);
+  const [startDateState, setStartDate] = useState(defaultDateString(0));
+  const [endDateState, setEndDate] = useState(defaultDateString(14));
+  const [durationMinutesState, setDurationMinutes] = useState(60);
   const [workingHoursStart, setWorkingHoursStart] = useState("09:00");
   const [workingHoursEnd, setWorkingHoursEnd] = useState("17:00");
   const [timezone, setTimezone] = useState<string>(TIMEZONES[0].value);
@@ -129,7 +135,7 @@ export function FindATimeForm({
   // The exact request body of the last search, replayed after a booking to
   // refresh the grid. Kept separately from `searchedParams` (which exists for
   // rendering) because the refetch has to send precisely what was searched —
-  // including durationMinutes, which the render snapshot doesn't carry.
+  // including durationMinutesState, which the render snapshot doesn't carry.
   const [lastSearchBody, setLastSearchBody] = useState<Record<string, unknown> | null>(null);
   // Snapshotted at search time, NOT read live from the form above — every
   // field here can change after a search completes while the grid is still
@@ -139,8 +145,66 @@ export function FindATimeForm({
   // checked.
   const [searchedParams, setSearchedParams] = useState<SearchedParams | null>(null);
 
-  async function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
+  /** Runs the search.
+   *
+   * `over` exists so a conflict can be opened in one click. React state is set
+   * asynchronously, so setting the fields and then calling this would search
+   * with the PREVIOUS values — the overrides are passed straight through
+   * instead, and the fields are updated alongside purely so the form shows what
+   * was searched. */
+  /** Takes the search straight to the week a clash falls in, with that
+   * session's own people.
+   *
+   * Sets the fields so the form shows what is being searched, and passes the
+   * same values to the search directly — React state is set asynchronously, so
+   * relying on the fields would search with whatever was there before.
+   *
+   * Deliberately no suggested replacement: the grid shows what is free and the
+   * choice belongs to whoever runs the session. */
+  function openConflict(conflict: OpenConflict) {
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: conflict.timezone }).format(
+      conflict.occurrenceStartsAt
+    );
+    // The whole week around it, so there is somewhere else to move to — a
+    // single day would often show nothing and be a dead end.
+    const from = addDaysToDateString(day, -3);
+    const to = addDaysToDateString(day, 3);
+    const guests = conflict.memberIds.filter((id) => id !== conflict.organizerMemberId);
+
+    setOrganizerMemberId(conflict.organizerMemberId);
+    setGuestMemberIds(guests);
+    setStartDate(from);
+    setEndDate(to);
+    setDurationMinutes(conflict.durationMinutes);
+    void handleSearch(null, {
+      organizerMemberId: conflict.organizerMemberId,
+      guestMemberIds: guests,
+      startDate: from,
+      endDate: to,
+      durationMinutes: conflict.durationMinutes,
+    });
+  }
+
+  async function handleSearch(
+    e: React.FormEvent | null,
+    over: Partial<{
+      organizerMemberId: number;
+      guestMemberIds: number[];
+      advisorMemberId: number | null;
+      startDate: string;
+      endDate: string;
+      durationMinutes: number;
+    }> = {}
+  ) {
+    e?.preventDefault();
+    const organizerMemberId = over.organizerMemberId ?? organizerMemberIdState;
+    const guestMemberIds = over.guestMemberIds ?? guestMemberIdsState;
+    const advisorMemberId =
+      over.advisorMemberId === undefined ? advisorMemberIdState : over.advisorMemberId;
+    const startDate = over.startDate ?? startDateState;
+    const endDate = over.endDate ?? endDateState;
+    const durationMinutes = over.durationMinutes ?? durationMinutesState;
+
     if (!organizerMemberId) {
       toast.error("Pick who's leading this session.");
       return;
@@ -312,6 +376,9 @@ export function FindATimeForm({
 
   return (
     <div className="space-y-8">
+      {/* Above everything, and invisible when there is nothing wrong. */}
+      {!reschedulingSession && <ConflictList conflicts={conflicts} onOpen={openConflict} />}
+
       {reschedulingSession ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/50 p-4">
           <p className="text-sm text-foreground">
@@ -346,7 +413,7 @@ export function FindATimeForm({
           <MemberSelect
             id="session-lead"
             members={facilitators}
-            value={organizerMemberId}
+            value={organizerMemberIdState}
             onChange={(id) => {
               setOrganizerMemberId(id);
               // The multi-select hides whoever's picked as lead from its own
@@ -370,7 +437,7 @@ export function FindATimeForm({
           <MemberSelect
             id="advisor"
             members={advisors}
-            value={advisorMemberId}
+            value={advisorMemberIdState}
             // No need to clear this person out of the guest selection the way
             // the session lead does: advisors are filtered out of the guest
             // list entirely (see guestCandidates), so they can never have been
@@ -400,9 +467,9 @@ export function FindATimeForm({
           <MemberMultiSelect
             id="guests"
             members={guestCandidates}
-            value={guestMemberIds}
+            value={guestMemberIdsState}
             onChange={setGuestMemberIds}
-            excludeId={organizerMemberId}
+            excludeId={organizerMemberIdState}
             placeholder="Who's this session for?"
           />
           {connectedMembers.length === 0 ? (
@@ -448,26 +515,26 @@ export function FindATimeForm({
             <Input
               id="start-date"
               type="date"
-              value={startDate}
+              value={startDateState}
               onChange={(e) => setStartDate(e.target.value)}
             />
-            <p className="text-xs text-muted-foreground">{spellOutDate(startDate)}</p>
+            <p className="text-xs text-muted-foreground">{spellOutDate(startDateState)}</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="end-date">End date</Label>
             <Input
               id="end-date"
               type="date"
-              value={endDate}
+              value={endDateState}
               onChange={(e) => setEndDate(e.target.value)}
             />
-            <p className="text-xs text-muted-foreground">{spellOutDate(endDate)}</p>
+            <p className="text-xs text-muted-foreground">{spellOutDate(endDateState)}</p>
           </div>
           <div className="space-y-2">
             <Label>Duration</Label>
             <Select
               items={Object.fromEntries(DURATIONS.map((d) => [String(d), `${d} min`]))}
-              value={String(durationMinutes)}
+              value={String(durationMinutesState)}
               onValueChange={(v) => v && setDurationMinutes(Number(v))}
             >
               <SelectTrigger className="w-full">

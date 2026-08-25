@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getMembersWithConnectionStatus } from "@/db/queries";
+import { getMembersWithConnectionStatus, getOpenConflicts } from "@/db/queries";
 import { FindATimeForm } from "@/components/find-a-time-form";
 import { requireAdminSession } from "@/lib/auth/admin";
 
@@ -14,7 +14,10 @@ export default async function FindATimePage() {
   const session = await requireAdminSession();
   if (!session) redirect("/connect");
 
-  const members = await getMembersWithConnectionStatus();
+  const [members, conflicts] = await Promise.all([
+    getMembersWithConnectionStatus(),
+    getOpenConflicts(),
+  ]);
 
   return (
     <div className="py-10">
@@ -28,7 +31,11 @@ export default async function FindATimePage() {
         </p>
       </div>
       <div className="mt-8">
-        <FindATimeForm members={members} signedInEmail={session.email} />
+        <FindATimeForm
+          members={members}
+          signedInEmail={session.email}
+          conflicts={conflicts}
+        />
       </div>
     </div>
   );

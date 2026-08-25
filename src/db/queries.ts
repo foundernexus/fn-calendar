@@ -1,7 +1,14 @@
-import { eq, inArray, and, or, gte, lte, lt, gt, sql, desc } from "drizzle-orm";
+import { eq, inArray, and, or, gte, lte, lt, gt, sql, desc, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "./index";
-import { calendarConnections, members, memberAvailability, events, eventAttendees } from "./schema";
+import {
+  calendarConnections,
+  members,
+  memberAvailability,
+  events,
+  eventAttendees,
+  sessionConflicts,
+} from "./schema";
 import { normalizeEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 
@@ -531,4 +538,73 @@ export async function getMembersWithConnectionStatus(): Promise<MemberWithConnec
       })),
     };
   });
+}
+
+export type OpenConflict = {
+  id: number;
+  eventId: number;
+  eventTitle: string;
+  /** The date in the series that stopped working — NOT the session's own
+   * `starts_at`, which is the first date and is fine. */
+  occurrenceStartsAt: Date;
+  timezone: string;
+  conflictingNames: string;
+  organizerMemberId: number;
+  /** Everyone on the session, so clicking through can search for exactly this
+   * group without the caller reassembling it. */
+  memberIds: number[];
+  durationMinutes: number;
+};
+
+/** Dates in repeating sessions that somebody has since booked over and nobody
+ * has dealt with.
+ *
+ * Written by the daily check (lib/conflicts.ts). Read here so the booking page
+ * can put them in front of whoever opens it — a list nobody passes is a list
+ * nobody reads, and this is the page a Nexus Partner is on every day. */
+export async function getOpenConflicts(): Promise<OpenConflict[]> {
+  const rows = await db
+    .select({
+      id: sessionConflicts.id,
+      eventId: sessionConflicts.eventId,
+      occurrenceStartsAt: sessionConflicts.occurrenceStartsAt,
+      conflictingNames: sessionConflicts.conflictingNames,
+      eventTitle: events.title,
+      timezone: events.timezone,
+      organizerMemberId: events.organizerMemberId,
+      startsAt: events.startsAt,
+      endsAt: events.endsAt,
+    })
+    .from(sessionConflicts)
+    .innerJoin(events, eq(sessionConflicts.eventId, events.id))
+    .where(and(isNull(sessionConflicts.resolvedAt), eq(events.status, "confirmed")))
+    .orderBy(sessionConflicts.occurrenceStartsAt);
+
+  if (rows.length === 0) return [];
+
+  const attendeeRows = await db
+    .select({ eventId: eventAttendees.eventId, memberId: eventAttendees.memberId })
+    .from(eventAttendees)
+    .where(
+      inArray(
+        eventAttendees.eventId,
+        rows.map((r) => r.eventId)
+      )
+    );
+  const byEvent = new Map<number, number[]>();
+  for (const a of attendeeRows) {
+    byEvent.set(a.eventId, [...(byEvent.get(a.eventId) ?? []), a.memberId]);
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    eventId: r.eventId,
+    eventTitle: r.eventTitle,
+    occurrenceStartsAt: r.occurrenceStartsAt,
+    timezone: r.timezone,
+    conflictingNames: r.conflictingNames,
+    organizerMemberId: r.organizerMemberId,
+    memberIds: [...new Set([r.organizerMemberId, ...(byEvent.get(r.eventId) ?? [])])],
+    durationMinutes: Math.round((r.endsAt.getTime() - r.startsAt.getTime()) / 60_000),
+  }));
 }
