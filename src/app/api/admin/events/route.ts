@@ -19,6 +19,7 @@ import {
   unbookableOccurrences,
 } from "@/lib/calendar/booking-guards";
 import { computeIdempotencyKey } from "@/lib/idempotency";
+import { oneToOnePartner, syncMemberToHubspot } from "@/lib/one-to-one";
 import { TIMEZONES } from "@/lib/time";
 import { requireAdminSession } from "@/lib/auth/admin";
 
@@ -515,6 +516,16 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+
+  // Karin's HubSpot list should be right by the time she looks at it, not
+  // tomorrow morning. Only for a real 1:1 — a group session changes nothing
+  // about anybody's monthly check-in, and syncing twenty guests on the booking
+  // path would make booking slow for no gain.
+  const partnerId = oneToOnePartner({
+    organizerMemberId: body.organizerMemberId,
+    attendees: attendeeValues.map((a) => ({ memberId: a.memberId, role: a.role })),
+  });
+  if (partnerId !== null) await syncMemberToHubspot(partnerId);
 
   return NextResponse.json({ event: inserted, alreadyExisted: false });
 }

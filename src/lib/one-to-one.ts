@@ -99,13 +99,13 @@ export async function oneToOneStates(now = new Date()): Promise<OneToOneState[]>
 
   for (const event of rows) {
     if (!facilitatorIds.has(event.organizerMemberId)) continue;
-    const attendees = byEvent.get(event.id) ?? [];
-    if (attendees.some((a) => a.role === "advisor")) continue;
-
-    const others = attendees.filter((a) => a.memberId !== event.organizerMemberId);
-    // Exactly one other person. Two makes it a small session, not a 1:1.
-    if (others.length !== 1) continue;
-    const memberId = others[0].memberId;
+    // Exactly one other person and no advisor — see oneToOnePartner, which the
+    // immediate write shares so the two can never disagree about what counts.
+    const memberId = oneToOnePartner({
+      organizerMemberId: event.organizerMemberId,
+      attendees: byEvent.get(event.id) ?? [],
+    });
+    if (memberId === null) continue;
 
     const startUnix = Math.floor(event.startsAt.getTime() / 1000);
     const durationMinutes = Math.round(
@@ -218,4 +218,73 @@ export async function syncOneToOneToHubspot(now = new Date()) {
   }
 
   return summary;
+}
+
+/** The member this session is a 1:1 with, or null if it isn't one.
+ *
+ * Same rule as the nightly walk, in one place so the immediate write and the
+ * reconcile can never disagree about what a 1:1 is. */
+export function oneToOnePartner(params: {
+  organizerMemberId: number;
+  attendees: { memberId: number; role: string }[];
+}): number | null {
+  if (params.attendees.some((a) => a.role === "advisor")) return null;
+  const others = params.attendees.filter((a) => a.memberId !== params.organizerMemberId);
+  return others.length === 1 ? others[0].memberId : null;
+}
+
+/** Pushes one member's 1:1 state to HubSpot, straight after a booking changes.
+ *
+ * The nightly run is a safety net, not the mechanism: Karin books at ten and
+ * looks at her list at five past, and a date that appears tomorrow is no use to
+ * her today.
+ *
+ * Awaited rather than fired and forgotten. It costs a booking a few hundred
+ * milliseconds, and the alternative in a serverless runtime is a request that
+ * gets killed the moment the response is sent — a write that usually doesn't
+ * happen is worse than a slightly slower booking.
+ *
+ * Cannot throw. The session is already real; a note about it failing to land is
+ * not a reason to tell anyone their booking failed. */
+export async function syncMemberToHubspot(memberId: number, now = new Date()) {
+  try {
+    const { syncOneToOne, hubspotConfigured } = await import("@/lib/hubspot");
+    if (!hubspotConfigured()) return;
+
+    const states = await oneToOneStates(now);
+    const state = states.find((s) => s.memberId === memberId);
+
+    if (state) {
+      await syncOneToOne({
+        emails: [state.email, state.calendarEmail],
+        fields: {
+          fn_next_monthly_11: state.next,
+          fn_last_monthly_11: state.last,
+          fn_11_booked_through: state.bookedThrough,
+          fn_calendar_email: state.calendarEmail,
+        },
+        context: `member ${memberId}`,
+      });
+      return;
+    }
+
+    // No state at all means they hold no 1:1 anywhere any more — the one they
+    // had was just cancelled. Clearing is the entire point: a date left
+    // standing for a meeting that no longer exists is exactly the failure that
+    // made HubSpot's own field unusable here.
+    const { getMemberById } = await import("@/db/queries");
+    const member = await getMemberById(memberId);
+    if (!member) return;
+    await syncOneToOne({
+      emails: [member.email],
+      fields: {
+        fn_next_monthly_11: null,
+        fn_last_monthly_11: null,
+        fn_11_booked_through: null,
+      },
+      context: `member ${memberId} (cleared)`,
+    });
+  } catch (err) {
+    console.warn(`[hubspot] immediate sync for member ${memberId} failed:`, err);
+  }
 }

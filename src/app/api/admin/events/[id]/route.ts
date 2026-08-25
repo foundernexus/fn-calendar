@@ -15,6 +15,7 @@ import {
   type EventConnection,
 } from "@/lib/calendar/events";
 import { computeIdempotencyKey } from "@/lib/idempotency";
+import { oneToOnePartner, syncMemberToHubspot } from "@/lib/one-to-one";
 import { TIMEZONES } from "@/lib/time";
 
 const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [string, ...string[]];
@@ -303,6 +304,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       })
       .where(eq(events.id, eventId))
       .returning();
+
+    // A moved 1:1 changes the date Karin's list shows, so it has to change now
+    // rather than tonight. `attendees` was read at the top of this handler and
+    // the people on the session did not change — only the time did.
+    const partnerId = oneToOnePartner({
+      organizerMemberId: event.organizerMemberId,
+      attendees: attendees.map((a) => ({ memberId: a.memberId, role: a.role })),
+    });
+    if (partnerId !== null) await syncMemberToHubspot(partnerId);
+
     return NextResponse.json({ event: updated });
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -420,6 +431,22 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       })
       .where(eq(events.id, eventId))
       .returning();
+    // Same reasoning as booking — and cancelling matters more, because the
+    // field has to be CLEARED. A date left standing for a session that no
+    // longer exists is the failure this whole column was chosen to avoid.
+    //
+    // Read here rather than reused from above: this handler has its own scope,
+    // and the rows are needed after the cancellation, not before it.
+    const cancelledAttendees = await db
+      .select({ memberId: eventAttendees.memberId, role: eventAttendees.role })
+      .from(eventAttendees)
+      .where(eq(eventAttendees.eventId, eventId));
+    const partnerId = oneToOnePartner({
+      organizerMemberId: event.organizerMemberId,
+      attendees: cancelledAttendees,
+    });
+    if (partnerId !== null) await syncMemberToHubspot(partnerId);
+
     return NextResponse.json({ event: updated, alreadyCancelled: false });
   } catch (err) {
     console.error("[admin/events/:id] Cancelled in Nylas but the DB update failed", {
