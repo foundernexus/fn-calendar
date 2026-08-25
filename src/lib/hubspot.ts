@@ -67,7 +67,16 @@ async function hubspotFetch(path: string, init: RequestInit) {
  *
  * Returns null when nothing matches, which is a normal outcome — not everyone
  * in the scheduler is in the CRM. */
-export async function findContactId(emails: (string | null | undefined)[]) {
+export type HubspotContact = {
+  id: string;
+  /** The 1:1 fields as they currently stand, so a caller can tell whether a
+   * write would actually change anything. */
+  properties: Record<string, string | null>;
+};
+
+export async function findContact(
+  emails: (string | null | undefined)[]
+): Promise<HubspotContact | null> {
   const candidates = [...new Set(emails.filter(Boolean).map((e) => normalizeEmail(e!)))];
   if (candidates.length === 0) return null;
 
@@ -78,12 +87,18 @@ export async function findContactId(emails: (string | null | undefined)[]) {
       // is what we want — a fuzzy match on somebody's email would attach a
       // meeting to the wrong person, and that is worse than not attaching it.
       filterGroups: [{ filters: [{ propertyName: "email", operator: "IN", values: candidates }] }],
-      properties: ["email"],
+      // The current values come back with the lookup rather than in a second
+      // request, so the reconcile can skip contacts that already read correctly
+      // instead of rewriting the whole roster every night.
+      properties: ["email", "fn_next_monthly_11", "fn_last_monthly_11", "fn_11_booked_through"],
       limit: 1,
     }),
   });
-  const data = (await res.json()) as { results?: { id: string }[] };
-  return data.results?.[0]?.id ?? null;
+  const data = (await res.json()) as {
+    results?: { id: string; properties?: Record<string, string | null> }[];
+  };
+  const hit = data.results?.[0];
+  return hit ? { id: hit.id, properties: hit.properties ?? {} } : null;
 }
 
 /** Writes a member's 1:1 state onto their contact. */
@@ -111,12 +126,12 @@ export async function syncOneToOne(params: {
 }): Promise<"written" | "no-contact" | "skipped" | "failed"> {
   if (!hubspotConfigured()) return "skipped";
   try {
-    const contactId = await findContactId(params.emails);
-    if (!contactId) {
+    const contact = await findContact(params.emails);
+    if (!contact) {
       console.info(`[hubspot] no contact for ${params.emails.filter(Boolean).join(", ")}`);
       return "no-contact";
     }
-    await updateContact(contactId, params.fields);
+    await updateContact(contact.id, params.fields);
     return "written";
   } catch (err) {
     console.warn(`[hubspot] ${params.context} sync failed:`, err);

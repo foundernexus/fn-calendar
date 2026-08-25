@@ -190,8 +190,10 @@ export async function oneToOneStates(now = new Date()): Promise<OneToOneState[]>
  * Every failure is counted and none of them stops the run. One member with no
  * matching contact must not cost the other fifty their update. */
 export async function syncOneToOneToHubspot(now = new Date()) {
-  const { syncOneToOne, hubspotConfigured } = await import("@/lib/hubspot");
-  const summary = { members: 0, written: 0, noContact: 0, failed: 0, skipped: 0 };
+  const { syncOneToOne, hubspotConfigured, findContact, updateContact } = await import(
+    "@/lib/hubspot"
+  );
+  const summary = { members: 0, written: 0, cleared: 0, noContact: 0, failed: 0, skipped: 0 };
   if (!hubspotConfigured()) {
     summary.skipped = 1;
     return summary;
@@ -202,7 +204,7 @@ export async function syncOneToOneToHubspot(now = new Date()) {
 
   for (const state of states) {
     const result = await syncOneToOne({
-      // Both addresses, because they routinely differ — see findContactId.
+      // Both addresses, because they routinely differ — see findContact.
       emails: [state.email, state.calendarEmail],
       fields: {
         fn_next_monthly_11: state.next,
@@ -215,6 +217,56 @@ export async function syncOneToOneToHubspot(now = new Date()) {
     if (result === "written") summary.written += 1;
     else if (result === "no-contact") summary.noContact += 1;
     else if (result === "failed") summary.failed += 1;
+  }
+
+  // Then everybody who holds NO 1:1 any more.
+  //
+  // The loop above only visits members who currently have one, so on its own it
+  // can add a date and move a date but can never take one away. A session
+  // cancelled straight in Google — which is how most of them get cancelled —
+  // would leave its date standing in HubSpot indefinitely, which is precisely
+  // the stale-column problem this field was introduced to solve.
+  const held = new Set(states.map((s) => s.memberId));
+  const everyone = await db.select({ id: members.id, email: members.email }).from(members);
+  const stale = everyone.filter((m) => !held.has(m.id));
+  const staleConnections = await getLatestConnections(stale.map((m) => m.id));
+
+  for (const member of stale) {
+    try {
+      const usable = staleConnections.filter(
+        (c) => c.member_id === member.id && isConnectionUsable(c)
+      );
+      const contact = await findContact([
+        member.email,
+        pickInviteConnection(usable)?.grant_email ?? null,
+      ]);
+      // No contact is the ordinary case here rather than a problem worth
+      // counting: most of the roster has never had a 1:1 booked through this
+      // tool at all.
+      if (!contact) continue;
+
+      // Only write when there is something to remove. Fifty PATCHes a night
+      // clearing fields that are already empty is noise in HubSpot's own
+      // history, and it makes the property's change log useless for seeing what
+      // actually moved.
+      const alreadyClear =
+        !contact.properties.fn_next_monthly_11 &&
+        !contact.properties.fn_last_monthly_11 &&
+        !contact.properties.fn_11_booked_through;
+      if (alreadyClear) continue;
+
+      await updateContact(contact.id, {
+        fn_next_monthly_11: null,
+        fn_last_monthly_11: null,
+        fn_11_booked_through: null,
+      });
+      summary.cleared += 1;
+    } catch (err) {
+      // Caught per member, so one bad contact cannot cost the rest of the
+      // roster its reconcile.
+      console.warn(`[hubspot] clearing member ${member.id} failed:`, err);
+      summary.failed += 1;
+    }
   }
 
   return summary;
@@ -249,13 +301,19 @@ export function oneToOnePartner(params: {
 export async function syncMemberToHubspot(memberId: number, now = new Date()) {
   try {
     const { syncOneToOne, hubspotConfigured } = await import("@/lib/hubspot");
-    if (!hubspotConfigured()) return;
+    if (!hubspotConfigured()) {
+      // Said out loud. A silent skip is indistinguishable from a silent success,
+      // and that ambiguity already cost an afternoon of guessing why a field
+      // wouldn't clear.
+      console.info(`[hubspot] no token configured, skipping member ${memberId}`);
+      return;
+    }
 
     const states = await oneToOneStates(now);
     const state = states.find((s) => s.memberId === memberId);
 
     if (state) {
-      await syncOneToOne({
+      const result = await syncOneToOne({
         emails: [state.email, state.calendarEmail],
         fields: {
           fn_next_monthly_11: state.next,
@@ -265,6 +323,7 @@ export async function syncMemberToHubspot(memberId: number, now = new Date()) {
         },
         context: `member ${memberId}`,
       });
+      console.info(`[hubspot] member ${memberId} next=${state.next ?? "none"}: ${result}`);
       return;
     }
 
@@ -272,11 +331,23 @@ export async function syncMemberToHubspot(memberId: number, now = new Date()) {
     // had was just cancelled. Clearing is the entire point: a date left
     // standing for a meeting that no longer exists is exactly the failure that
     // made HubSpot's own field unusable here.
-    const { getMemberById } = await import("@/db/queries");
+    const { getMemberById, getLatestConnections, isConnectionUsable, pickInviteConnection } =
+      await import("@/db/queries");
     const member = await getMemberById(memberId);
     if (!member) return;
-    await syncOneToOne({
-      emails: [member.email],
+
+    // BOTH addresses, exactly as the write above does.
+    //
+    // This asymmetry was a real bug: booking searched the registered address AND
+    // the connected one, cancelling searched only the registered one. Where the
+    // two differ — which is common, and is the whole reason findContact takes
+    // a list — the clear landed on a different contact than the write, so the
+    // date sat there afterwards looking like the sync had failed.
+    const usable = (await getLatestConnections([memberId])).filter(isConnectionUsable);
+    const calendarEmail = pickInviteConnection(usable)?.grant_email ?? null;
+
+    const result = await syncOneToOne({
+      emails: [member.email, calendarEmail],
       fields: {
         fn_next_monthly_11: null,
         fn_last_monthly_11: null,
@@ -284,6 +355,7 @@ export async function syncMemberToHubspot(memberId: number, now = new Date()) {
       },
       context: `member ${memberId} (cleared)`,
     });
+    console.info(`[hubspot] member ${memberId} cleared: ${result}`);
   } catch (err) {
     console.warn(`[hubspot] immediate sync for member ${memberId} failed:`, err);
   }
