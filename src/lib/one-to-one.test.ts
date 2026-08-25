@@ -149,8 +149,11 @@ describe("the dates it reports", () => {
       .where(eq(events.id, event.id));
 
     const [state] = await states();
-    expect(state.bookedThrough).not.toBeNull();
-    expect(state.bookedThrough! > state.next!).toBe(true);
+    // ISO timestamp, not YYYY-MM-DD: HubSpot types this field as datetime and
+    // rejects a plain date. The two date fields beside it are the other way
+    // round — a mismatch that would have failed on the very first sync.
+    expect(state.bookedThrough).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(state.bookedThrough!.slice(0, 10) > state.next!).toBe(true);
   });
 
   it("leaves booked-through empty for a series with no end", async () => {

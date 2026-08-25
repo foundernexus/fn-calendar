@@ -27,8 +27,13 @@ export type OneToOneState = {
   /** `YYYY-MM-DD` in the session's own timezone, or null. */
   next: string | null;
   last: string | null;
-  /** The final date of a repeating 1:1. Null for a one-off, and null for a
-   * series with no end — there is no date to give. */
+  /** The final date of a repeating 1:1, as an ISO timestamp — HubSpot types
+   * this field as `datetime`, unlike the two above which are `date`. Sending it
+   * as `YYYY-MM-DD` is rejected.
+   *
+   * Null for a one-off, and null for a series with no end: there is no date to
+   * give, and reporting the horizon we happen to walk to would be a number
+   * nobody chose. */
   bookedThrough: string | null;
 };
 
@@ -170,7 +175,7 @@ export async function oneToOneStates(now = new Date()): Promise<OneToOneState[]>
       calendarEmail: calendarEmailById.get(memberId) ?? null,
       next: future.length > 0 ? localDate(future[0], zone) : null,
       last: past.length > 0 ? localDate(past[past.length - 1], zone) : null,
-      bookedThrough: ends.length > 0 ? localDate(ends[0], zone) : null,
+      bookedThrough: ends.length > 0 ? new Date(ends[0] * 1000).toISOString() : null,
     };
   });
 }
