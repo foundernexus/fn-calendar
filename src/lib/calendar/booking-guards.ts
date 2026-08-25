@@ -5,11 +5,12 @@ import {
   connectionCredentials,
 } from "@/db/queries";
 import { getCollectiveAvailability } from "@/lib/calendar/availability";
+// Recurrence maths lives in one place — see the note there about walking local
+// dates rather than adding seconds.
+export { occurrenceTimes } from "@/lib/calendar/recurrence";
 import {
   slotMatchesMemberAvailability,
   zonedDateTimeParts,
-  zonedDateTimeToUnix,
-  addDaysToDateString,
   AVAILABILITY_INTERVAL_MINUTES,
   type AvailabilityWindow,
 } from "@/lib/time";
@@ -151,34 +152,6 @@ export async function slotStillFree(params: {
     console.warn(`[${params.context}] Slot re-check failed, proceeding anyway`, err);
     return true;
   }
-}
-
-/** When a repeating session actually falls, in unix seconds.
- *
- * Walked in local dates rather than by adding 28 × 86400 seconds, because a
- * fortnight or a month will cross a daylight-saving boundary sooner or later and
- * arithmetic on seconds would quietly move a ten o'clock call to nine. The
- * provider repeats at the same wall-clock time; the check in front of it has to
- * agree, or it would be checking hours nobody is going to be booked into.
- *
- * The first entry is the slot that was clicked, so a count of 6 means six
- * sessions in total, not six more. */
-export function occurrenceTimes(params: {
-  startUnix: number;
-  durationMinutes: number;
-  intervalWeeks: number;
-  count: number;
-  timezone: string;
-}): { startUnix: number; endUnix: number }[] {
-  const first = zonedDateTimeParts(params.startUnix, params.timezone);
-  const out: { startUnix: number; endUnix: number }[] = [];
-  for (let i = 0; i < params.count; i++) {
-    const date = addDaysToDateString(first.date, i * params.intervalWeeks * 7);
-    const startUnix = zonedDateTimeToUnix(date, first.time, params.timezone);
-    if (!Number.isFinite(startUnix)) continue;
-    out.push({ startUnix, endUnix: startUnix + params.durationMinutes * 60 });
-  }
-  return out;
 }
 
 /** Every occurrence that can't be booked, as human dates.

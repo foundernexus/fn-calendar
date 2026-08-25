@@ -165,6 +165,45 @@ export const calendarConnections = pgTable(
   ]
 );
 
+/** A date in a repeating session that somebody has since booked over.
+ *
+ * A series is one row in `events` carrying a rule, so its later dates exist
+ * only as arithmetic — there is nothing to attach "this one is now double
+ * booked" to. This table is that attachment, and it exists because the problem
+ * is invisible without it: the fourth date is four months out, somebody puts a
+ * flight in front of it in November, and nobody finds out until the day.
+ *
+ * Written by the daily check, never by a person. A row is a question waiting
+ * for an answer, not a record worth keeping — once the date is clear again, or
+ * the session moved, it is resolved rather than deleted so the list can show
+ * what changed since yesterday. */
+export const sessionConflicts = pgTable(
+  "session_conflicts",
+  {
+    id: serial("id").primaryKey(),
+    eventId: integer("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    /** Which date in the series — the series row itself only knows the first. */
+    occurrenceStartsAt: timestamp("occurrence_starts_at", { withTimezone: true }).notNull(),
+    /** Who is busy, already resolved to names. Stored rather than looked up on
+     * read: the answer is a fact about the moment it was detected, and the
+     * calendar it came from will have moved on by the time anyone reads it. */
+    conflictingNames: text("conflicting_names").notNull(),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Null while it still needs attention. Set when the date came free again
+     * or the session was moved — kept rather than deleted so the list can say
+     * "this sorted itself out" instead of the row silently vanishing. */
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    // One open question per date. The daily check runs over the same window
+    // every day, and without this it would raise the same conflict again every
+    // morning until somebody dealt with it.
+    uniqueIndex("session_conflicts_event_occurrence").on(t.eventId, t.occurrenceStartsAt),
+  ]
+);
+
 export const events = pgTable("events", {
   id: serial("id").primaryKey(),
   /** How often this session repeats, as an RFC 5545 rule — the string we hand
