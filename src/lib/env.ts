@@ -33,6 +33,11 @@ const envSchema = z.object({
   // a missing value here should not stop anyone signing in. The route itself
   // refuses to run when it is blank — see api/cron/conflicts.
   CRON_SECRET: z.string().default(""),
+  // Writes each member's 1:1 rhythm onto their HubSpot contact — one direction,
+  // this tool to HubSpot. Empty means the sync is simply off: every call site
+  // treats a missing token as "skip", never as an error, because a booking must
+  // not fail over a note about it.
+  HUBSPOT_TOKEN: z.string().default(""),
   /** "common" admits both work and personal Microsoft accounts, matching how
    * the Azure app registration is configured. A tenant GUID here would lock
    * out every founder using a personal Outlook address. */

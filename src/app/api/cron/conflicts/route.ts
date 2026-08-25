@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { detectSeriesConflicts } from "@/lib/conflicts";
+import { syncOneToOneToHubspot } from "@/lib/one-to-one";
 import { env } from "@/lib/env";
 
 // Reads calendars over the network for every upcoming date of every series.
@@ -29,9 +30,16 @@ export async function GET(request: Request) {
   }
 
   try {
-    const summary = await detectSeriesConflicts();
-    console.info("[cron/conflicts] finished", summary);
-    return NextResponse.json({ ok: true, ...summary });
+    const conflicts = await detectSeriesConflicts();
+    console.info("[cron] conflict check finished", conflicts);
+
+    // Runs even if the conflict check found nothing — they are independent
+    // jobs sharing one schedule, and a quiet night for one is not a reason to
+    // skip the other.
+    const hubspot = await syncOneToOneToHubspot();
+    console.info("[cron] hubspot 1:1 sync finished", hubspot);
+
+    return NextResponse.json({ ok: true, conflicts, hubspot });
   } catch (err) {
     // Loud, because nothing else will notice. Nobody is looking at this route,
     // and a check that quietly stopped running would leave the list looking
