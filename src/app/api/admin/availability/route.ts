@@ -234,6 +234,14 @@ export async function POST(request: Request) {
         workingHoursEnd: body.workingHoursEnd,
         excludeWeekends: body.excludeWeekends,
         leadMinutes: body.leadMinutes,
+        // One group per PERSON, carrying every address they hold — someone with
+        // a work and a personal calendar is one constraint, not two.
+        blockerGroups: allSelectedIds
+          .map((id) => ({
+            label: membersById.get(id)?.fullName ?? `#${id}`,
+            emails: (connectionsByMemberId.get(id) ?? []).map((c) => c.grant_email),
+          }))
+          .filter((g) => g.emails.length > 0),
       }),
       // Only needs to cover the visible search range itself — the grid never
       // renders cells outside [startDate, endDate] to begin with.
@@ -258,7 +266,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { slots, unreadable, droppedByLead } = collective;
+  const { slots, unreadable, droppedByLead, blockers } = collective;
 
   // The session lead is the exception: their calendar is the one the session is
   // created ON, and every slot offered is a claim about their time. Offering
@@ -345,15 +353,43 @@ export async function POST(request: Request) {
   // set "Mondays 2-5pm only" on /me. Every selected member (organizer, advisor
   // AND founders) must individually clear their own stated availability
   // window, checked in each member's own timezone.
+  const clearsStatedHours = (slot: { startTime: number; endTime: number }, id: number) =>
+    slotMatchesMemberAvailability(
+      { startUnix: slot.startTime, endUnix: slot.endTime },
+      membersById.get(id)?.timezone ?? null,
+      availabilityByMemberId.get(id) ?? []
+    );
+
   const availableSlots = slots.filter((slot) =>
-    allSelectedIds.every((id) =>
-      slotMatchesMemberAvailability(
-        { startUnix: slot.startTime, endUnix: slot.endTime },
-        membersById.get(id)?.timezone ?? null,
-        availabilityByMemberId.get(id) ?? []
-      )
-    )
+    allSelectedIds.every((id) => clearsStatedHours(slot, id))
   );
+
+  // Who is the constraint, when there is nothing to offer.
+  //
+  // Two different causes need two different answers. If the calendars never
+  // overlapped, the lib worked it out from busy data. If they DID overlap and
+  // stated weekly hours removed every slot, the answer is here — count how many
+  // of those slots each person's own hours rejected, and the one rejecting the
+  // most is the one to talk to.
+  //
+  // Either way this replaces "no overlapping free time", which is true and
+  // tells an admin nothing about what to do next.
+  let constraint: { label: string; slotsWithout: number } | null = null;
+  if (availableSlots.length === 0 && allSelectedIds.length > 1) {
+    if (slots.length > 0) {
+      const ranked = allSelectedIds
+        .map((id) => ({
+          label: membersById.get(id)?.fullName ?? `#${id}`,
+          slotsWithout: slots.filter((slot) =>
+            allSelectedIds.every((other) => other === id || clearsStatedHours(slot, other))
+          ).length,
+        }))
+        .sort((a, b) => b.slotsWithout - a.slotsWithout);
+      constraint = ranked[0]?.slotsWithout ? ranked[0] : null;
+    } else {
+      constraint = blockers[0]?.slotsWithout ? blockers[0] : null;
+    }
+  }
 
   return NextResponse.json({
     slots: availableSlots.map((slot) => ({
@@ -381,6 +417,9 @@ export async function POST(request: Request) {
     // saying "no overlapping free time" when calendars genuinely overlap and
     // it's actually a stated preference doing the filtering.
     filteredByPreferences: slots.length > 0 && availableSlots.length === 0,
+    // Who to drop, or talk to, when nothing fits. Null when no single person
+    // unlocks anything — then the range is the problem, not a person.
+    constraint,
     // Real sessions already booked through this tool involving anyone
     // selected — shown on the grid as a distinct "already booked" cell
     // instead of an unexplained gray one.

@@ -218,3 +218,72 @@ describe("run-up before the session", () => {
     expect(slots.map((s) => s.startTime)).not.toContain(at("2026-08-19T18:30:00Z"));
   });
 });
+
+describe("who is the constraint", () => {
+  const groups = [
+    { label: "Yuan", emails: ["yuan@example.com"] },
+    { label: "Court", emails: ["court@example.com"] },
+  ];
+
+  async function searchWithGroups(connections: ReturnType<typeof connection>[]) {
+    const { getCollectiveAvailability } = await import("@/lib/calendar/availability");
+    return getCollectiveAvailability({
+      connections,
+      blockerGroups: groups,
+      startTime: at("2026-08-19T07:00:00Z"),
+      endTime: at("2026-08-20T06:59:00Z"),
+      durationMinutes: 60,
+      timezone: "America/Los_Angeles",
+      workingHoursStart: "09:00",
+      workingHoursEnd: "17:00",
+      excludeWeekends: true,
+    });
+  }
+
+  it("names the person whose absence unlocks the day", async () => {
+    // Yuan is busy all day, Court is free. "No overlapping free time" is true
+    // and tells an admin nothing; knowing it is Yuan is the difference between
+    // widening the range and dropping one person.
+    fetchBusy
+      .mockResolvedValueOnce([
+        { start: at("2026-08-19T15:00:00Z"), end: at("2026-08-20T02:00:00Z") },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const { slots, blockers } = await searchWithGroups([
+      connection({ id: 1, grantEmail: "yuan@example.com" }),
+      connection({ id: 2, grantEmail: "court@example.com" }),
+    ]);
+
+    expect(slots).toHaveLength(0);
+    expect(blockers[0].label).toBe("Yuan");
+    expect(blockers[0].slotsWithout).toBeGreaterThan(0);
+    // Court unlocks nothing, so he must not be offered as the answer.
+    expect(blockers.find((b) => b.label === "Court")!.slotsWithout).toBe(0);
+  });
+
+  it("says nothing when there are times on offer", async () => {
+    // Wasted work on a question nobody is asking, and a suggestion to drop
+    // someone from a session that already has a slot would be nonsense.
+    const { slots, blockers } = await searchWithGroups([
+      connection({ id: 1, grantEmail: "yuan@example.com" }),
+      connection({ id: 2, grantEmail: "court@example.com" }),
+    ]);
+    expect(slots.length).toBeGreaterThan(0);
+    expect(blockers).toEqual([]);
+  });
+
+  it("reports nobody when removing any one person still leaves nothing", async () => {
+    // Both are blocked all day. The range is the problem, not a person — and
+    // naming one would send an admin to have a pointless conversation.
+    fetchBusy.mockResolvedValue([
+      { start: at("2026-08-19T15:00:00Z"), end: at("2026-08-20T02:00:00Z") },
+    ]);
+
+    const { blockers } = await searchWithGroups([
+      connection({ id: 1, grantEmail: "yuan@example.com" }),
+      connection({ id: 2, grantEmail: "court@example.com" }),
+    ]);
+    expect(blockers.every((b) => b.slotsWithout === 0)).toBe(true);
+  });
+});

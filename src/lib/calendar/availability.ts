@@ -60,6 +60,10 @@ export type CollectiveAvailability = {
    * lead time was asked for. Reported rather than swallowed: a search that
    * quietly returns fewer times than it could looks like nobody is free. */
   droppedByLead: number;
+  /** For each group in `blockerGroups`, how many slots would exist if that
+   * group's calendars were left out. Empty unless the search found nothing and
+   * groups were supplied — see the note on the parameter. */
+  blockers: { label: string; slotsWithout: number }[];
 };
 
 /** Every slot in the window where all of these calendars are free.
@@ -94,6 +98,17 @@ export async function getCollectiveAvailability(params: {
    * everybody at once, and it stacks on top of whatever people set for
    * themselves rather than replacing it. */
   leadMinutes?: number;
+  /** People to test as the constraint, each with all the addresses they hold.
+   *
+   * "No overlapping free time" is a true answer and a useless one: it doesn't
+   * say whether five people are wide open and one is impossible, which is the
+   * difference between changing the date range and dropping somebody. Taking
+   * each person out in turn answers that.
+   *
+   * Only computed when the search found nothing — otherwise it is wasted work
+   * on a question nobody is asking. Costs no extra calls either way: it reruns
+   * the arithmetic over busy data already fetched. */
+  blockerGroups?: { label: string; emails: string[] }[];
 }): Promise<CollectiveAvailability> {
   const lead = Math.max(0, params.leadMinutes ?? 0) * 60;
 
@@ -176,5 +191,22 @@ export async function getCollectiveAvailability(params: {
       : computeCollectiveSlots({ participants: participantsWithoutLead, ...shape }).length -
         slots.length;
 
-  return { slots, unreadable, droppedByLead };
+  // Only when there is nothing to offer. With even one slot on the table, who
+  // would unlock more is a question nobody is asking.
+  const blockers: { label: string; slotsWithout: number }[] = [];
+  if (slots.length === 0 && (params.blockerGroups?.length ?? 0) > 1) {
+    for (const group of params.blockerGroups!) {
+      const without = participants.filter((p) => !group.emails.includes(p.email));
+      // Everyone in the group is unreadable or unconnected — removing them
+      // changes nothing and naming them would be a false lead.
+      if (without.length === participants.length) continue;
+      blockers.push({
+        label: group.label,
+        slotsWithout: computeCollectiveSlots({ participants: without, ...shape }).length,
+      });
+    }
+    blockers.sort((a, b) => b.slotsWithout - a.slotsWithout);
+  }
+
+  return { slots, unreadable, droppedByLead, blockers };
 }

@@ -48,6 +48,9 @@ export type AvailabilityResult = {
   /** How many times the run-up filter cost. Shown so a thin result reads as
    * "you asked for a gap", not "nobody is free". */
   droppedByLead?: number;
+  /** The one person whose absence would unlock times, when nothing fits. Null
+   * when no single person is the problem. */
+  constraint?: { label: string; slotsWithout: number } | null;
   error?: string;
   /** True when Nylas found real calendar overlap but it all got filtered out
    * by someone's stated /me availability window or a guest's weekly session
@@ -148,11 +151,30 @@ export function ResultsList({
       )}
 
       {result.slots.length === 0 && (result.bookedSlots?.length ?? 0) === 0 ? (
-        <p className="mt-4 text-sm text-foreground">
-          {result.filteredByPreferences
-            ? "Everyone's calendar overlaps at some point in this range, but it all falls outside someone's stated availability. Try adjusting the working hours, a different date range, or ask them to update their hours on /me."
-            : "No overlapping free time found in this range."}
-        </p>
+        <div className="mt-4 space-y-2 text-sm text-foreground">
+          <p>
+            {result.filteredByPreferences
+              ? "Everyone's calendar overlaps at some point in this range, but it all falls outside someone's stated availability."
+              : "No overlapping free time found in this range."}
+          </p>
+          {/* "No overlapping free time" is true and useless: it doesn't say
+              whether five people are wide open and one is impossible, which is
+              the difference between widening the range and dropping somebody.
+              This says which. */}
+          {result.constraint ? (
+            <p className="rounded-md border border-border bg-secondary/40 px-3 py-2">
+              <span className="font-medium">{result.constraint.label}</span> is the constraint —
+              without {result.constraint.label.split(" ")[0]} there{" "}
+              {result.constraint.slotsWithout === 1 ? "is" : "are"}{" "}
+              <span className="font-medium">{result.constraint.slotsWithout}</span>{" "}
+              {result.constraint.slotsWithout === 1 ? "time" : "times"} in this range.
+            </p>
+          ) : (
+            <p className="text-muted-foreground">
+              No single person unlocks this — try a wider date range or different working hours.
+            </p>
+          )}
+        </div>
       ) : (
         <div className="mt-4">
           {/* The first person outside the team to open this grid read it
