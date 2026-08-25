@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import type { MemberSession, SessionAttendee } from "@/db/queries";
+import type { MemberSession } from "@/db/queries";
 
 /** Formats in the SESSION's timezone, not the viewer's. The event row carries
  * the zone it was booked in, and an advisor comparing this against the invite
@@ -28,28 +28,6 @@ function formatParts(session: MemberSession) {
   }).format(session.endsAt);
   const minutes = Math.round((session.endsAt.getTime() - session.startsAt.getTime()) / 60000);
   return { date, time: `${start} – ${end}`, minutes };
-}
-
-/** Deliberately shows no RSVP status. `event_attendees.response_status` is
- * written once at creation and never updated — nothing subscribes to the
- * provider's RSVP events — so every attendee read as "No reply yet" forever,
- * including ones who had accepted days ago. A field that is always wrong is
- * worse than no field: it told advisors nobody had responded.
- *
- * Whoever needs the real answer has it already — the provider shows each
- * attendee's response on the event itself, in the calendar both the organizer
- * and the attendees are already looking at. Restoring it here means a Nylas
- * webhook, which is a new public endpoint, not a display change. */
-function AttendeeRow({ attendee }: { attendee: SessionAttendee }) {
-  return (
-    <li className="py-2">
-      <span className="text-sm text-foreground">{attendee.fullName}</span>
-      {attendee.role === "advisor" && (
-        <span className="ml-2 text-xs text-muted-foreground">(advisor)</span>
-      )}
-      <p className="text-xs text-muted-foreground">{attendee.email}</p>
-    </li>
-  );
 }
 
 function SessionRow({ session }: { session: MemberSession }) {
@@ -131,16 +109,12 @@ function SessionRow({ session }: { session: MemberSession }) {
             </div>
           )}
 
-          <div>
-            <p className="text-xs text-muted-foreground">
-              Who&apos;s coming ({session.attendees.length})
-            </p>
-            <ul className="mt-1 divide-y divide-border">
-              {session.attendees.map((a) => (
-                <AttendeeRow key={a.memberId} attendee={a} />
-              ))}
-            </ul>
-          </div>
+          {/* No guest list. An advisor is told a session's shape — when, how
+              long, who is leading, how many people — and nothing about which
+              founders are in the room. That is the members' business, and it is
+              not an advisor's to browse from a dashboard.
+              The count stays: it exposes nobody and it is what an advisor needs
+              to prepare for two people versus twenty. */}
         </div>
       )}
     </li>
