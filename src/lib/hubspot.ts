@@ -103,13 +103,17 @@ export async function findContact(
 
 /** Writes a member's 1:1 state onto their contact. */
 export async function updateContact(contactId: string, fields: Partial<OneToOneFields>) {
+  // Empty string, not null. This is the whole reason a cancelled 1:1 kept its
+  // date: HubSpot ignores a JSON null on write, answers 200 as if it had done
+  // the work, and leaves the old value standing. An empty string is how the v3
+  // API clears a property. Nothing else about the request differs, which is why
+  // rescheduling always worked and only cancelling didn't.
+  const properties = Object.fromEntries(
+    Object.entries(fields).map(([name, value]) => [name, value ?? ""])
+  );
   await hubspotFetch(`/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, {
     method: "PATCH",
-    // Nulls are sent rather than dropped: clearing "next 1:1" when a session is
-    // cancelled is the entire point. Omitting it would leave a date standing
-    // for a meeting that no longer exists, which is the failure mode that made
-    // HubSpot's own field unusable for this.
-    body: JSON.stringify({ properties: fields }),
+    body: JSON.stringify({ properties }),
   });
 }
 
