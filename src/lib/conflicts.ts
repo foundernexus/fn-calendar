@@ -2,6 +2,7 @@ import { and, eq, gte, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { events, eventAttendees, sessionConflicts } from "@/db/schema";
 import { parseRecurrence, occurrencesBetween } from "@/lib/calendar/recurrence";
+import { getExceptions, applyExceptions } from "@/lib/occurrences";
 import { participantsOutsideStatedHours, slotStillFree } from "@/lib/calendar/booking-guards";
 
 /** How far ahead to look.
@@ -52,6 +53,11 @@ export async function detectSeriesConflicts(now = new Date()) {
     ]);
   }
 
+  // Dates somebody has already moved or dropped. Without these the check would
+  // ask about the empty slot a session used to sit in, and stay silent about
+  // the one it moved to.
+  const exceptionsByEvent = await getExceptions(repeating.map((e) => e.id));
+
   for (const event of repeating) {
     const recurrence = parseRecurrence(event.recurrenceRule);
     // A rule we did not write — someone rebuilt the series in Google — is not
@@ -66,14 +72,19 @@ export async function detectSeriesConflicts(now = new Date()) {
       (event.endsAt.getTime() - event.startsAt.getTime()) / 60_000
     );
 
-    const occurrences = occurrencesBetween({
-      seriesStartUnix: Math.floor(event.startsAt.getTime() / 1000),
-      durationMinutes,
-      recurrence,
-      timezone: event.timezone,
-      fromUnix,
-      toUnix,
-    });
+    const occurrences = applyExceptions(
+      occurrencesBetween({
+        seriesStartUnix: Math.floor(event.startsAt.getTime() / 1000),
+        durationMinutes,
+        recurrence,
+        timezone: event.timezone,
+        // Widened, then filtered below: a date moved INTO this window was
+        // generated outside it, and it is the one most worth checking.
+        fromUnix: fromUnix - 14 * 86_400,
+        toUnix: toUnix + 14 * 86_400,
+      }),
+      exceptionsByEvent.get(event.id)
+    ).filter((o) => o.startUnix >= fromUnix && o.startUnix <= toUnix);
     checked.series += 1;
     checked.occurrences += occurrences.length;
 
@@ -81,7 +92,7 @@ export async function detectSeriesConflicts(now = new Date()) {
       // The first date of a series is the one that was booked, and booking
       // already checked it. Re-reporting it would put a conflict on the row
       // that is working.
-      if (occurrence.startUnix === Math.floor(event.startsAt.getTime() / 1000)) continue;
+      if (occurrence.originalStartUnix === Math.floor(event.startsAt.getTime() / 1000)) continue;
 
       const [outsideHours, free] = await Promise.all([
         participantsOutsideStatedHours({
@@ -100,7 +111,10 @@ export async function detectSeriesConflicts(now = new Date()) {
       ]);
 
       const clear = outsideHours.length === 0 && free;
-      const occurrenceAt = new Date(occurrence.startUnix * 1000);
+      // Keyed by where the RULE puts the date, not where it currently sits.
+      // Moving a date must resolve the question already raised about it rather
+      // than leaving the old one open and asking a second one.
+      const occurrenceAt = new Date(occurrence.originalStartUnix * 1000);
 
       if (clear) {
         // Resolved rather than deleted, so tomorrow's list can say a clash

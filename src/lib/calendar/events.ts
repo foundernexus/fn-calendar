@@ -1,5 +1,11 @@
 import { getAccessToken } from "@/lib/calendar/tokens";
-import { createEvent, updateEvent, deleteEvent, asCalendarProvider } from "@/lib/calendar";
+import {
+  createEvent,
+  updateEvent,
+  deleteEvent,
+  findEventInstanceId,
+  asCalendarProvider,
+} from "@/lib/calendar";
 
 /** Booking, moving and cancelling a session on the organiser's calendar.
  *
@@ -80,10 +86,37 @@ export async function moveSessionEvent(params: {
   });
 }
 
+/** The provider's id for ONE date of a repeating session.
+ *
+ * Everything downstream then treats that id like any other event id: moving and
+ * cancelling a single date go through `moveSessionEvent` and
+ * `cancelSessionEvent` unchanged, which is why single-date handling adds no new
+ * write path to this module.
+ *
+ * Null means the provider no longer has that date — somebody deleted it in
+ * their own calendar, or the series was edited there. Callers must report that
+ * rather than falling back to the series id, which would move all of it. */
+export async function resolveOccurrenceEventId(params: {
+  connection: EventConnection;
+  seriesEventId: string;
+  originalStartUnix: number;
+}) {
+  const accessToken = await getAccessToken(params.connection);
+  return findEventInstanceId({
+    provider: asCalendarProvider(params.connection.provider),
+    accessToken,
+    seriesEventId: params.seriesEventId,
+    originalStartUnix: params.originalStartUnix,
+  });
+}
+
 /** Deletes the session from the organiser's calendar. Because every attendee
  * was invited as a participant, the provider withdraws it from their calendars
  * too and sends its own cancellation notice — there is no separate "notify"
- * step, and no way to cancel quietly. */
+ * step, and no way to cancel quietly.
+ *
+ * Given an occurrence id rather than a series id, this drops that one date and
+ * leaves the rest of the series alone. */
 export async function cancelSessionEvent(params: {
   connection: EventConnection;
   providerEventId: string;

@@ -204,21 +204,61 @@ export const sessionConflicts = pgTable(
   ]
 );
 
+/** One date of a repeating session that no longer follows the rule.
+ *
+ * A series is a single row in `events` plus a rule, which says every date is
+ * identical. Real rhythms aren't: one week somebody is travelling, so that
+ * Tuesday moves to the Thursday or doesn't happen, and the other eleven dates
+ * are untouched. Every calendar app models this the same way, because there is
+ * no other honest way to model it.
+ *
+ * The key is `originalStartsAt` — where the RULE says the date falls, not where
+ * it ended up. That is the only value that stays stable when the occurrence is
+ * moved twice, and it is also what the providers key their own exceptions on. */
+export const eventOccurrences = pgTable(
+  "event_occurrences",
+  {
+    id: serial("id").primaryKey(),
+    eventId: integer("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    /** Where the recurrence rule puts this date, always — never the new time. */
+    originalStartsAt: timestamp("original_starts_at", { withTimezone: true }).notNull(),
+    /** `moved` or `cancelled`. A cancelled occurrence keeps its row rather than
+     * being deleted: the rule still generates that date, so without the row it
+     * would reappear on the grid the moment anyone looked. */
+    status: text("status").notNull(),
+    /** Where it actually is now. Null when the occurrence was cancelled. */
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    /** The provider's own id for this one instance, which is NOT the series id.
+     * Held so a second move edits the same exception instead of creating
+     * another one beside it. */
+    providerInstanceId: text("provider_instance_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // One exception per date. Moving the same occurrence twice has to overwrite
+    // the first move, not stack a second row that readers would have to break
+    // a tie between.
+    uniqueIndex("event_occurrences_event_original").on(t.eventId, t.originalStartsAt),
+  ]
+);
+
 export const events = pgTable("events", {
   id: serial("id").primaryKey(),
   /** How often this session repeats, as an RFC 5545 rule — the string we hand
    * the provider, e.g. `RRULE:FREQ=WEEKLY;INTERVAL=4;COUNT=6`. Null for the
    * ordinary one-off, which is nearly all of them.
    *
-   * Stored so the app can say "this cancels all six" before someone cancels all
-   * six. Nothing else reads it: the later occurrences are real events in real
-   * calendars, so free/busy reports them and the grid greys them out without
-   * anyone here expanding a series.
+   * Expanded rather than merely displayed: the grid, the conflict check and the
+   * 1:1 dates all walk this rule forward, because the later dates of a series
+   * exist nowhere else.
    *
-   * Deliberately no per-occurrence rows. Moving one instance of a series is
-   * something Google already does well, in the calendar everyone involved
-   * already has open; matching it here would mean tracking exceptions and
-   * giving up this table as the answer to "when is this session". */
+   * This row is no longer the whole answer to "when is this session". A single
+   * date can be moved or dropped without disturbing the rest, and those live in
+   * `eventOccurrences` — anything reading dates off this rule has to subtract
+   * them or it will report a meeting at a time nobody will be at. */
   recurrenceRule: text("recurrence_rule"),
   title: text("title").notNull(),
   description: text("description"),

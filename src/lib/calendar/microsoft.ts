@@ -343,6 +343,49 @@ export async function updateMicrosoftEvent(params: {
   );
 }
 
+/** Graph's own id for ONE date of a repeating event — see the Google module for
+ * why this lookup is all a single-date move needs.
+ *
+ * Graph reports `originalStart` on every occurrence, including ones already
+ * moved, which is what makes matching on it safe. It also insists on a bounded
+ * window, hence the same generous fortnight either side. */
+export async function findMicrosoftInstanceId(params: {
+  accessToken: string;
+  seriesEventId: string;
+  originalStartUnix: number;
+}): Promise<string | null> {
+  const window = 7 * 86_400;
+  const url = new URL(`${GRAPH}/me/events/${encodeURIComponent(params.seriesEventId)}/instances`);
+  url.searchParams.set(
+    "startDateTime",
+    new Date((params.originalStartUnix - window) * 1000).toISOString()
+  );
+  url.searchParams.set(
+    "endDateTime",
+    new Date((params.originalStartUnix + window) * 1000).toISOString()
+  );
+  url.searchParams.set("$top", "50");
+
+  const res = await graphFetch(
+    url.toString(),
+    { headers: { Authorization: `Bearer ${params.accessToken}` } },
+    "event instances"
+  );
+  const data = (await res.json()) as {
+    value?: { id: string; originalStart?: string; start?: { dateTime?: string } }[];
+  };
+
+  for (const item of data.value ?? []) {
+    // Graph hands back naive datetimes for occurrences; they are UTC, and
+    // Date.parse needs telling so, or every comparison here lands hours out.
+    const raw = item.originalStart ?? item.start?.dateTime;
+    if (!raw) continue;
+    const iso = /(Z|[+-]\d{2}:\d{2})$/.test(raw) ? raw : `${raw}Z`;
+    if (Math.floor(Date.parse(iso) / 1000) === params.originalStartUnix) return item.id;
+  }
+  return null;
+}
+
 export async function deleteMicrosoftEvent(params: { accessToken: string; eventId: string }) {
   const res = await fetch(`${GRAPH}/me/events/${encodeURIComponent(params.eventId)}`, {
     method: "DELETE",

@@ -377,6 +377,54 @@ export async function updateGoogleEvent(params: {
   );
 }
 
+/** Google's own id for ONE date of a repeating event.
+ *
+ * A series is a single event to us and to Google, but each of its dates has its
+ * own id the moment you ask for it — and that id is what both the update and
+ * the delete endpoints accept in place of the series id. So moving one date
+ * needs no new write path, only this lookup.
+ *
+ * Matched on `originalStartTime`, never on the instance's current start: an
+ * occurrence that has already been moved sits somewhere else entirely, and the
+ * original start is the only value that stays put. The window is generous for
+ * the same reason.
+ *
+ * Returns null when the date isn't in the series — a rule that changed under
+ * us, or a date already deleted in Google. The caller has to treat that as
+ * "nothing to move" rather than retrying. */
+export async function findGoogleInstanceId(params: {
+  accessToken: string;
+  seriesEventId: string;
+  originalStartUnix: number;
+}): Promise<string | null> {
+  const window = 7 * 86_400;
+  const url = new URL(
+    `${CALENDAR_API}/calendars/primary/events/${encodeURIComponent(params.seriesEventId)}/instances`
+  );
+  url.searchParams.set("timeMin", new Date((params.originalStartUnix - window) * 1000).toISOString());
+  url.searchParams.set("timeMax", new Date((params.originalStartUnix + window) * 1000).toISOString());
+  url.searchParams.set("maxResults", "50");
+
+  const res = await googleFetch(
+    url.toString(),
+    { headers: { Authorization: `Bearer ${params.accessToken}` } },
+    "event instances"
+  );
+  const data = (await res.json()) as {
+    items?: {
+      id: string;
+      originalStartTime?: { dateTime?: string; date?: string };
+    }[];
+  };
+
+  for (const item of data.items ?? []) {
+    const original = item.originalStartTime?.dateTime ?? item.originalStartTime?.date;
+    if (!original) continue;
+    if (Math.floor(Date.parse(original) / 1000) === params.originalStartUnix) return item.id;
+  }
+  return null;
+}
+
 export async function deleteGoogleEvent(params: { accessToken: string; eventId: string }) {
   const res = await fetch(
     `${CALENDAR_API}/calendars/primary/events/${encodeURIComponent(params.eventId)}?sendUpdates=all`,

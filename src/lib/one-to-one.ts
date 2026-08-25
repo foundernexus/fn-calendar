@@ -2,6 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { events, eventAttendees, members } from "@/db/schema";
 import { parseRecurrence, occurrencesBetween } from "@/lib/calendar/recurrence";
+import { getExceptions, applyExceptions } from "@/lib/occurrences";
 import { isConnectionUsable, getLatestConnections, pickInviteConnection } from "@/db/queries";
 
 /** A member's standing 1:1 rhythm, as this tool knows it.
@@ -83,6 +84,11 @@ export async function oneToOneStates(now = new Date()): Promise<OneToOneState[]>
     byEvent.set(a.eventId, [...(byEvent.get(a.eventId) ?? []), a]);
   }
 
+  // A date moved or dropped on its own. Karin's list is the thing this feeds,
+  // and a next-1:1 date that somebody already moved is worse than no date at
+  // all — she would turn up to it.
+  const exceptionsByEvent = await getExceptions(rows.filter((r) => r.recurrenceRule).map((r) => r.id));
+
   const facilitatorIds = new Set(
     (await db.select({ id: members.id }).from(members).where(eq(members.isFacilitator, true))).map(
       (m) => m.id
@@ -115,21 +121,29 @@ export async function oneToOneStates(now = new Date()): Promise<OneToOneState[]>
 
     let occurrences: number[];
     if (recurrence) {
-      occurrences = occurrencesBetween({
-        seriesStartUnix: startUnix,
-        durationMinutes,
-        recurrence,
-        timezone: event.timezone,
-        fromUnix: startUnix,
-        toUnix: nowUnix + HORIZON_DAYS * 86_400,
-      }).map((o) => o.startUnix);
+      const dates = applyExceptions(
+        occurrencesBetween({
+          seriesStartUnix: startUnix,
+          durationMinutes,
+          recurrence,
+          timezone: event.timezone,
+          fromUnix: startUnix,
+          toUnix: nowUnix + HORIZON_DAYS * 86_400,
+        }),
+        exceptionsByEvent.get(event.id)
+      );
+      occurrences = dates.map((o) => o.startUnix);
       // Only a series that actually ends has a "booked through" date. An
       // endless one is not booked through anything, and inventing the horizon
       // as an answer would be a number nobody chose.
       if (recurrence.count !== null && occurrences.length > 0) {
+        // Sorted first: a date moved later than the series' own last one is now
+        // the date it runs through, and reading the array in rule order would
+        // report the wrong end.
+        const sorted = [...occurrences].sort((a, b) => a - b);
         seriesEndByMember.set(memberId, [
           ...(seriesEndByMember.get(memberId) ?? []),
-          occurrences[occurrences.length - 1],
+          sorted[sorted.length - 1],
         ]);
       }
     } else {

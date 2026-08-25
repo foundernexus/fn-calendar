@@ -1,4 +1,4 @@
-import { eq, inArray, and, or, gte, lte, lt, gt, sql, desc, isNull } from "drizzle-orm";
+import { eq, inArray, and, or, gte, lte, lt, gt, sql, desc, isNull, isNotNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "./index";
 import {
@@ -10,6 +10,8 @@ import {
   sessionConflicts,
 } from "./schema";
 import { normalizeEmail } from "@/lib/email";
+import { parseRecurrence, occurrencesBetween } from "@/lib/calendar/recurrence";
+import { getExceptions, applyExceptions } from "@/lib/occurrences";
 import { env } from "@/lib/env";
 
 /** Case-insensitive member lookup — always goes through normalizeEmail so a
@@ -77,6 +79,9 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
       // Needed to warn before cancelling: cancelling acts on the whole series,
       // and a booked cell gives no hint that the date behind it is one of six.
       recurrenceRule: events.recurrenceRule,
+      // Needed to expand the series: its later dates are wall-clock times in
+      // this zone, and adding seconds instead would drift across a DST change.
+      timezone: events.timezone,
     })
     .from(events)
     .leftJoin(eventAttendees, eq(eventAttendees.eventId, events.id))
@@ -85,7 +90,11 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
         eq(events.status, "confirmed"),
         or(inArray(events.organizerMemberId, memberIds), inArray(eventAttendees.memberId, memberIds)),
         lt(events.startsAt, to),
-        gt(events.endsAt, from)
+        // A one-off has to overlap the window to matter. A series only has to
+        // have STARTED before it: the row holds the first date, so a monthly
+        // 1:1 booked in March is the reason a cell in September is taken, and
+        // filtering on the stored end date would hide every date but the first.
+        or(gt(events.endsAt, from), isNotNull(events.recurrenceRule))
       )
     );
 
@@ -129,7 +138,50 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
     attendeesByEvent.set(a.eventId, list);
   }
 
-  return found.map((e) => ({ ...e, attendees: attendeesByEvent.get(e.id) ?? [] }));
+  // A series is one row and many dates. The grid needs each date it can show as
+  // its own entry, or the fourth session of a 1:1 is a cell nobody can click —
+  // which is what "move just this one" needs to be possible at all.
+  const exceptionsByEvent = await getExceptions(
+    found.filter((e) => e.recurrenceRule).map((e) => e.id)
+  );
+  const fromUnix = Math.floor(from.getTime() / 1000);
+  const toUnix = Math.floor(to.getTime() / 1000);
+
+  return found.flatMap((e) => {
+    const attendees = attendeesByEvent.get(e.id) ?? [];
+    const startUnix = Math.floor(e.startsAt.getTime() / 1000);
+    const endUnix = Math.floor(e.endsAt.getTime() / 1000);
+    const recurrence = parseRecurrence(e.recurrenceRule);
+
+    if (!recurrence) {
+      return [{ ...e, attendees, occurrenceStartUnix: startUnix, isSeries: false }];
+    }
+
+    const ruleDates = occurrencesBetween({
+      seriesStartUnix: startUnix,
+      durationMinutes: Math.round((endUnix - startUnix) / 60),
+      recurrence,
+      timezone: e.timezone,
+      // Widened either side of the visible window: a date MOVED into this week
+      // was generated in another one, and asking only for this week's rule
+      // dates would leave it off the grid entirely.
+      fromUnix: fromUnix - 14 * 86_400,
+      toUnix: toUnix + 14 * 86_400,
+    });
+
+    return applyExceptions(ruleDates, exceptionsByEvent.get(e.id))
+      .filter((o) => o.startUnix < toUnix && o.endUnix > fromUnix)
+      .map((o) => ({
+        ...e,
+        attendees,
+        startsAt: new Date(o.startUnix * 1000),
+        endsAt: new Date(o.endUnix * 1000),
+        // What has to be sent back to move or drop THIS date. Not the same as
+        // the date shown once somebody has already moved it.
+        occurrenceStartUnix: o.originalStartUnix,
+        isSeries: true,
+      }));
+  });
 }
 
 /** No responseStatus: the column exists but nothing ever updates it (see

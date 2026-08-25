@@ -50,10 +50,21 @@ export function CancelSessionDialog({
     timeZoneName: "short",
   }).format(new Date(booked.startUnix * 1000));
 
+  // Defaults to this date alone. Wiping a year of somebody's 1:1s is the
+  // costlier mistake of the two, and it is the one that can't be undone — so
+  // the wider action is the one you have to choose deliberately.
+  const isSeries = Boolean(booked.recurrenceRule);
+  const [scope, setScope] = useState<"occurrence" | "series">("occurrence");
+  const wholeSeries = !isSeries || scope === "series";
+
   async function handleCancel() {
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/admin/events/${booked.id}`, { method: "DELETE" });
+      const url =
+        wholeSeries || booked.occurrenceStartUnix === undefined
+          ? `/api/admin/events/${booked.id}`
+          : `/api/admin/events/${booked.id}?occurrenceStartUnix=${booked.occurrenceStartUnix}`;
+      const res = await fetch(url, { method: "DELETE" });
       const data = await res.json();
       if (handleExpiredSession(res)) return;
       if (!res.ok) {
@@ -68,7 +79,9 @@ export function CancelSessionDialog({
             // once, but going free again depends on the calendar provider
             // catching up, which takes a moment. Without this the cell looks
             // stuck and the obvious guess is that cancelling half-failed.
-            "Session cancelled. The slot can take a minute to show as free again."
+            wholeSeries
+            ? "Session cancelled. The slot can take a minute to show as free again."
+            : "That date is off. The rest of the series is unchanged."
       );
       onCancelled();
     } catch {
@@ -77,10 +90,8 @@ export function CancelSessionDialog({
     }
   }
 
-  // How many sessions this actually is. Cancelling here acts on the whole
-  // series, not on the date that was clicked — the thing somebody would
-  // otherwise discover by wiping a year of a member's 1:1s while meaning to
-  // clear one afternoon.
+  // How many sessions the wider option actually takes with it. Said before it
+  // happens rather than discovered afterwards.
   const seriesCount = booked.recurrenceRule
     ? Number(/COUNT=(\d+)/.exec(booked.recurrenceRule)?.[1] ?? 0)
     : 0;
@@ -93,15 +104,42 @@ export function CancelSessionDialog({
           <DialogDescription>{when}</DialogDescription>
         </DialogHeader>
 
-        {booked.recurrenceRule && (
-          <p className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            This session repeats. Cancelling removes{" "}
-            <span className="font-medium">
-              {seriesCount > 0 ? `all ${seriesCount} of them` : "every date in the series"}
-            </span>
-            , not just this one. To drop a single date, decline or delete it in the calendar
-            instead.
-          </p>
+        {isSeries && (
+          <div className="space-y-2 rounded-md border border-border p-3 text-sm">
+            <p className="text-muted-foreground">This session repeats. Cancel:</p>
+            <label className="flex items-start gap-2 text-foreground">
+              <input
+                type="radio"
+                name="cancel-scope"
+                className="mt-1"
+                checked={scope === "occurrence"}
+                onChange={() => setScope("occurrence")}
+              />
+              <span>
+                <span className="font-medium">This date only</span>
+                <span className="block text-xs text-muted-foreground">
+                  {when} comes off everyone&apos;s calendar. The rest of the series carries on.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-foreground">
+              <input
+                type="radio"
+                name="cancel-scope"
+                className="mt-1"
+                checked={scope === "series"}
+                onChange={() => setScope("series")}
+              />
+              <span>
+                <span className="font-medium">
+                  {seriesCount > 0 ? `All ${seriesCount} dates` : "Every date in the series"}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  The whole rhythm ends. This can&apos;t be undone.
+                </span>
+              </span>
+            </label>
+          </div>
         )}
 
         {/* Who this actually hits. Cancelling used to name only the session,
@@ -127,9 +165,9 @@ export function CancelSessionDialog({
         )}
 
         <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
-          This removes the session from everyone&apos;s calendar and sends them a cancellation
-          email straight away. It can&apos;t be undone — rebooking would create a new session and
-          new invites.
+          {wholeSeries
+            ? "This removes the session from everyone's calendar and sends them a cancellation email straight away. It can't be undone — rebooking would create a new session and new invites."
+            : "This removes that one date from everyone's calendar and sends them a cancellation email straight away. The rest of the series stays exactly as it is."}
         </div>
 
         {/* Three choices in one row, ordered by how much they cost you: do
@@ -152,7 +190,7 @@ export function CancelSessionDialog({
             onClick={handleCancel}
             disabled={submitting}
           >
-            {submitting ? "Cancelling…" : "Cancel session"}
+            {submitting ? "Cancelling…" : wholeSeries ? "Cancel session" : "Cancel this date"}
           </Button>
         </DialogFooter>
       </DialogContent>

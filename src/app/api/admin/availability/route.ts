@@ -430,9 +430,13 @@ export async function POST(request: Request) {
       startUnix: Math.floor(e.startsAt.getTime() / 1000),
       endUnix: Math.floor(e.endsAt.getTime() / 1000),
       title: e.title,
-      // Carried so the cancel dialog can say how many sessions it is about to
-      // take with it. Cancelling here acts on the whole series.
+      // Carried so the dialogs can offer the choice between this date and the
+      // whole series, and say what each one means.
       recurrenceRule: e.recurrenceRule,
+      // Which date of the series this cell is, as the RULE puts it — the handle
+      // for moving or dropping just this one. Equal to startUnix until somebody
+      // moves it, and different afterwards, which is the whole point.
+      occurrenceStartUnix: e.occurrenceStartUnix,
       organizerMemberId: e.organizerMemberId,
       // Sent with the slot rather than fetched when the dialog opens: there
       // are only ever a handful of booked sessions overlapping one search, and

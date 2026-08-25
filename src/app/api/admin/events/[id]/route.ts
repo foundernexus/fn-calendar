@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { events, eventAttendees, calendarConnections } from "@/db/schema";
+import {
+  events,
+  eventAttendees,
+  calendarConnections,
+  eventOccurrences,
+  sessionConflicts,
+} from "@/db/schema";
 import { getActiveConnections, groupConnectionsByMember, pickInviteConnection } from "@/db/queries";
 import { requireAdminSession } from "@/lib/auth/admin";
 import { participantsOutsideStatedHours, slotStillFree } from "@/lib/calendar/booking-guards";
@@ -12,6 +18,7 @@ import { cancelNylasEvent, rescheduleNylasEvent } from "@/lib/nylas";
 import {
   moveSessionEvent,
   cancelSessionEvent,
+  resolveOccurrenceEventId,
   type EventConnection,
 } from "@/lib/calendar/events";
 import { computeIdempotencyKey } from "@/lib/idempotency";
@@ -26,6 +33,14 @@ const rescheduleSchema = z.object({
     error: "Duration must be 15, 30, 45, or 60 minutes.",
   }),
   timezone: z.enum(TIMEZONE_VALUES, { error: "Unsupported timezone." }),
+  /** Move ONE date of a repeating session, identified by where the rule puts
+   * it. Absent means the whole series moves, which is what every caller did
+   * before this existed and is still the default.
+   *
+   * The original start, never the current one: an occurrence that has already
+   * been moved is keyed by where it started life, both here and at the
+   * provider. */
+  occurrenceStartUnix: z.number().int().positive().optional(),
 });
 
 /** drizzle-orm wraps driver errors in `DrizzleQueryError`, which has no `code`
@@ -102,6 +117,289 @@ async function resolveEventTarget(event: {
   return null;
 }
 
+/** Moves ONE date of a repeating session, leaving the rest of the series alone.
+ *
+ * The series row is never touched. What changes is a single exception row, and
+ * the provider's own exception for that instance — which is exactly how Google
+ * and Outlook model this, so the result is what everyone involved would see if
+ * they had dragged the date in their own calendar.
+ *
+ * Provider first, database second, for the same reason as every other write
+ * here: if the provider fails, nothing has moved anywhere and the failure is
+ * honest. The other order would show a new time in this app while everyone's
+ * calendar still held the old one. */
+async function moveSingleOccurrence(params: {
+  eventId: number;
+  event: { organizerMemberId: number };
+  connection: EventConnection;
+  seriesEventId: string;
+  originalStartUnix: number;
+  startsAtUnix: number;
+  endsAtUnix: number;
+  timezone: string;
+  attendees: { memberId: number; role: string }[];
+}) {
+  const originalStartsAt = new Date(params.originalStartUnix * 1000);
+
+  // A date moved once already has its provider id recorded. Reusing it matters:
+  // looking the instance up again would search around the ORIGINAL time, where
+  // the provider no longer has anything, and a second move would fail.
+  const [existing] = await db
+    .select()
+    .from(eventOccurrences)
+    .where(
+      and(
+        eq(eventOccurrences.eventId, params.eventId),
+        eq(eventOccurrences.originalStartsAt, originalStartsAt)
+      )
+    )
+    .limit(1);
+
+  let instanceId = existing?.providerInstanceId ?? null;
+  if (!instanceId) {
+    try {
+      instanceId = await resolveOccurrenceEventId({
+        connection: params.connection,
+        seriesEventId: params.seriesEventId,
+        originalStartUnix: params.originalStartUnix,
+      });
+    } catch (err) {
+      console.error("[admin/events/:id] Couldn't read the series' dates", {
+        eventId: params.eventId,
+        originalStartUnix: params.originalStartUnix,
+        err,
+      });
+      return NextResponse.json(
+        { error: "Couldn't reach the calendar to find that date. Please try again." },
+        { status: 502 }
+      );
+    }
+  }
+
+  if (!instanceId) {
+    // Never fall back to the series id here. That would move every date while
+    // the admin believed they had moved one.
+    return NextResponse.json(
+      {
+        error:
+          "That date isn't in the series any more — it may have been changed in the calendar directly. Search again to see what's there.",
+      },
+      { status: 409 }
+    );
+  }
+
+  try {
+    await moveSessionEvent({
+      connection: params.connection,
+      providerEventId: instanceId,
+      startTime: params.startsAtUnix,
+      endTime: params.endsAtUnix,
+      timezone: params.timezone,
+    });
+  } catch (err) {
+    console.error("[admin/events/:id] Occurrence move failed", {
+      eventId: params.eventId,
+      instanceId,
+      err,
+    });
+    return NextResponse.json(
+      { error: "Couldn't move that date with the calendar provider. Please try again." },
+      { status: 502 }
+    );
+  }
+
+  // Past this line the calendars already show the new time.
+  try {
+    await db
+      .insert(eventOccurrences)
+      .values({
+        eventId: params.eventId,
+        originalStartsAt,
+        status: "moved",
+        startsAt: new Date(params.startsAtUnix * 1000),
+        endsAt: new Date(params.endsAtUnix * 1000),
+        providerInstanceId: instanceId,
+      })
+      // Moving the same date twice overwrites the first move rather than
+      // stacking a second row that readers would have to break a tie between.
+      .onConflictDoUpdate({
+        target: [eventOccurrences.eventId, eventOccurrences.originalStartsAt],
+        set: {
+          status: "moved",
+          startsAt: new Date(params.startsAtUnix * 1000),
+          endsAt: new Date(params.endsAtUnix * 1000),
+          providerInstanceId: instanceId,
+        },
+      });
+
+    // A clash raised against this date is answered by moving it. Left open, the
+    // list would still be asking about a date that no longer exists.
+    await db
+      .update(sessionConflicts)
+      .set({ resolvedAt: new Date() })
+      .where(
+        and(
+          eq(sessionConflicts.eventId, params.eventId),
+          eq(sessionConflicts.occurrenceStartsAt, originalStartsAt),
+          isNull(sessionConflicts.resolvedAt)
+        )
+      );
+  } catch (err) {
+    // The calendars are already right; only our record of it is behind. Saying
+    // "failed" would invite a retry that moves the date a second time.
+    console.error("[admin/events/:id] Occurrence moved at the provider but not recorded", {
+      eventId: params.eventId,
+      err,
+    });
+    return NextResponse.json(
+      {
+        error:
+          "The date moved in everyone's calendar, but we couldn't record it here. Don't move it again — tell an admin.",
+      },
+      { status: 500 }
+    );
+  }
+
+  const partnerId = oneToOnePartner({
+    organizerMemberId: params.event.organizerMemberId,
+    attendees: params.attendees,
+  });
+  if (partnerId !== null) await syncMemberToHubspot(partnerId);
+
+  return NextResponse.json({ movedOccurrence: true });
+}
+
+/** Drops ONE date of a repeating session. The series keeps running.
+ *
+ * Same shape as moving a single date: the provider is told first, and the
+ * exception row records it. The row is what stops the date coming back — the
+ * rule still generates it, so without the row it would reappear on the grid the
+ * moment anyone looked. */
+async function cancelSingleOccurrence(params: {
+  eventId: number;
+  event: { organizerMemberId: number };
+  connection: EventConnection;
+  seriesEventId: string;
+  originalStartUnix: number;
+}) {
+  const originalStartsAt = new Date(params.originalStartUnix * 1000);
+
+  const [existing] = await db
+    .select()
+    .from(eventOccurrences)
+    .where(
+      and(
+        eq(eventOccurrences.eventId, params.eventId),
+        eq(eventOccurrences.originalStartsAt, originalStartsAt)
+      )
+    )
+    .limit(1);
+
+  if (existing?.status === "cancelled") {
+    // Already in the state that was asked for — same reasoning as cancelling a
+    // session twice. A retry after a flaky response shouldn't read as an error.
+    return NextResponse.json({ cancelledOccurrence: true, alreadyCancelled: true });
+  }
+
+  let instanceId = existing?.providerInstanceId ?? null;
+  if (!instanceId) {
+    try {
+      instanceId = await resolveOccurrenceEventId({
+        connection: params.connection,
+        seriesEventId: params.seriesEventId,
+        originalStartUnix: params.originalStartUnix,
+      });
+    } catch (err) {
+      console.error("[admin/events/:id] Couldn't read the series' dates", {
+        eventId: params.eventId,
+        originalStartUnix: params.originalStartUnix,
+        err,
+      });
+      return NextResponse.json(
+        { error: "Couldn't reach the calendar to find that date. Please try again." },
+        { status: 502 }
+      );
+    }
+  }
+
+  // Nothing at the provider means the date is already gone from the calendars.
+  // The exception row is still written: our own rule would otherwise keep
+  // generating it. Deliberately NOT falling back to the series id, which would
+  // cancel every date.
+  if (instanceId) {
+    try {
+      await cancelSessionEvent({
+        connection: params.connection,
+        providerEventId: instanceId,
+      });
+    } catch (err) {
+      console.error("[admin/events/:id] Occurrence cancellation failed", {
+        eventId: params.eventId,
+        instanceId,
+        err,
+      });
+      return NextResponse.json(
+        { error: "Couldn't drop that date with the calendar provider. Please try again." },
+        { status: 502 }
+      );
+    }
+  }
+
+  try {
+    await db
+      .insert(eventOccurrences)
+      .values({
+        eventId: params.eventId,
+        originalStartsAt,
+        status: "cancelled",
+        startsAt: null,
+        endsAt: null,
+        providerInstanceId: instanceId,
+      })
+      .onConflictDoUpdate({
+        target: [eventOccurrences.eventId, eventOccurrences.originalStartsAt],
+        // A date that was moved and is now dropped loses its new time: it isn't
+        // happening anywhere.
+        set: { status: "cancelled", startsAt: null, endsAt: null },
+      });
+
+    await db
+      .update(sessionConflicts)
+      .set({ resolvedAt: new Date() })
+      .where(
+        and(
+          eq(sessionConflicts.eventId, params.eventId),
+          eq(sessionConflicts.occurrenceStartsAt, originalStartsAt),
+          isNull(sessionConflicts.resolvedAt)
+        )
+      );
+  } catch (err) {
+    console.error("[admin/events/:id] Occurrence dropped at the provider but not recorded", {
+      eventId: params.eventId,
+      err,
+    });
+    return NextResponse.json(
+      {
+        error:
+          "The date was removed from everyone's calendar, but we couldn't record it here. Tell an admin — it may reappear in the grid.",
+      },
+      { status: 500 }
+    );
+  }
+
+  const attendeeRows = await db
+    .select({ memberId: eventAttendees.memberId, role: eventAttendees.role })
+    .from(eventAttendees)
+    .where(eq(eventAttendees.eventId, params.eventId));
+  const partnerId = oneToOnePartner({
+    organizerMemberId: params.event.organizerMemberId,
+    attendees: attendeeRows,
+  });
+  if (partnerId !== null) await syncMemberToHubspot(partnerId);
+
+  return NextResponse.json({ cancelledOccurrence: true });
+}
+
 /** Moves a booked session to a new time, keeping the same event and the same
  * people.
  *
@@ -174,6 +472,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     );
   }
 
+  // Moving one date of a series leaves the series itself where it is, so the
+  // series' own key still describes it correctly. Rewriting it would claim the
+  // whole rhythm had moved to a time only one of its dates now occupies.
+  const movingOneDate = body.occurrenceStartUnix !== undefined;
+  if (movingOneDate && !event.recurrenceRule) {
+    return NextResponse.json(
+      { error: "That session doesn't repeat, so there's no single date to move." },
+      { status: 400 }
+    );
+  }
+
   // The key encodes the people AND the time, so moving the session changes it.
   // Leaving the old one in place would let the very same session be booked
   // again at its new time without tripping the duplicate check.
@@ -181,12 +490,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const guestMemberIds = attendees
     .filter((a) => a.role === "guest" && a.memberId !== event.organizerMemberId)
     .map((a) => a.memberId);
-  const newKey = await computeIdempotencyKey({
-    guestMemberIds,
-    advisorMemberId,
-    startsAtUnix: body.startsAtUnix,
-    durationMinutes: body.durationMinutes,
-  });
+  const newKey = movingOneDate
+    ? event.idempotencyKey
+    : await computeIdempotencyKey({
+        guestMemberIds,
+        advisorMemberId,
+        startsAtUnix: body.startsAtUnix,
+        durationMinutes: body.durationMinutes,
+      });
 
   if (newKey !== event.idempotencyKey) {
     const [clash] = await db
@@ -257,6 +568,35 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       },
       { status: 409 }
     );
+  }
+
+  // One date of a series. Everything above — the stated hours, the calendars,
+  // the clash check — has already run against the new time, because a single
+  // date deserves the same guards as any other booking.
+  if (movingOneDate) {
+    if (target.kind !== "direct") {
+      // Sessions booked before the provider switch are reachable only through
+      // Nylas, which has no per-occurrence handle. Saying so beats moving the
+      // entire series while the admin believes they moved one afternoon.
+      return NextResponse.json(
+        {
+          error:
+            "This session was booked with the old calendar connection, so single dates can't be moved. Move it in the calendar directly, or move the whole series.",
+        },
+        { status: 409 }
+      );
+    }
+    return moveSingleOccurrence({
+      eventId,
+      event,
+      connection: target.connection,
+      seriesEventId: target.eventId,
+      originalStartUnix: body.occurrenceStartUnix!,
+      startsAtUnix: body.startsAtUnix,
+      endsAtUnix,
+      timezone: body.timezone,
+      attendees,
+    });
   }
 
   try {
@@ -346,7 +686,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
  * if Nylas fails, nothing has changed anywhere and it's safe to report a clean
  * failure. The other order would let the grid show "cancelled" while the event
  * still sat in everyone's calendar — and people would show up to it. */
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireAdminSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -389,6 +729,39 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       },
       { status: 409 }
     );
+  }
+
+  // Dropping ONE date of a series. A query parameter rather than a body: a
+  // DELETE with a payload is handled inconsistently by enough intermediaries
+  // that it isn't worth the ambiguity.
+  const occurrenceParam = new URL(request.url).searchParams.get("occurrenceStartUnix");
+  if (occurrenceParam !== null) {
+    const originalStartUnix = Number(occurrenceParam);
+    if (!Number.isInteger(originalStartUnix) || originalStartUnix <= 0) {
+      return NextResponse.json({ error: "Invalid date." }, { status: 400 });
+    }
+    if (!event.recurrenceRule) {
+      return NextResponse.json(
+        { error: "That session doesn't repeat, so there's no single date to drop." },
+        { status: 400 }
+      );
+    }
+    if (target.kind !== "direct") {
+      return NextResponse.json(
+        {
+          error:
+            "This session was booked with the old calendar connection, so single dates can't be dropped. Delete it in the calendar directly, or cancel the whole series.",
+        },
+        { status: 409 }
+      );
+    }
+    return cancelSingleOccurrence({
+      eventId,
+      event,
+      connection: target.connection,
+      seriesEventId: target.eventId,
+      originalStartUnix,
+    });
   }
 
   try {

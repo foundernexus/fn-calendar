@@ -13,9 +13,13 @@ export type BookedSlot = {
   endUnix: number;
   title: string;
   /** The repeat rule, when this session is one of a series. Null for the
-   * ordinary one-off. Cancelling or moving acts on the WHOLE series, so the
-   * dialogs have to say so before anyone finds out. */
+   * ordinary one-off. Its presence is what makes the dialogs offer a choice
+   * between this date and the whole series. */
   recurrenceRule?: string | null;
+  /** Which date of the series this is, as the rule puts it. Sent back to move
+   * or drop this one date. Differs from `startUnix` once it has been moved —
+   * the original start is the stable handle, here and at the provider. */
+  occurrenceStartUnix?: number;
   /** Carried so rescheduling can repopulate the search with this session's own
    * people rather than whatever happens to be selected in the form. */
   organizerMemberId: number;

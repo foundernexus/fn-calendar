@@ -45,12 +45,17 @@ const cal = {
   })),
   /** Dates the availability mock should report as taken. */
   busyDates: new Set<number>(),
+  /** The provider's id for one date of a series. Null stands for "the provider
+   * no longer has that date", which the routes have to refuse rather than
+   * falling back to the series id. */
+  instanceId: vi.fn(async (_a: unknown) => "provider-instance-1" as string | null),
 };
 
 vi.mock("@/lib/calendar/events", () => ({
   createSessionEvent: (a: CreateArgs) => cal.create(a),
   cancelSessionEvent: (a: unknown) => cal.cancel(a),
   moveSessionEvent: (a: unknown) => cal.move(a),
+  resolveOccurrenceEventId: (a: unknown) => cal.instanceId(a),
 }));
 vi.mock("@/lib/calendar/availability", () => ({
   getCollectiveAvailability: (args: { startTime: number; endTime: number }) =>
@@ -74,6 +79,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   cal.busyDates.clear();
   cal.create.mockResolvedValue({ eventId: "provider-event-1" });
+  cal.instanceId.mockResolvedValue("provider-instance-1");
   vi.resetModules();
   mockCookies(await adminCookie());
   await reinstallTestDb();
@@ -525,6 +531,131 @@ describe("a repeating session", () => {
     expect(res.status).toBe(409);
     expect(cal.create).not.toHaveBeenCalled();
     expect(await harness.db.select().from(events)).toHaveLength(0);
+  });
+
+  it("puts the series' later dates on the grid, and takes a dropped one off", async () => {
+    // Without this the fourth date of a 1:1 is a cell nobody can click, and
+    // "move just this one" has nothing to start from. The grid used to show a
+    // series only in the week it began.
+    const c = await cast();
+    await book(c, { repeatEveryWeeks: 4, repeatCount: 6 });
+    const { getBookedEventsOverlapping } = await import("@/db/queries");
+    const laterWeek = () =>
+      getBookedEventsOverlapping(
+        [c.lead.id, c.founder.id],
+        new Date((FOUR_WEEKS - 86_400) * 1000),
+        new Date((FOUR_WEEKS + 86_400) * 1000)
+      );
+
+    const before = await laterWeek();
+    expect(before).toHaveLength(1);
+    // Keyed by where the rule puts it, which is the handle the dialogs send back.
+    expect(before[0].occurrenceStartUnix).toBe(FOUR_WEEKS);
+
+    const [series] = await harness.db.select().from(events);
+    const { DELETE } = await import("@/app/api/admin/events/[id]/route");
+    await DELETE(
+      new Request(
+        `http://localhost/api/admin/events/${series.id}?occurrenceStartUnix=${FOUR_WEEKS}`,
+        { method: "DELETE" }
+      ),
+      { params: Promise.resolve({ id: String(series.id) }) }
+    );
+
+    // Gone from the grid, while the first date is still there.
+    expect(await laterWeek()).toHaveLength(0);
+    expect(await gridBookings([c.lead.id, c.founder.id])).toHaveLength(1);
+  });
+
+  it("moves one date and leaves the rest of the series where it was", async () => {
+    // The whole point of the feature: somebody can't make the second date, and
+    // moving it must not drag eleven other people's months with it.
+    const c = await cast();
+    await book(c, { repeatEveryWeeks: 4, repeatCount: 6 });
+    const [series] = await harness.db.select().from(events);
+
+    const { PATCH } = await import("@/app/api/admin/events/[id]/route");
+    const res = await PATCH(
+      jsonRequest(
+        `http://localhost/api/admin/events/${series.id}`,
+        {
+          startsAtUnix: FOUR_WEEKS + 3600,
+          durationMinutes: 60,
+          timezone: "America/Los_Angeles",
+          occurrenceStartUnix: FOUR_WEEKS,
+        },
+        { cookie: await adminCookie() }
+      ),
+      { params: Promise.resolve({ id: String(series.id) }) }
+    );
+    expect(res.status).toBe(200);
+
+    // The provider was told about the INSTANCE, never the series.
+    expect(cal.move.mock.calls[0]![0]).toMatchObject({ providerEventId: "provider-instance-1" });
+
+    // The series row is untouched — same first date, same rule.
+    const [after] = await harness.db.select().from(events);
+    expect(Math.floor(after.startsAt.getTime() / 1000)).toBe(SLOT);
+    expect(after.recurrenceRule).toBe("RRULE:FREQ=WEEKLY;INTERVAL=4;COUNT=6");
+
+    // And the exception records where the date actually went.
+    const { eventOccurrences } = await import("@/db/schema");
+    const [exception] = await harness.db.select().from(eventOccurrences);
+    expect(exception.status).toBe("moved");
+    expect(Math.floor(exception.originalStartsAt.getTime() / 1000)).toBe(FOUR_WEEKS);
+    expect(Math.floor(exception.startsAt!.getTime() / 1000)).toBe(FOUR_WEEKS + 3600);
+  });
+
+  it("refuses rather than moving the whole series when the date is gone", async () => {
+    // The dangerous failure. Falling back to the series id here would move
+    // every date while the admin believed they had moved one afternoon.
+    const c = await cast();
+    await book(c, { repeatEveryWeeks: 4, repeatCount: 6 });
+    const [series] = await harness.db.select().from(events);
+    cal.instanceId.mockResolvedValue(null);
+
+    const { PATCH } = await import("@/app/api/admin/events/[id]/route");
+    const res = await PATCH(
+      jsonRequest(
+        `http://localhost/api/admin/events/${series.id}`,
+        {
+          startsAtUnix: FOUR_WEEKS + 3600,
+          durationMinutes: 60,
+          timezone: "America/Los_Angeles",
+          occurrenceStartUnix: FOUR_WEEKS,
+        },
+        { cookie: await adminCookie() }
+      ),
+      { params: Promise.resolve({ id: String(series.id) }) }
+    );
+
+    expect(res.status).toBe(409);
+    expect(cal.move).not.toHaveBeenCalled();
+  });
+
+  it("drops one date without ending the series", async () => {
+    const c = await cast();
+    await book(c, { repeatEveryWeeks: 4, repeatCount: 6 });
+    const [series] = await harness.db.select().from(events);
+
+    const { DELETE } = await import("@/app/api/admin/events/[id]/route");
+    const res = await DELETE(
+      new Request(
+        `http://localhost/api/admin/events/${series.id}?occurrenceStartUnix=${FOUR_WEEKS}`,
+        { method: "DELETE" }
+      ),
+      { params: Promise.resolve({ id: String(series.id) }) }
+    );
+    expect(res.status).toBe(200);
+
+    // The session itself is still on. Only that one date is off.
+    const [after] = await harness.db.select().from(events);
+    expect(after.status).toBe("confirmed");
+
+    const { eventOccurrences } = await import("@/db/schema");
+    const [exception] = await harness.db.select().from(eventOccurrences);
+    expect(exception.status).toBe("cancelled");
+    expect(exception.startsAt).toBeNull();
   });
 
   it("does not book forever just because a count went missing", async () => {

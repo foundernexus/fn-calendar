@@ -48,6 +48,13 @@ export function RescheduleSessionDialog({
   const [submitting, setSubmitting] = useState(false);
   const durationMinutes = Math.round((slot.endUnix - slot.startUnix) / 60);
 
+  // This date alone unless asked otherwise — the same default as cancelling,
+  // and for the same reason: moving a whole rhythm because somebody meant to
+  // shift one afternoon is the expensive way round to get this wrong.
+  const isSeries = Boolean(booked.recurrenceRule);
+  const [scope, setScope] = useState<"occurrence" | "series">("occurrence");
+  const wholeSeries = !isSeries || scope === "series";
+
   async function handleSubmit() {
     setSubmitting(true);
     try {
@@ -58,6 +65,9 @@ export function RescheduleSessionDialog({
           startsAtUnix: slot.startUnix,
           durationMinutes,
           timezone,
+          ...(wholeSeries || booked.occurrenceStartUnix === undefined
+            ? {}
+            : { occurrenceStartUnix: booked.occurrenceStartUnix }),
         }),
       });
       const data = await res.json();
@@ -67,7 +77,11 @@ export function RescheduleSessionDialog({
         setSubmitting(false);
         return;
       }
-      toast.success("Session moved — everyone's calendar has been updated.");
+      toast.success(
+        wholeSeries
+          ? "Session moved — everyone's calendar has been updated."
+          : "That date moved. The rest of the series is unchanged."
+      );
       onRescheduled();
     } catch {
       toast.error("Something went wrong. Please try again.");
@@ -91,6 +105,42 @@ export function RescheduleSessionDialog({
           <p className="text-xs text-muted-foreground">{durationMinutes} minutes</p>
         </div>
 
+        {isSeries && (
+          <div className="space-y-2 rounded-md border border-border p-3 text-sm">
+            <p className="text-muted-foreground">This session repeats. Move:</p>
+            <label className="flex items-start gap-2 text-foreground">
+              <input
+                type="radio"
+                name="move-scope"
+                className="mt-1"
+                checked={scope === "occurrence"}
+                onChange={() => setScope("occurrence")}
+              />
+              <span>
+                <span className="font-medium">This date only</span>
+                <span className="block text-xs text-muted-foreground">
+                  Every other date keeps its usual time.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-foreground">
+              <input
+                type="radio"
+                name="move-scope"
+                className="mt-1"
+                checked={scope === "series"}
+                onChange={() => setScope("series")}
+              />
+              <span>
+                <span className="font-medium">Every date</span>
+                <span className="block text-xs text-muted-foreground">
+                  The whole rhythm shifts to this weekday and time.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
+
         {booked.attendees.length > 0 && (
           <p className="text-sm text-muted-foreground">
             {booked.attendees.length === 1
@@ -105,7 +155,7 @@ export function RescheduleSessionDialog({
             Keep the old time
           </Button>
           <Button type="button" onClick={handleSubmit} disabled={submitting}>
-            {submitting ? "Moving…" : "Move session"}
+            {submitting ? "Moving…" : wholeSeries ? "Move session" : "Move this date"}
           </Button>
         </DialogFooter>
       </DialogContent>

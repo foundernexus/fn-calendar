@@ -5,6 +5,7 @@ import {
   createGoogleEvent,
   updateGoogleEvent,
   deleteGoogleEvent,
+  findGoogleInstanceId,
   revokeGoogleToken,
   fetchGoogleOwnEvents,
 } from "@/lib/calendar/google";
@@ -15,6 +16,7 @@ import {
   createMicrosoftEvent,
   updateMicrosoftEvent,
   deleteMicrosoftEvent,
+  findMicrosoftInstanceId,
   revokeMicrosoftToken,
   fetchMicrosoftOwnEvents,
 } from "@/lib/calendar/microsoft";
@@ -121,6 +123,26 @@ export async function updateEvent(params: {
   return params.provider === "microsoft"
     ? updateMicrosoftEvent(params)
     : updateGoogleEvent(params);
+}
+
+/** The provider's id for one date of a repeating session.
+ *
+ * Both providers accept that id wherever they accept a series id, so moving or
+ * dropping a single date reuses `updateEvent` and `deleteEvent` unchanged —
+ * this is the only thing single-date handling adds to the provider layer.
+ *
+ * Null means the date is no longer part of the series as the provider sees it.
+ * That is a real answer, not an error: somebody may have already deleted it in
+ * their own calendar. */
+export async function findEventInstanceId(params: {
+  provider: CalendarProvider;
+  accessToken: string;
+  seriesEventId: string;
+  originalStartUnix: number;
+}): Promise<string | null> {
+  return params.provider === "microsoft"
+    ? findMicrosoftInstanceId(params)
+    : findGoogleInstanceId(params);
 }
 
 export async function deleteEvent(params: {
