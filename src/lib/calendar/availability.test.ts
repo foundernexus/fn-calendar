@@ -42,10 +42,11 @@ function connection(
   };
 }
 
-async function search(connections = [connection()]) {
+async function search(connections = [connection()], leadMinutes?: number) {
   const { getCollectiveAvailability } = await import("@/lib/calendar/availability");
   return getCollectiveAvailability({
     connections,
+    leadMinutes,
     startTime: at("2026-08-19T07:00:00Z"),
     endTime: at("2026-08-20T06:59:00Z"),
     durationMinutes: 60,
@@ -165,5 +166,55 @@ describe("gaps around meetings", () => {
 
     const { slots } = await search([connection()]);
     expect(slots.map((s) => s.startTime)).toContain(at("2026-08-19T18:00:00Z"));
+  });
+});
+
+describe("run-up before the session", () => {
+  it("drops the slot that starts the moment another meeting ends", async () => {
+    // The whole point: people turn up late because their previous call ran to
+    // the minute this one begins. 10:00-11:00 PT is 17:00-18:00 UTC, so with a
+    // quarter-hour run-up the 11:00 slot goes and 12:00 stays.
+    fetchBusy.mockResolvedValue([
+      { start: at("2026-08-19T17:00:00Z"), end: at("2026-08-19T18:00:00Z") },
+    ]);
+
+    const { slots } = await search([connection()], 15);
+    const starts = slots.map((s) => s.startTime);
+
+    expect(starts).not.toContain(at("2026-08-19T18:00:00Z")); // 11:00, straight out of a call
+    expect(starts).toContain(at("2026-08-19T19:00:00Z")); // 12:00, clear run-up
+  });
+
+  it("reports how many times it cost", async () => {
+    // Said out loud, because a search that quietly returns fewer results than
+    // it could reads as "nobody is free" rather than "you asked for a gap".
+    fetchBusy.mockResolvedValue([
+      { start: at("2026-08-19T17:00:00Z"), end: at("2026-08-19T18:00:00Z") },
+    ]);
+
+    const withLead = await search([connection()], 15);
+    const without = await search([connection()], 0);
+
+    expect(withLead.droppedByLead).toBe(without.slots.length - withLead.slots.length);
+    expect(withLead.droppedByLead).toBeGreaterThan(0);
+  });
+
+  it("costs nothing and reports nothing when it isn't asked for", async () => {
+    fetchBusy.mockResolvedValue([
+      { start: at("2026-08-19T17:00:00Z"), end: at("2026-08-19T18:00:00Z") },
+    ]);
+    const result = await search([connection()]);
+    expect(result.droppedByLead).toBe(0);
+    expect(result.slots.map((s) => s.startTime)).toContain(at("2026-08-19T18:00:00Z"));
+  });
+
+  it("stacks on top of a personal buffer rather than replacing it", async () => {
+    // Someone who keeps 30 minutes to themselves does not get less protection
+    // because a search asked for 15.
+    fetchBusy.mockResolvedValue([
+      { start: at("2026-08-19T17:00:00Z"), end: at("2026-08-19T18:00:00Z") },
+    ]);
+    const { slots } = await search([connection({ bufferAfterMinutes: 30 })], 15);
+    expect(slots.map((s) => s.startTime)).not.toContain(at("2026-08-19T18:30:00Z"));
   });
 });

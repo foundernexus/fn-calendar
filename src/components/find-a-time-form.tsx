@@ -102,6 +102,10 @@ export function FindATimeForm({
   const [workingHoursEnd, setWorkingHoursEnd] = useState("17:00");
   const [timezone, setTimezone] = useState<string>(TIMEZONES[0].value);
   const [excludeWeekends, setExcludeWeekends] = useState(true);
+  // Off by default. It narrows what is on offer, and a search that silently
+  // returns fewer times than it could is the wrong thing to hand someone
+  // before they have asked for it.
+  const [requireLead, setRequireLead] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AvailabilityResult | null>(null);
@@ -163,6 +167,7 @@ export function FindATimeForm({
       workingHoursEnd,
       timezone,
       excludeWeekends,
+      leadMinutes: requireLead ? 15 : 0,
     };
 
     setLoading(true);
@@ -523,6 +528,23 @@ export function FindATimeForm({
             onCheckedChange={(checked) => setExcludeWeekends(!!checked)}
           />
           Exclude weekends
+        </label>
+
+        {/* People arrive late because their previous call ran up to the minute
+            this one starts. With this on, a time is only offered when everybody
+            has a quarter of an hour clear beforehand. */}
+        <label className="flex items-start gap-2 text-sm text-foreground">
+          <Checkbox
+            className="mt-0.5"
+            checked={requireLead}
+            onCheckedChange={(checked) => setRequireLead(!!checked)}
+          />
+          <span>
+            Leave 15 minutes before the session
+            <span className="block text-xs text-muted-foreground">
+              Only offers times where nobody is coming straight out of another meeting.
+            </span>
+          </span>
         </label>
 
         <Button type="submit" disabled={loading}>

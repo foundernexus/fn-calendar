@@ -53,6 +53,10 @@ const bodySchema = z
       .refine(isOnIntervalBoundary, "Working hours end must be on a 30-minute mark (e.g. 5:00 or 5:30)."),
     timezone: z.enum(TIMEZONE_VALUES),
     excludeWeekends: z.boolean(),
+    // Clear time everyone needs before the session starts. Aimed at people
+    // turning up late because their previous call ran right up to ours.
+    // Optional so an older client that doesn't send it keeps working.
+    leadMinutes: z.union([z.literal(0), z.literal(10), z.literal(15)]).optional(),
   })
   .refine((b) => b.endDate >= b.startDate, {
     message: "End date must be on or after start date.",
@@ -229,6 +233,7 @@ export async function POST(request: Request) {
         workingHoursStart: body.workingHoursStart,
         workingHoursEnd: body.workingHoursEnd,
         excludeWeekends: body.excludeWeekends,
+        leadMinutes: body.leadMinutes,
       }),
       // Only needs to cover the visible search range itself — the grid never
       // renders cells outside [startDate, endDate] to begin with.
@@ -253,7 +258,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { slots, unreadable } = collective;
+  const { slots, unreadable, droppedByLead } = collective;
 
   // The session lead is the exception: their calendar is the one the session is
   // created ON, and every slot offered is a claim about their time. Offering
@@ -362,6 +367,10 @@ export async function POST(request: Request) {
     // The viewer's own day, so a free slot can be judged against what sits
     // beside it. Never anyone else's — see where this is built.
     ownEvents,
+    // How many times the run-up cost. Said out loud, because a search that
+    // quietly returns fewer results than it could reads as "nobody is free"
+    // rather than "you asked for a gap".
+    droppedByLead,
     // Connected, but we couldn't read them — a different problem from not being
     // connected at all, and one the admin has to see: the slots below do NOT
     // account for these people.

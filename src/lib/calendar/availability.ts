@@ -56,6 +56,10 @@ export type CollectiveAvailability = {
   slots: AvailabilitySlot[];
   /** grant_email of every calendar that could not be read. */
   unreadable: string[];
+  /** How many more slots there would be without `leadMinutes`. Zero when no
+   * lead time was asked for. Reported rather than swallowed: a search that
+   * quietly returns fewer times than it could looks like nobody is free. */
+  droppedByLead: number;
 };
 
 /** Every slot in the window where all of these calendars are free.
@@ -78,7 +82,21 @@ export async function getCollectiveAvailability(params: {
   workingHoursStart: string;
   workingHoursEnd: string;
   excludeWeekends: boolean;
+  /** Clear time everyone must have BEFORE the session starts.
+   *
+   * Aimed at one thing: people arriving late because their previous call ran up
+   * to the minute our session begins. Implemented by widening everyone's
+   * existing meetings FORWARD — if a call ends at 10:00 and we need a quarter
+   * hour of run-up, 10:00 is no longer offered but 10:30 still is.
+   *
+   * Distinct from a personal buffer, which someone sets for themselves and
+   * carries into every search. This is a property of one search, applied to
+   * everybody at once, and it stacks on top of whatever people set for
+   * themselves rather than replacing it. */
+  leadMinutes?: number;
 }): Promise<CollectiveAvailability> {
+  const lead = Math.max(0, params.leadMinutes ?? 0) * 60;
+
   // Fetched in parallel — a search across six people with two calendars each
   // is twelve round trips, and doing them in sequence would put the grid
   // several seconds behind every click.
@@ -103,19 +121,30 @@ export async function getCollectiveAvailability(params: {
       // window; it only pushes candidate slots away from real meetings.
       const before = (connection.bufferBeforeMinutes ?? 0) * 60;
       const after = (connection.bufferAfterMinutes ?? 0) * 60;
-      const padded =
-        before === 0 && after === 0
+      const pad = (extraAfter: number) =>
+        before === 0 && after === 0 && extraAfter === 0
           ? busy
-          : busy.map((b) => ({ start: b.start - before, end: b.end + after }));
-      return { email: connection.grantEmail, busy: padded };
+          : busy.map((b) => ({ start: b.start - before, end: b.end + after + extraAfter }));
+      return {
+        email: connection.grantEmail,
+        busy: pad(lead),
+        // The same calendars without the run-up, so the caller can say how many
+        // times it cost. Computed from one fetch, not a second round trip.
+        busyWithoutLead: pad(0),
+      };
     })
   );
 
   const participants: ParticipantBusy[] = [];
+  const participantsWithoutLead: ParticipantBusy[] = [];
   const unreadable: string[] = [];
   settled.forEach((result, i) => {
     if (result.status === "fulfilled") {
-      participants.push(result.value);
+      participants.push({ email: result.value.email, busy: result.value.busy });
+      participantsWithoutLead.push({
+        email: result.value.email,
+        busy: result.value.busyWithoutLead,
+      });
       return;
     }
     const email = params.connections[i].grantEmail;
@@ -127,18 +156,25 @@ export async function getCollectiveAvailability(params: {
     console.warn(`[availability] couldn't read ${email}'s calendar: ${cause}`);
   });
 
-  return {
-    slots: computeCollectiveSlots({
-      participants,
-      startTime: params.startTime,
-      endTime: params.endTime,
-      durationMinutes: params.durationMinutes,
-      intervalMinutes: params.intervalMinutes,
-      timezone: params.timezone,
-      workingHoursStart: params.workingHoursStart,
-      workingHoursEnd: params.workingHoursEnd,
-      excludeWeekends: params.excludeWeekends,
-    }),
-    unreadable,
+  const shape = {
+    startTime: params.startTime,
+    endTime: params.endTime,
+    durationMinutes: params.durationMinutes,
+    intervalMinutes: params.intervalMinutes,
+    timezone: params.timezone,
+    workingHoursStart: params.workingHoursStart,
+    workingHoursEnd: params.workingHoursEnd,
+    excludeWeekends: params.excludeWeekends,
   };
+
+  const slots = computeCollectiveSlots({ participants, ...shape });
+  // Only worth computing when a run-up was actually asked for, and free when it
+  // was — same busy data, no second round trip to anyone's calendar.
+  const droppedByLead =
+    lead === 0
+      ? 0
+      : computeCollectiveSlots({ participants: participantsWithoutLead, ...shape }).length -
+        slots.length;
+
+  return { slots, unreadable, droppedByLead };
 }

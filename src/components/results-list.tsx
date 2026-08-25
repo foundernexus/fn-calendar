@@ -45,6 +45,9 @@ export type AvailabilityResult = {
   /** The viewer's own calendar for the searched range. Optional so a response
    * from an older deploy still renders. */
   ownEvents?: OwnEventSummary[];
+  /** How many times the run-up filter cost. Shown so a thin result reads as
+   * "you asked for a gap", not "nobody is free". */
+  droppedByLead?: number;
   error?: string;
   /** True when Nylas found real calendar overlap but it all got filtered out
    * by someone's stated /me availability window or a guest's weekly session
@@ -129,6 +132,18 @@ export function ResultsList({
           <span className="font-medium">{result.unreadableNames!.join(", ")}</span>. Ask{" "}
           {result.unreadableNames!.length === 1 ? "them" : "each of them"} to reconnect from their
           settings page.
+        </p>
+      )}
+
+      {/* A run-up that removed times says so. Otherwise a search that quietly
+          returns three slots instead of eleven reads as "these people are
+          impossible to schedule" when it really means "you asked for a gap
+          before the session". */}
+      {(result.droppedByLead ?? 0) > 0 && (
+        <p className="mt-3 text-sm text-muted-foreground">
+          {result.droppedByLead} more{" "}
+          {result.droppedByLead === 1 ? "time is" : "times are"} available without a run-up —
+          untick it above to see {result.droppedByLead === 1 ? "it" : "them"}.
         </p>
       )}
 
