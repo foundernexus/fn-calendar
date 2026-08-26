@@ -37,6 +37,67 @@ const REPEAT_OPTIONS = {
 
 type RepeatFor = keyof typeof REPEAT_OPTIONS;
 
+const WEEKDAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+const ORDINAL_NAMES = ["", "first", "second", "third", "fourth"];
+
+/** The repeat choices, phrased the way Google phrases them for the date that
+ * was actually picked.
+ *
+ * Google writes out the full sentence — "Monthly on the fourth Friday" — rather
+ * than making you assemble it, and that is the whole reason nobody is surprised
+ * by what they get. The four-weekly option is the one that needs the warning,
+ * because "every 4 weeks" reads like "monthly" and is not: 28 days is short of
+ * every month, so the date walks backwards out of it.
+ *
+ * "Last" is only offered when the chosen date really is the last of its weekday
+ * in the month — offering it otherwise would silently move the first session. */
+function repeatChoicesFor(startUnix: number, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(startUnix * 1000));
+  const [year, month, day] = parts.split("-").map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  const ordinal = Math.ceil(day / 7);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const isLast = day + 7 > daysInMonth;
+  const name = WEEKDAY_NAMES[weekday];
+
+  const choices: { value: string; label: string; note?: string }[] = [
+    { value: "weekly-2", label: `Every 2 weeks on ${name}` },
+    {
+      value: "weekly-4",
+      label: `Every 4 weeks on ${name}`,
+      note: "Every 28 days — this drifts out of the month over time.",
+    },
+  ];
+  if (ordinal <= 4) {
+    choices.push({
+      value: `monthly-${ordinal}`,
+      label: `Monthly on the ${ORDINAL_NAMES[ordinal]} ${name}`,
+      note: "Keeps its place in the month. The gap is sometimes five weeks.",
+    });
+  }
+  if (isLast) {
+    choices.push({
+      value: "monthly--1",
+      label: `Monthly on the last ${name}`,
+      note: "Keeps its place in the month. The gap is sometimes five weeks.",
+    });
+  }
+  return { choices, weekday };
+}
+
 export function CreateEventDialog({
   slot,
   organizerMemberId,
@@ -75,8 +136,13 @@ export function CreateEventDialog({
   // Off unless asked for. Most sessions are one-offs; a recurring 1:1 is the
   // Nexus Partner's monthly rhythm with a member.
   const [repeats, setRepeats] = useState(false);
-  const [repeatEveryWeeks, setRepeatEveryWeeks] = useState(4);
+  const { choices: repeatChoices, weekday } = repeatChoicesFor(slot.startUnix, timezone);
+  // Defaults to four-weekly, which is what every existing series uses. Changing
+  // the default would quietly change the rhythm of sessions people book without
+  // reading the dropdown.
+  const [repeatPattern, setRepeatPattern] = useState("weekly-4");
   const [repeatFor, setRepeatFor] = useState<RepeatFor>("6");
+  const chosenPattern = repeatChoices.find((c) => c.value === repeatPattern) ?? repeatChoices[0];
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -101,7 +167,14 @@ export function CreateEventDialog({
           // someone's calendar indefinitely".
           ...(repeats
             ? {
-                repeatEveryWeeks,
+                ...(chosenPattern.value.startsWith("monthly")
+                  ? {
+                      repeatMonthlyOrdinal: Number(chosenPattern.value.slice("monthly-".length)),
+                      repeatMonthlyWeekday: weekday,
+                    }
+                  : {
+                      repeatEveryWeeks: Number(chosenPattern.value.slice("weekly-".length)),
+                    }),
                 ...(repeatFor === "forever"
                   ? { repeatForever: true }
                   : { repeatCount: Number(repeatFor) }),
@@ -172,18 +245,20 @@ export function CreateEventDialog({
             {repeats && (
               <>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  <span>Every</span>
                   <Select
-                    items={{ "2": "2 weeks", "4": "4 weeks" }}
-                    value={String(repeatEveryWeeks)}
-                    onValueChange={(v) => v && setRepeatEveryWeeks(Number(v))}
+                    items={Object.fromEntries(repeatChoices.map((c) => [c.value, c.label]))}
+                    value={chosenPattern.value}
+                    onValueChange={(v) => v && setRepeatPattern(v)}
                   >
-                    <SelectTrigger className="w-28">
+                    <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="2">2 weeks</SelectItem>
-                      <SelectItem value="4">4 weeks</SelectItem>
+                      {repeatChoices.map((c) => (
+                        <SelectItem key={c.value} value={c.value}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <span>for</span>
@@ -206,12 +281,15 @@ export function CreateEventDialog({
                 </div>
                 {/* Said before booking rather than discovered afterwards: what
                     gets checked, and that one invitation covers the series. */}
+                {chosenPattern.note && (
+                  <p className="text-xs text-muted-foreground">{chosenPattern.note}</p>
+                )}
                 <p className="text-xs text-muted-foreground">
                   {repeatFor === "forever"
                     ? "The first year of dates is checked before anything is booked. After that the series keeps going, and any clash that appears is flagged on the day it turns up."
                     : "Every date is checked before anything is booked."}{" "}
-                  Everyone gets one invitation for the whole series — skipping or moving a single
-                  date is done in the calendar itself.
+                  Everyone gets one invitation for the whole series — a single date can be moved or
+                  dropped later without touching the rest.
                 </p>
               </>
             )}

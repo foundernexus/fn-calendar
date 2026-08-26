@@ -18,6 +18,7 @@ import {
   occurrenceTimes,
   unbookableOccurrences,
 } from "@/lib/calendar/booking-guards";
+import { recurrenceRuleString } from "@/lib/calendar/recurrence";
 import { computeIdempotencyKey } from "@/lib/idempotency";
 import { oneToOnePartner, syncMemberToHubspot } from "@/lib/one-to-one";
 import { TIMEZONES } from "@/lib/time";
@@ -41,10 +42,19 @@ const bodySchema = z.object({
     error: "Duration must be 15, 30, 45, or 60 minutes.",
   }),
   timezone: z.enum(TIMEZONE_VALUES, { error: "Unsupported timezone." }),
-  // Fortnightly or four-weekly, rather than "monthly". A recurring 1:1 lives on
-  // a fixed weekday at a fixed time; "monthly" would have to choose between
-  // "the 15th" and "the first Monday", and both drift against that rhythm.
+  // Fortnightly or four-weekly. Note that four-weekly is NOT monthly: 28 days
+  // is short of every month, so the date walks backwards through the calendar —
+  // a session on the last Friday of August is the third Friday of November. For
+  // anybody who meant "monthly", the two fields below are the ones to send.
   repeatEveryWeeks: z.union([z.literal(2), z.literal(4)]).optional(),
+  /** "The fourth Friday", or -1 for "the last Friday" — the same choices Google
+   * offers. Sent together with the weekday, and takes precedence over
+   * repeatEveryWeeks when both arrive. */
+  repeatMonthlyOrdinal: z
+    .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(-1)])
+    .optional(),
+  /** 0 = Sunday. */
+  repeatMonthlyWeekday: z.number().int().min(0).max(6).optional(),
   /** Total sessions including the one being booked, so 6 means six. */
   repeatCount: z.number().int().min(2).max(12).optional(),
   /** A series with no end — the standing 1:1 nobody intends to stop. Asked for
@@ -304,15 +314,38 @@ export async function POST(request: Request) {
   // re-book a standing 1:1 every twelve months, and a rhythm that needs
   // renewing is a rhythm that lapses.
   let recurrenceRule: string | undefined;
-  const endless = body.repeatEveryWeeks !== undefined && body.repeatForever === true;
+
+  // Which rhythm was asked for. Monthly wins when both arrive: it is the more
+  // specific request, and a client sending both has a bug worth failing towards
+  // the narrower meaning rather than the wider one.
+  const monthly =
+    body.repeatMonthlyOrdinal !== undefined && body.repeatMonthlyWeekday !== undefined
+      ? ({
+          freq: "monthly" as const,
+          ordinal: body.repeatMonthlyOrdinal,
+          weekday: body.repeatMonthlyWeekday,
+          count: null,
+        })
+      : null;
+  const weekly =
+    !monthly && body.repeatEveryWeeks !== undefined
+      ? ({ freq: "weekly" as const, intervalWeeks: body.repeatEveryWeeks, count: null })
+      : null;
+  const shape = monthly ?? weekly;
+
+  const endless = shape !== null && body.repeatForever === true;
   const repeatCount = endless ? undefined : body.repeatCount;
 
-  if (body.repeatEveryWeeks && (endless || repeatCount)) {
+  if (shape && (endless || repeatCount)) {
+    // How many dates get checked when there is no last one to check. A year
+    // either way — twelve monthly, or fifty-two weeks divided by the interval.
+    const aheadCount =
+      shape.freq === "monthly" ? 12 : Math.floor(CHECKED_AHEAD_WEEKS / shape.intervalWeeks);
     const occurrences = occurrenceTimes({
       startUnix: body.startsAtUnix,
       durationMinutes: body.durationMinutes,
-      intervalWeeks: body.repeatEveryWeeks,
-      count: repeatCount ?? Math.floor(CHECKED_AHEAD_WEEKS / body.repeatEveryWeeks),
+      recurrence: shape,
+      count: repeatCount ?? aheadCount,
       timezone: body.timezone,
     });
     let blocked: string[];
@@ -340,9 +373,9 @@ export async function POST(request: Request) {
         { status: 409 }
       );
     }
-    recurrenceRule = endless
-      ? `RRULE:FREQ=WEEKLY;INTERVAL=${body.repeatEveryWeeks}`
-      : `RRULE:FREQ=WEEKLY;INTERVAL=${body.repeatEveryWeeks};COUNT=${repeatCount}`;
+    // Built by the same function that reads it back, so a series can never be
+    // created under one meaning and expanded under another.
+    recurrenceRule = recurrenceRuleString({ ...shape, count: repeatCount ?? null });
   }
 
   let providerEvent;

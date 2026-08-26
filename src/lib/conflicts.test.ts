@@ -148,10 +148,14 @@ describe("the daily look-ahead", () => {
   });
 
   it("leaves a rule it cannot read alone", async () => {
-    // Somebody rebuilt the series in Google to repeat on the second Tuesday.
-    // Half-understanding that would raise warnings about dates that are not in
-    // the series at all.
-    await seedSeries({ rule: "RRULE:FREQ=MONTHLY;BYDAY=2TU" });
+    // Somebody rebuilt the series in Google to repeat on the 15th of every
+    // month. Half-understanding that would raise warnings about dates that are
+    // not in the series at all.
+    //
+    // Was "the second Tuesday" until this app learned to write monthly rules
+    // itself. The point of the test is a rule we do NOT write, so it moved to
+    // one that is still outside what parseRecurrence accepts.
+    await seedSeries({ rule: "RRULE:FREQ=MONTHLY;BYMONTHDAY=15" });
     clashingNames = ["Yuan Sun"];
 
     const summary = await run();

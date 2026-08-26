@@ -94,11 +94,14 @@ export function ResultsList({
   searchedParams,
   onSelectSlot,
   onSelectBooked,
+  onShiftRange,
 }: {
   result: AvailabilityResult;
   searchedParams: SearchedParams;
   onSelectSlot: (slot: Slot) => void;
   onSelectBooked: (booked: BookedSlot) => void;
+  /** Pages the searched range a week either way — see AvailabilityGrid. */
+  onShiftRange?: (direction: -1 | 1) => void;
 }) {
   if (result.error) {
     return (
@@ -216,6 +219,7 @@ export function ResultsList({
             ownEvents={result.ownEvents ?? []}
             onSelectSlot={onSelectSlot}
             onSelectBooked={onSelectBooked}
+            onShiftRange={onShiftRange}
           />
         </div>
       )}

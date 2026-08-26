@@ -185,6 +185,27 @@ export function FindATimeForm({
     });
   }
 
+  /** Moves the searched range a week either way and searches again.
+   *
+   * What the grid's arrows call once they reach the edge of what was searched.
+   * Booking a session in January from September used to mean typing dates into
+   * the two fields; now it means clicking forward, the way any calendar works.
+   *
+   * The whole range shifts rather than growing, so a search stays the same size
+   * however far anyone pages — every one of them reads every participant's
+   * calendar, and a window that quietly grew would get slower with each click.
+   *
+   * Fields are set AND passed through, for the usual reason: React state is
+   * asynchronous, so a search reading the fields would search the week before
+   * the one just asked for. */
+  function shiftRange(direction: -1 | 1) {
+    const from = addDaysToDateString(startDateState, direction * 7);
+    const to = addDaysToDateString(endDateState, direction * 7);
+    setStartDate(from);
+    setEndDate(to);
+    void handleSearch(null, { startDate: from, endDate: to });
+  }
+
   async function handleSearch(
     e: React.FormEvent | null,
     over: Partial<{
@@ -626,6 +647,7 @@ export function FindATimeForm({
           searchedParams={searchedParams}
           onSelectSlot={setDialogSlot}
           onSelectBooked={setCancelTarget}
+          onShiftRange={shiftRange}
         />
         </div>
       )}

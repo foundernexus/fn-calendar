@@ -658,6 +658,23 @@ describe("a repeating session", () => {
     expect(exception.startsAt).toBeNull();
   });
 
+  it("writes a monthly rule when that is what was asked for", async () => {
+    // The difference somebody actually noticed: every four weeks walks out of
+    // the month, monthly-on-the-Nth does not. Both are legitimate; only one is
+    // what "monthly" means.
+    const c = await cast();
+    const { res } = await book(c, {
+      repeatMonthlyOrdinal: -1,
+      repeatMonthlyWeekday: 3,
+      repeatCount: 6,
+    });
+
+    expect(res.status).toBe(200);
+    expect(cal.create.mock.calls[0]![0]).toMatchObject({
+      recurrenceRule: "RRULE:FREQ=MONTHLY;BYDAY=-1WE;COUNT=6",
+    });
+  });
+
   it("does not book forever just because a count went missing", async () => {
     // The failure this guards against is silent and expensive: a client bug
     // that drops repeatCount must produce a one-off, never an endless series

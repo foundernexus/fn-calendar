@@ -40,6 +40,7 @@ export function AvailabilityGrid({
   ownEvents = [],
   onSelectSlot,
   onSelectBooked,
+  onShiftRange,
 }: {
   slots: Slot[];
   bookedSlots: BookedSlot[];
@@ -56,12 +57,26 @@ export function AvailabilityGrid({
   onSelectSlot: (slot: Slot) => void;
   /** Opens a booked session so it can be reviewed or cancelled. */
   onSelectBooked: (booked: BookedSlot) => void;
+  /** Moves the searched range a week either way and searches again.
+   *
+   * Without it, paging stops at the edge of whatever was searched — the default
+   * is a fortnight, so "Next week" greyed out after two clicks and reaching a
+   * date in January meant typing it into the date field. With it, the arrows
+   * keep going as far as anyone wants to look.
+   *
+   * Why a new search rather than one long window: every search reads everyone's
+   * calendars. Loading a year up front to page through it would be minutes of
+   * work for a glance, so pages are fetched as they are asked for — the same
+   * thing a calendar app does. */
+  onShiftRange?: (direction: -1 | 1) => void;
 }) {
   const [weekOffset, setWeekOffset] = useState(0);
 
   const allDays = getDaysInRange(startDate, endDate);
   const totalWeeks = Math.max(1, Math.ceil(allDays.length / 7));
   const weekDays = allDays.slice(weekOffset * 7, weekOffset * 7 + 7);
+  const atStart = weekOffset === 0;
+  const atEnd = weekOffset >= totalWeeks - 1;
   const visibleDays = excludeWeekends ? weekDays.filter((d) => !isWeekendDateString(d)) : weekDays;
 
   // Booked sessions the grid has no column for. "Exclude weekends" hides whole
@@ -158,14 +173,16 @@ export function AvailabilityGrid({
 
   return (
     <div>
-      {totalWeeks > 1 && (
+      {(totalWeeks > 1 || onShiftRange) && (
         <div className="flex items-center justify-between pb-3">
+          {/* At the edge of the searched range the arrows move the range itself
+              rather than going dead, so paging forward never stops. */}
           <Button
             type="button"
             variant="secondary"
             size="sm"
-            disabled={weekOffset === 0}
-            onClick={() => setWeekOffset((w) => w - 1)}
+            disabled={atStart && !onShiftRange}
+            onClick={() => (atStart ? onShiftRange?.(-1) : setWeekOffset((w) => w - 1))}
           >
             Previous week
           </Button>
@@ -173,8 +190,8 @@ export function AvailabilityGrid({
             type="button"
             variant="secondary"
             size="sm"
-            disabled={weekOffset >= totalWeeks - 1}
-            onClick={() => setWeekOffset((w) => w + 1)}
+            disabled={atEnd && !onShiftRange}
+            onClick={() => (atEnd ? onShiftRange?.(1) : setWeekOffset((w) => w + 1))}
           >
             Next week
           </Button>
