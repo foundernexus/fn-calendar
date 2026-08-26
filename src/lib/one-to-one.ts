@@ -4,6 +4,7 @@ import { events, eventAttendees, members } from "@/db/schema";
 import { parseRecurrence, occurrencesBetween } from "@/lib/calendar/recurrence";
 import { getExceptions, applyExceptions } from "@/lib/occurrences";
 import { isConnectionUsable, getLatestConnections, pickInviteConnection } from "@/db/queries";
+import type { DateValue } from "@/lib/hubspot";
 
 /** A member's standing 1:1 rhythm, as this tool knows it.
  *
@@ -25,18 +26,27 @@ export type OneToOneState = {
   email: string;
   /** The address their calendar is connected under, when they have one. */
   calendarEmail: string | null;
-  /** `YYYY-MM-DD` in the session's own timezone, or null. */
-  next: string | null;
-  last: string | null;
-  /** The final date of a repeating 1:1, as an ISO timestamp — HubSpot types
-   * this field as `datetime`, unlike the two above which are `date`. Sending it
-   * as `YYYY-MM-DD` is rejected.
+  /** The next 1:1, carried as both a timestamp and a calendar date in the
+   * SESSION's timezone — see DateValue. Which one HubSpot wants depends on how
+   * the property is typed there, and that can change without anyone touching
+   * this code. Null when there is nothing upcoming. */
+  next: DateValue | null;
+  last: DateValue | null;
+  /** The final date of a repeating 1:1.
    *
    * Null for a one-off, and null for a series with no end: there is no date to
    * give, and reporting the horizon we happen to walk to would be a number
    * nobody chose. */
-  bookedThrough: string | null;
+  bookedThrough: DateValue | null;
 };
+
+/** A moment in both forms, the calendar date taken in the session's own zone.
+ *
+ * Not the UTC date: a 17:00 Pacific session is already the next day in UTC, and
+ * using that would report every late-afternoon 1:1 as happening tomorrow. */
+function dateValue(unix: number, timezone: string): DateValue {
+  return { iso: new Date(unix * 1000).toISOString(), localDate: localDate(unix, timezone) };
+}
 
 /** Date in the SESSION's timezone, not the server's. A 1:1 at 17:00 Pacific is
  * still that day in Seattle when the server has already rolled over to the
@@ -187,9 +197,9 @@ export async function oneToOneStates(now = new Date()): Promise<OneToOneState[]>
       memberId,
       email: emailById.get(memberId) ?? "",
       calendarEmail: calendarEmailById.get(memberId) ?? null,
-      next: future.length > 0 ? localDate(future[0], zone) : null,
-      last: past.length > 0 ? localDate(past[past.length - 1], zone) : null,
-      bookedThrough: ends.length > 0 ? new Date(ends[0] * 1000).toISOString() : null,
+      next: future.length > 0 ? dateValue(future[0], zone) : null,
+      last: past.length > 0 ? dateValue(past[past.length - 1], zone) : null,
+      bookedThrough: ends.length > 0 ? dateValue(ends[0], zone) : null,
     };
   });
 }
@@ -337,7 +347,7 @@ export async function syncMemberToHubspot(memberId: number, now = new Date()) {
         },
         context: `member ${memberId}`,
       });
-      console.info(`[hubspot] member ${memberId} next=${state.next ?? "none"}: ${result}`);
+      console.info(`[hubspot] member ${memberId} next=${state.next?.iso ?? "none"}: ${result}`);
       return;
     }
 

@@ -126,7 +126,7 @@ describe("the dates it reports", () => {
     const [state] = await states();
     expect(state.last).not.toBeNull();
     expect(state.next).not.toBeNull();
-    expect(state.last! < state.next!).toBe(true);
+    expect(state.last!.localDate < state.next!.localDate).toBe(true);
   });
 
   it("gives a finite series a booked-through date", async () => {
@@ -149,11 +149,12 @@ describe("the dates it reports", () => {
       .where(eq(events.id, event.id));
 
     const [state] = await states();
-    // ISO timestamp, not YYYY-MM-DD: HubSpot types this field as datetime and
-    // rejects a plain date. The two date fields beside it are the other way
-    // round — a mismatch that would have failed on the very first sync.
-    expect(state.bookedThrough).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(state.bookedThrough!.slice(0, 10) > state.next!).toBe(true);
+    // Both forms, because which one HubSpot wants depends on how the property
+    // is typed over there — and somebody switching it from Date to
+    // Date-and-time silently changed the right answer once already.
+    expect(state.bookedThrough!.iso).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(state.bookedThrough!.localDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(state.bookedThrough!.localDate > state.next!.localDate).toBe(true);
   });
 
   it("leaves booked-through empty for a series with no end", async () => {
