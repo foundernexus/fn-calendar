@@ -118,6 +118,12 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
       // when someone connected a different calendar account.
       email: eventAttendees.attendeeEmail,
       role: eventAttendees.role,
+      // Written by the daily refreshAttendance, read here so an admin about to
+      // cancel or move a session can see who had already said yes. Reads
+      // "noreply" both for somebody who hasn't answered and for a session the
+      // daily job has not reached yet — the dialog shows nothing in either
+      // case, which is the only honest rendering of "no answer known".
+      responseStatus: eventAttendees.responseStatus,
     })
     .from(eventAttendees)
     .innerJoin(members, eq(eventAttendees.memberId, members.id))
@@ -130,11 +136,23 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
 
   const attendeesByEvent = new Map<
     number,
-    { memberId: number; fullName: string; email: string; role: string }[]
+    {
+      memberId: number;
+      fullName: string;
+      email: string;
+      role: string;
+      responseStatus: (typeof attendeeRows)[number]["responseStatus"];
+    }[]
   >();
   for (const a of attendeeRows) {
     const list = attendeesByEvent.get(a.eventId) ?? [];
-    list.push({ memberId: a.memberId, fullName: a.fullName, email: a.email, role: a.role });
+    list.push({
+      memberId: a.memberId,
+      fullName: a.fullName,
+      email: a.email,
+      role: a.role,
+      responseStatus: a.responseStatus,
+    });
     attendeesByEvent.set(a.eventId, list);
   }
 
@@ -184,11 +202,15 @@ export async function getBookedEventsOverlapping(memberIds: number[], from: Date
   });
 }
 
-/** No responseStatus: the column exists but nothing ever updates it (see
- * AttendeeRow in advisor-session-list.tsx), so selecting it only offered
- * callers a value that is permanently "noreply". The column itself is kept —
- * dropping it would be a migration against production for no gain, and it's
- * what a future RSVP webhook would write into. */
+/** No responseStatus, and no longer because there is nothing to read.
+ *
+ * The column is now written daily by refreshAttendance in lib/attendance.ts,
+ * and getBookedEventsOverlapping above does select it — the admin cancelling a
+ * session needs to know who had already accepted. This type does not, because
+ * it feeds /advisor, and that panel deliberately shows no guest list at all
+ * (see the note in advisor-session-list.tsx). Carrying per-person answers to a
+ * screen that must not name the people would be a leak waiting for someone to
+ * render it. */
 export type SessionAttendee = {
   memberId: number;
   fullName: string;

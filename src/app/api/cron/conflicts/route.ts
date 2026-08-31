@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { detectSeriesConflicts } from "@/lib/conflicts";
 import { syncOneToOneToHubspot } from "@/lib/one-to-one";
+import { refreshAttendance } from "@/lib/attendance";
 import { env } from "@/lib/env";
 
 // Reads calendars over the network for every upcoming date of every series.
@@ -39,7 +40,22 @@ export async function GET(request: Request) {
     const hubspot = await syncOneToOneToHubspot();
     console.info("[cron] hubspot 1:1 sync finished", hubspot);
 
-    return NextResponse.json({ ok: true, conflicts, hubspot });
+    // Last, and behind its own catch, which is the point rather than caution.
+    // The two jobs above have already done their work by the time this starts;
+    // letting a failure here escape into the handler's catch would turn a run
+    // that succeeded into a 500 and hide that they succeeded. Reading RSVPs is
+    // also the newest and least important of the three — it is the one that
+    // should give way, not the one that takes the others down with it.
+    let attendance;
+    try {
+      attendance = await refreshAttendance();
+      console.info("[cron] attendance refresh finished", attendance);
+    } catch (err) {
+      console.error("[cron/conflicts] attendance refresh failed", err);
+      attendance = { error: err instanceof Error ? err.message : "failed" };
+    }
+
+    return NextResponse.json({ ok: true, conflicts, hubspot, attendance });
   } catch (err) {
     // Loud, because nothing else will notice. Nobody is looking at this route,
     // and a check that quietly stopped running would leave the list looking

@@ -1,5 +1,6 @@
 import { env } from "@/lib/env";
 import type { BusyInterval, OwnEvent } from "@/lib/calendar/slots";
+import type { ProviderAttendance } from "@/lib/calendar/attendance";
 import { requestedScopes, type CalendarAccess } from "@/lib/calendar/scopes";
 
 /** Microsoft Outlook / Microsoft 365, spoken to directly through Graph.
@@ -401,6 +402,50 @@ export async function deleteMicrosoftEvent(params: { accessToken: string; eventI
   if (!res.ok && res.status !== 404 && res.status !== 410) {
     throw new MicrosoftApiError(res.status, await res.text().catch(() => ""), "event delete");
   }
+}
+
+/** What everyone on a session we created has answered — see
+ * fetchGoogleEventAttendance for why this reads the organiser's copy and why
+ * that asks nothing of the guests.
+ *
+ * /me/events/{id}, not calendarView: this wants the series master's answer,
+ * which is what an attendee gives when they accept a repeating invitation.
+ * calendarView would expand it into instances and force a choice between dates
+ * that nobody has actually answered separately.
+ *
+ * Needs Calendars.ReadWrite, which session leads already grant. No session lead
+ * is on Microsoft today, so this path is written to match Google's shape rather
+ * than from anything observed in production — the mapping in attendance.ts
+ * covers Graph's five spellings, and an unrecognised one is skipped rather than
+ * guessed at. */
+export async function fetchMicrosoftEventAttendance(params: {
+  accessToken: string;
+  eventId: string;
+}): Promise<ProviderAttendance[]> {
+  const url = new URL(`${GRAPH}/me/events/${encodeURIComponent(params.eventId)}`);
+  url.searchParams.set("$select", "attendees");
+
+  const res = await graphFetch(
+    url.toString(),
+    { headers: { Authorization: `Bearer ${params.accessToken}` } },
+    "event attendance"
+  );
+  const data = (await res.json()) as {
+    attendees?: {
+      emailAddress?: { address?: string };
+      status?: { response?: string };
+    }[];
+  };
+
+  const attendance: ProviderAttendance[] = [];
+  for (const attendee of data.attendees ?? []) {
+    const email = attendee.emailAddress?.address;
+    // Same reason as the Google side: no address, nothing to match a row
+    // against. Graph does this for rooms and equipment.
+    if (!email) continue;
+    attendance.push({ email, response: attendee.status?.response });
+  }
+  return attendance;
 }
 
 /** Microsoft has no public endpoint to revoke a single refresh token the way

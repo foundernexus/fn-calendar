@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { Check, CircleHelp, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,8 +12,38 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import type { BookedSlot } from "@/components/results-list";
+import type { BookedAttendee, BookedSlot } from "@/components/results-list";
 import { handleExpiredSession } from "@/lib/session-expired";
+
+/** The three answers a calendar invite can come back with, drawn the way Google
+ * draws them so nobody has to learn a second vocabulary for the same thing.
+ *
+ * "noreply" gets nothing at all, deliberately. It is where every invite starts
+ * and where most sit until the day, so a mark there would put something against
+ * almost every name and mean almost nothing. It is also what a row reads as
+ * before the daily job has ever looked at this session, and an absence is the
+ * only honest way to draw "no answer, or none read yet" — a grey icon would
+ * claim we had asked and been told nothing.
+ *
+ * Never colour alone: the three shapes already differ, and each carries a title
+ * and an off-screen label, so the answer survives colour-blindness and a screen
+ * reader both. */
+const RESPONSE_ICONS = {
+  yes: { Icon: Check, label: "Accepted", className: "text-emerald-600" },
+  no: { Icon: X, label: "Declined", className: "text-destructive" },
+  maybe: { Icon: CircleHelp, label: "Maybe", className: "text-amber-600" },
+} as const;
+
+function ResponseIcon({ status }: { status: BookedAttendee["responseStatus"] }) {
+  if (status === "noreply") return null;
+  const { Icon, label, className } = RESPONSE_ICONS[status];
+  return (
+    <span className="inline-flex shrink-0 items-center" title={label}>
+      <Icon className={`size-4 ${className}`} aria-hidden="true" />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
 
 /** Confirmation before cancelling a booked session.
  *
@@ -153,14 +184,22 @@ export function CancelSessionDialog({
             <ul className="mt-2 space-y-1">
               {booked.attendees.map((a) => (
                 <li key={a.email} className="text-sm text-foreground">
-                  {a.fullName}
-                  {a.role === "advisor" && (
-                    <span className="ml-2 text-xs text-muted-foreground">(advisor)</span>
-                  )}
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate">{a.fullName}</span>
+                    <ResponseIcon status={a.responseStatus} />
+                    {a.role === "advisor" && (
+                      <span className="text-xs text-muted-foreground">(advisor)</span>
+                    )}
+                  </span>
                   <span className="block text-xs text-muted-foreground">{a.email}</span>
                 </li>
               ))}
             </ul>
+            {/* Said plainly rather than implied. These answers come from a
+                daily job, so a reply that landed this morning may not be here
+                yet — and an admin deciding whether to chase somebody needs to
+                know they are reading yesterday's post, not a live feed. */}
+            <p className="mt-2 text-xs text-muted-foreground">Replies are checked once a day.</p>
           </div>
         )}
 

@@ -1,5 +1,6 @@
 import { env } from "@/lib/env";
 import type { BusyInterval, OwnEvent } from "@/lib/calendar/slots";
+import type { ProviderAttendance } from "@/lib/calendar/attendance";
 import { requestedScopes, type CalendarAccess } from "@/lib/calendar/scopes";
 
 /** Google Calendar, spoken to directly.
@@ -420,6 +421,55 @@ export async function updateGoogleEvent(params: {
     },
     "event update"
   );
+}
+
+/** What everyone on a session we created has answered.
+ *
+ * Read from the ORGANISER's copy of the event, and that is the load-bearing
+ * detail: an attendee's own copy knows what they said and nothing about anyone
+ * else, while the organiser's carries the whole list. So this asks nothing of
+ * the guests — no permission, no connected calendar, no account with us at all.
+ * An outside guest invited by email address is covered exactly like a member.
+ *
+ * Needs calendar.events, which session leads already grant so their sessions
+ * can be created in the first place. Nobody sees a new consent screen and
+ * nobody has to reconnect.
+ *
+ * Asks for the attendee field alone. The rest of an event is somebody's meeting
+ * content, and there is no reason to pull it across a network to count RSVPs.
+ *
+ * A missing `attendees` is an event with nobody on it — an empty answer, not a
+ * failure. A deleted event is a 404 and does throw; the caller decides what
+ * that means, because "the organiser removed it in Google" and "our token
+ * broke" want different handling and only the caller knows which it can
+ * tolerate. */
+export async function fetchGoogleEventAttendance(params: {
+  accessToken: string;
+  eventId: string;
+}): Promise<ProviderAttendance[]> {
+  const url = new URL(
+    `${CALENDAR_API}/calendars/primary/events/${encodeURIComponent(params.eventId)}`
+  );
+  url.searchParams.set("fields", "attendees(email,responseStatus)");
+
+  const res = await googleFetch(
+    url.toString(),
+    { headers: { Authorization: `Bearer ${params.accessToken}` } },
+    "event attendance"
+  );
+  const data = (await res.json()) as {
+    attendees?: { email?: string; responseStatus?: string }[];
+  };
+
+  const attendance: ProviderAttendance[] = [];
+  for (const attendee of data.attendees ?? []) {
+    // No address means nothing to match a row against. Google does this for
+    // resources like a meeting room, which are attendees to it and not people
+    // to us.
+    if (!attendee.email) continue;
+    attendance.push({ email: attendee.email, response: attendee.responseStatus });
+  }
+  return attendance;
 }
 
 /** Google's own id for ONE date of a repeating event.

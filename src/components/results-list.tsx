@@ -6,6 +6,11 @@ export type BookedAttendee = {
   fullName: string;
   email: string;
   role: string;
+  /** What this person has answered, as last read from the organiser's calendar
+   * by the daily job. "noreply" covers both "hasn't answered" and "we haven't
+   * looked yet", which is why the dialog draws nothing for it — see
+   * ResponseIcon in cancel-session-dialog.tsx. */
+  responseStatus: "noreply" | "yes" | "no" | "maybe";
 };
 export type BookedSlot = {
   id: number;

@@ -8,6 +8,7 @@ import {
   findGoogleInstanceId,
   revokeGoogleToken,
   fetchGoogleOwnEvents,
+  fetchGoogleEventAttendance,
 } from "@/lib/calendar/google";
 import {
   buildMicrosoftAuthUrl,
@@ -19,8 +20,10 @@ import {
   findMicrosoftInstanceId,
   revokeMicrosoftToken,
   fetchMicrosoftOwnEvents,
+  fetchMicrosoftEventAttendance,
 } from "@/lib/calendar/microsoft";
 import type { BusyInterval, OwnEvent } from "@/lib/calendar/slots";
+import type { ProviderAttendance } from "@/lib/calendar/attendance";
 import type { CalendarAccess } from "@/lib/calendar/scopes";
 
 /** One shape for both providers, so nothing outside this folder has to know
@@ -175,7 +178,22 @@ export async function revokeToken(params: {
   return { revokedAtProvider: true };
 }
 
-export type { OwnEvent };
+export type { OwnEvent, ProviderAttendance };
+
+/** What everybody on one already-created session has answered.
+ *
+ * Read-only, and the only thing in this file that asks a provider about an
+ * event it did not just write. See fetchGoogleEventAttendance for why the
+ * organiser's copy is the one worth reading. */
+export async function fetchEventAttendance(params: {
+  provider: CalendarProvider;
+  accessToken: string;
+  eventId: string;
+}): Promise<ProviderAttendance[]> {
+  return params.provider === "microsoft"
+    ? fetchMicrosoftEventAttendance(params)
+    : fetchGoogleEventAttendance(params);
+}
 
 /** The signed-in person's own day, so they can see what a free slot sits next
  * to before they book into it. */

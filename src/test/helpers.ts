@@ -144,6 +144,12 @@ export async function seedEvent(over: {
   status?: "confirmed" | "cancelled";
   nylasEventId?: string;
   organizerGrantId?: string | null;
+  /** The pair that makes an event readable back from its provider: the id, and
+   * the calendar that id means anything on. Both default to absent, which is
+   * what a Nylas-era row looks like — pass them for anything exercising
+   * refreshAttendance. */
+  providerEventId?: string | null;
+  organizerConnectionId?: number | null;
   attendees?: { memberId: number; email: string; role?: "guest" | "advisor" }[];
 }) {
   const duration = over.durationMinutes ?? 60;
@@ -161,6 +167,8 @@ export async function seedEvent(over: {
       // hand it the default instead — making the fallback path untestable.
       organizerGrantId:
         over.organizerGrantId === undefined ? "grant-organizer" : over.organizerGrantId,
+      providerEventId: over.providerEventId ?? null,
+      organizerConnectionId: over.organizerConnectionId ?? null,
       status: over.status ?? "confirmed",
       idempotencyKey: over.idempotencyKey,
     })
