@@ -298,13 +298,31 @@ export async function createGoogleEvent(params: {
   /** RFC 5545 rule for a repeating session, e.g.
    * `RRULE:FREQ=WEEKLY;INTERVAL=4;COUNT=6`. Absent for a one-off. */
   recurrenceRule?: string;
+  /** Enables asking Google for a Meet link when no `meetingUrl` was pasted.
+   *
+   * Google deduplicates conference creation on this id, so it has to survive a
+   * retry unchanged — a fresh value on the second attempt would hand the same
+   * session two different Meet rooms. The booking's idempotency key is already
+   * exactly that: stable for one booking, different for every other. Absent
+   * means "don't create one", which is what the reschedule and cancel paths
+   * want. */
+  conferenceRequestId?: string;
 }) {
   const organizer = params.organizerEmail?.trim().toLowerCase();
+  // A pasted link wins. Someone who keeps a standing Zoom room on /me is
+  // naming the room this session happens in, and quietly creating a second,
+  // different place for the same meeting would be worse than useless. An empty
+  // field is what asks for a Meet link — no extra switch to forget.
+  const createConference = !params.meetingUrl?.trim() && !!params.conferenceRequestId;
   const res = await googleFetch(
     // sendUpdates=all is what actually emails the invitations. Without it the
     // event appears on the organiser's calendar and nobody else ever hears
     // about it.
-    `${CALENDAR_API}/calendars/primary/events?sendUpdates=all&conferenceDataVersion=0`,
+    //
+    // conferenceDataVersion=1 is what makes Google read conferenceData at all;
+    // at 0 it ignores the field entirely and silently creates a link-less
+    // event.
+    `${CALENDAR_API}/calendars/primary/events?sendUpdates=all&conferenceDataVersion=1`,
     {
       method: "POST",
       headers: {
@@ -317,6 +335,16 @@ export async function createGoogleEvent(params: {
         // An admin-pasted URL of unknown provider goes in `location`, not a
         // typed conferencing object — it shows on the invite whatever it is.
         location: params.meetingUrl,
+        ...(createConference
+          ? {
+              conferenceData: {
+                createRequest: {
+                  requestId: params.conferenceRequestId,
+                  conferenceSolutionKey: { type: "hangoutsMeet" },
+                },
+              },
+            }
+          : {}),
         // A repeating session is ONE event carrying a rule, not many events.
         // The people on it get a single invitation, and their calendar handles
         // skipping or moving an individual occurrence — which it does well, in
@@ -346,8 +374,25 @@ export async function createGoogleEvent(params: {
     },
     "event create"
   );
-  const data = (await res.json()) as { id: string; htmlLink?: string };
-  return { eventId: data.id, url: data.htmlLink };
+  const data = (await res.json()) as {
+    id: string;
+    htmlLink?: string;
+    hangoutLink?: string;
+    conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] };
+  };
+  // Both spellings, because Google gives the video entry point on
+  // conferenceData and ALSO mirrors a Meet room to the older top-level
+  // hangoutLink. Reading only one of them works right up until it doesn't.
+  //
+  // Creation is documented as asynchronous, so a `pending` conference can come
+  // back with no link yet. Deliberately not retried or re-fetched: the event is
+  // already real and Google shows attendees the Meet link on the invite either
+  // way, so the only cost is our own copy being blank on the advisor dashboard
+  // — not worth a second round trip and the latency it adds to every booking.
+  const meetingUrl =
+    data.conferenceData?.entryPoints?.find((e) => e.entryPointType === "video")?.uri ??
+    data.hangoutLink;
+  return { eventId: data.id, url: data.htmlLink, meetingUrl };
 }
 
 export async function updateGoogleEvent(params: {

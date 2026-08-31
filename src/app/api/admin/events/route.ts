@@ -386,6 +386,11 @@ export async function POST(request: Request) {
       title: body.title,
       description: body.description,
       meetingUrl: body.meetingUrl || undefined,
+      // Only used when the link field was left empty, and then the provider
+      // generates one. Reusing the idempotency key is the point rather than a
+      // convenience: it's already stable for exactly one booking, so a retry
+      // reattaches the same room instead of minting a second one.
+      conferenceRequestId: idempotencyKey,
       startTime: body.startsAtUnix,
       endTime: endsAtUnix,
       timezone: body.timezone,
@@ -469,7 +474,11 @@ export async function POST(request: Request) {
         startsAt: new Date(body.startsAtUnix * 1000),
         endsAt: new Date(endsAtUnix * 1000),
         timezone: body.timezone,
-        meetingUrl: body.meetingUrl || null,
+        // A generated Meet link wins over the empty field it came from, so the
+        // advisor dashboard shows the place this session actually happens
+        // rather than nothing. A pasted link is never overwritten — the
+        // provider only generates one when the field was empty.
+        meetingUrl: providerEvent.meetingUrl ?? (body.meetingUrl || null),
         organizerMemberId: body.organizerMemberId,
         providerEventId: providerEvent.eventId,
         // Recorded, not re-derived later: an event id only means anything

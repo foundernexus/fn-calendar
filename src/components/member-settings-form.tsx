@@ -470,7 +470,9 @@ export function MemberSettingsForm({
           <p className="text-base font-semibold text-foreground">Your meeting link</p>
           <p className="mt-1 text-sm text-muted-foreground">
             Filled in automatically whenever you book a session. You can still change it on any
-            individual booking.
+            individual booking. Leave it empty and each session gets its own fresh Google Meet
+            link instead — which is what you want for introductions between people who don&apos;t
+            share a room.
           </p>
           <Input
             id="meeting-link"

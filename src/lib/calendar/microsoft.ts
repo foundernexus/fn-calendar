@@ -317,7 +317,12 @@ export async function createMicrosoftEvent(params: {
     "event create"
   );
   const data = (await res.json()) as { id: string; webLink?: string };
-  return { eventId: data.id, url: data.webLink };
+  // Always undefined: Graph would make a Teams meeting with isOnlineMeeting,
+  // but no session lead is on Microsoft today and an untested conferencing path
+  // is worse than none. Stated rather than omitted so both providers return the
+  // same shape and callers need no branch — a Microsoft lead with an empty link
+  // field gets no link, exactly as before.
+  return { eventId: data.id, url: data.webLink, meetingUrl: undefined };
 }
 
 export async function updateMicrosoftEvent(params: {

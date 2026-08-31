@@ -41,6 +41,11 @@ export async function createSessionEvent(params: {
   participants: { name?: string; email: string }[];
   /** RFC 5545 rule for a repeating session. Absent for a one-off. */
   recurrenceRule?: string;
+  /** Asks the provider for a video link when `meetingUrl` is empty, so a
+   * session lead who keeps no standing room still hands everyone somewhere to
+   * meet. Must be stable across a retry of the SAME booking — see
+   * createGoogleEvent. */
+  conferenceRequestId?: string;
 }) {
   const accessToken = await getAccessToken(params.connection);
   return createEvent({
@@ -54,6 +59,7 @@ export async function createSessionEvent(params: {
     timezone: params.timezone,
     participants: params.participants,
     recurrenceRule: params.recurrenceRule,
+    conferenceRequestId: params.conferenceRequestId,
     // The event is created ON this connection's calendar, so its address IS
     // the organiser's. Passed down so the provider can be told that person has
     // already agreed to be there — see createGoogleEvent.

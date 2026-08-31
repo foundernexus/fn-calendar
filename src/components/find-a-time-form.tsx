@@ -63,11 +63,18 @@ export function FindATimeForm({
   signedInEmail?: string;
 }) {
   const connectedMembers = members.filter((m) => m.connected);
-  // Session lead is a curated subset — connecting a calendar makes someone
-  // eligible as a guest, not automatically eligible to lead a session.
+  // Session lead is a curated subset, and the ONE role that genuinely has to be
+  // connected: the session is created on their calendar, so without a writable
+  // connection there is nowhere for it to go.
   const facilitators = connectedMembers.filter((m) => m.isFacilitator);
-  // Same idea as facilitators: a curated subset, not everyone connected.
-  const advisors = connectedMembers.filter((m) => m.isAdvisor);
+  // Deliberately NOT filtered by `connected`, unlike the lead above. An
+  // introduction is arranged with someone who hasn't joined the tool — an
+  // outside advisor who sent over their Calendly is the normal case, not an
+  // edge one — and the old filter made those people unbookable rather than
+  // merely uncheckable. They're invited at their registered address and their
+  // calendar simply isn't consulted; the search already reports them under
+  // notConnectedNames instead of blocking on them.
+  const advisors = members.filter((m) => m.isAdvisor);
   // Advisors are deliberately absent from the guest list entirely, not just
   // hidden once picked above: being an advisor is a distinct role on the
   // session (own dashboard, own session cap, its own attendee role), so
@@ -79,7 +86,9 @@ export function FindATimeForm({
   // lead picker and the founder list — FounderNexus staff listed as founders of
   // the companies they run sessions for. Two rules for the word "founder" in
   // one app, and the People page had the right one.
-  const guestCandidates = connectedMembers.filter((m) => !m.isAdvisor && !m.isFacilitator);
+  // Unconnected founders are offered here for the same reason as advisors
+  // above — see that note.
+  const guestCandidates = members.filter((m) => !m.isAdvisor && !m.isFacilitator);
 
   // The person scheduling the session is usually the one leading it, so they
   // start selected. This used to be facilitators[0], which is whoever sorts
@@ -465,23 +474,25 @@ export function FindATimeForm({
             // selected as a guest in the first place.
             onChange={setAdvisorMemberId}
             placeholder="Add an advisor to this session?"
-            emptyText="No connected advisors — mark someone as an advisor when adding them."
+            emptyText="No advisors yet — mark someone as an advisor when adding them."
           />
           <p className="text-xs text-muted-foreground">
-            Their calendar is checked like everyone else&apos;s, and they&apos;ll see the session on
-            their advisor dashboard. Pick the same person again to clear this.
+            A connected advisor&apos;s calendar is checked like everyone else&apos;s. An advisor
+            who hasn&apos;t connected is still invited, at the address they&apos;re registered
+            under — their calendar just isn&apos;t checked. Either way they&apos;ll see the
+            session on their advisor dashboard. Pick the same person again to clear this.
           </p>
         </div>
 
         <div className="space-y-2">
           {/* Adding people lives on /admin/members now, not here: this page is
               for booking, that one is for who exists and what they've
-              connected. Nothing is lost by the move — someone added here could
-              never be booked in the same sitting anyway, since they don't
-              appear in any picker until they've connected a calendar. */}
+              connected. Someone added there CAN now be booked straight away
+              without connecting anything, which is the whole point of an
+              introduction — so the round trip is one page, not a wait. */}
           {/* "Founders", matching the People page's grouping and the language
               everyone here actually uses. Slightly loose: this list is
-              "connected and not an advisor", so a Team member could appear in
+              "not an advisor and not Team", so a Team member could appear in
               it if they're attending rather than leading. That's rare enough
               to be worth the plainer word. */}
           <Label htmlFor="guests">Founders</Label>
@@ -493,21 +504,17 @@ export function FindATimeForm({
             excludeId={organizerMemberIdState}
             placeholder="Who's this session for?"
           />
-          {connectedMembers.length === 0 ? (
+          {/* Keyed off guestCandidates, not connectedMembers: connecting is no
+              longer what makes someone selectable here, so the old test would
+              have shown "nobody's connected a calendar yet" over a picker that
+              was in fact full of people. */}
+          {guestCandidates.length === 0 ? (
+            // Everyone on the books is an advisor or Team. Without this the
+            // picker would just be empty under a note explaining how selection
+            // works, which reads like a bug.
             <p className="text-sm text-destructive">
-              No one&apos;s connected a calendar yet —{" "}
-              <Link href="/connect" className="underline">
-                connect one
-              </Link>{" "}
-              first.
-            </p>
-          ) : guestCandidates.length === 0 ? (
-            // Everyone connected is an advisor. Without this the picker would
-            // just be empty with the reassuring "only connected people can be
-            // selected" note below it, which reads like a bug.
-            <p className="text-sm text-destructive">
-              Everyone who&apos;s connected is marked as an advisor — pick them in the advisor field
-              above, or add a founder on the{" "}
+              Everyone registered is marked as an advisor or Team — pick them in the fields above,
+              or add a founder on the{" "}
               <Link href="/admin/members" className="underline">
                 People page
               </Link>
@@ -515,8 +522,9 @@ export function FindATimeForm({
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Only people who&apos;ve connected their calendar can be selected — that&apos;s what
-              makes the grid below meaningful.
+              Anyone registered can be selected. People who&apos;ve connected a calendar are
+              checked for conflicts in the grid below; anyone else is invited without being
+              checked.
             </p>
           )}
         </div>
@@ -672,6 +680,10 @@ export function FindATimeForm({
           guestNames={searchedParams.guestMemberIds.map(
             (id) => members.find((m) => m.id === id)?.fullName ?? `Member #${id}`
           )}
+          // Taken from the search result, not recomputed from `members`: this
+          // is who the server actually skipped for THIS slot, and someone could
+          // have connected or dropped off since the page loaded.
+          notConnectedNames={result?.notConnectedNames ?? []}
           timezone={searchedParams.timezone}
           onOpenChange={(open) => {
             if (!open) setDialogSlot(null);

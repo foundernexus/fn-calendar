@@ -106,6 +106,9 @@ export async function createEvent(params: {
   /** RFC 5545 rule for a repeating session. Google only — see
    * createMicrosoftEvent. */
   recurrenceRule?: string;
+  /** Asks for a generated Meet link when no `meetingUrl` was pasted. Google
+   * only; Microsoft ignores it — see createMicrosoftEvent. */
+  conferenceRequestId?: string;
 }) {
   return params.provider === "microsoft"
     ? createMicrosoftEvent(params)

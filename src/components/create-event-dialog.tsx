@@ -106,6 +106,7 @@ export function CreateEventDialog({
   advisorName,
   guestMemberIds,
   guestNames,
+  notConnectedNames = [],
   timezone,
   defaultMeetingUrl = "",
   onOpenChange,
@@ -119,6 +120,11 @@ export function CreateEventDialog({
   advisorName: string | null;
   guestMemberIds: number[];
   guestNames: string[];
+  /** Whoever on this session had no calendar to check. They are invited like
+   * everyone else — this slot simply isn't known to be free for them, and this
+   * is the last screen before it's booked, so it says so here rather than
+   * leaving it behind on the results line. */
+  notConnectedNames?: string[];
   timezone: string;
   /** The session lead's standing link for this length, if they hold one. Only
    * a starting value — an admin can replace it for a one-off. */
@@ -234,8 +240,16 @@ export function CreateEventDialog({
               type="url"
               value={meetingUrl}
               onChange={(e) => setMeetingUrl(e.target.value)}
-              placeholder="https://zoom.us/j/… (optional)"
+              placeholder="https://zoom.us/j/… (leave empty for Google Meet)"
             />
+            {/* The empty field IS the switch, so it has to say so here. An
+                introduction between two people who've never met is exactly the
+                booking where nobody has a shared room to paste, and silently
+                sending an invite with nowhere to meet is the failure this
+                sentence prevents. */}
+            <p className="text-xs text-muted-foreground">
+              Leave this empty and Google Meet makes a fresh link for this session.
+            </p>
           </div>
           <div className="space-y-2 rounded-lg border border-border p-3">
             <label className="flex items-center gap-2 text-sm text-foreground">
@@ -313,6 +327,16 @@ export function CreateEventDialog({
                 <p className="text-xs text-muted-foreground">Advisor</p>
                 <p className="text-foreground">{advisorName}</p>
               </div>
+            )}
+            {/* Spans both columns and sits under the summary: it's a caveat
+                about the people named above, not another field alongside
+                them. */}
+            {notConnectedNames.length > 0 && (
+              <p className="col-span-2 text-xs text-muted-foreground">
+                {notConnectedNames.join(", ")}{" "}
+                {notConnectedNames.length === 1 ? "has no" : "have no"} calendar connected, so this
+                time wasn&apos;t checked against theirs. They&apos;ll be invited and can decline.
+              </p>
             )}
           </div>
           <DialogFooter>
