@@ -56,7 +56,7 @@ export function AvailabilityGrid({
   ownEvents?: OwnEventSummary[];
   /** The session lead for the search that produced these slots. A busy cell is
    * only offerable when THEY are the only person busy in it — see the cell.
-   * Null is safe: every busy cell then stays shut, naming who is busy. */
+   * Null is safe: every busy cell then renders as an ordinary unavailable one. */
   leadMemberId?: number | null;
   startDate: string;
   endDate: string;
@@ -295,54 +295,27 @@ export function AvailabilityGrid({
                   // what you are about to book over, which is the whole case
                   // this was built for.
                   const mine = slot ? undefined : ownByCell.get(`${day}_${time}`);
-                  const busy = slot ? undefined : busyByCell.get(`${day}_${time}`);
+                  const rawBusy = slot ? undefined : busyByCell.get(`${day}_${time}`);
+                  // The only thing standing in the way is the session lead's own
+                  // calendar — a hold they made themselves, somewhere else. That
+                  // is the one case worth offering, and the whole reason this
+                  // exists: the block IS the session.
+                  //
+                  // The moment anybody ELSE is busy, this is `undefined` and the
+                  // cell falls through to the ordinary unavailable one below —
+                  // grey, shut, and saying nothing about whose calendar it is.
+                  // Grey already means "not free", which is the only thing being
+                  // asked; writing a participant's name across the grid answers
+                  // a question nobody posed and puts other people's business on
+                  // screen for no gain.
+                  const busy =
+                    rawBusy &&
+                    leadMemberId !== null &&
+                    rawBusy.busyMemberIds.length > 0 &&
+                    rawBusy.busyMemberIds.every((id) => id === leadMemberId)
+                      ? rawBusy
+                      : undefined;
                   if (busy) {
-                    const who = busy.busyNames.join(", ");
-                    // The only thing standing in the way is the session lead's
-                    // own calendar — a hold they made themselves, somewhere
-                    // else. That is the one case worth offering, and the whole
-                    // reason this exists: the block IS the session.
-                    //
-                    // The moment anybody ELSE is busy, the cell stays shut. Not
-                    // because it couldn't be booked, but because nobody wants
-                    // to: the question at these cells is "is this person free",
-                    // and "no" is a complete answer. Offering a button there
-                    // would invite exactly the double-booking nobody asked for.
-                    const onlyTheLead =
-                      leadMemberId !== null &&
-                      busy.busyMemberIds.length > 0 &&
-                      busy.busyMemberIds.every((id) => id === leadMemberId);
-
-                    if (!onlyTheLead) {
-                      // Shut, but not silent. Naming who is busy is the entire
-                      // point — it turns a dead grey square into the answer.
-                      return (
-                        <button
-                          key={`${day}_${time}`}
-                          type="button"
-                          disabled
-                          title={`${who} ${busy.busyNames.length === 1 ? "is" : "are"} busy`}
-                          aria-label={`${formatDateLabel(day)} ${formatTimeLabel(time)} — ${who} ${
-                            busy.busyNames.length === 1 ? "is" : "are"
-                          } busy`}
-                          className="min-w-0 truncate border-b border-l border-border bg-secondary px-1.5 py-1.5 text-left text-[11px] leading-tight text-muted-foreground"
-                        >
-                          {who}
-                        </button>
-                      );
-                    }
-                    // Whether the ONLY person busy here is the one reading the
-                    // screen. That is the case this whole feature was built for
-                    // — a hold you made elsewhere, sitting on your own calendar
-                    // — and it is the one case where your own event title is the
-                    // more useful thing to show, because it says what you'd be
-                    // booking over.
-                    //
-                    // The moment anybody else is busy too, the names win. The
-                    // question at one of these cells is "can I still get the
-                    // others here", and a cell reading "Edan Shahar" answers a
-                    // question nobody asked while hiding the one they did.
-                    //
                     return (
                       <button
                         key={`${day}_${time}`}
@@ -363,7 +336,7 @@ export function AvailabilityGrid({
                         // glance rather than by shade.
                         className="min-w-0 truncate border-b border-l border-border bg-secondary px-1.5 py-1.5 text-left text-[11px] leading-tight text-muted-foreground outline-1 -outline-offset-2 outline-dashed outline-foreground/40 transition-colors hover:bg-secondary/60 hover:text-foreground"
                       >
-                        {mine ?? who}
+                        {mine}
                       </button>
                     );
                   }

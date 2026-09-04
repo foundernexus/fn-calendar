@@ -48,9 +48,8 @@ export function RescheduleSessionDialog({
   const [submitting, setSubmitting] = useState(false);
   const durationMinutes = Math.round((slot.endUnix - slot.startUnix) / 60);
 
-  // Who this move would double-book, if anyone — read off the slot for the same
-  // reason as in CreateEventDialog.
-  const busyNames = slot.busyNames ?? [];
+  // Whose calendar this move goes onto, if anyone's. Only ever the lead's own —
+  // the grid does not open this dialog for a slot anybody else is busy in.
   const busyMemberIds = slot.busyMemberIds ?? [];
   const overBusy = busyMemberIds.length > 0;
 

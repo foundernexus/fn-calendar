@@ -141,7 +141,6 @@ export function CreateEventDialog({
   // grid cell was drawn from and the ones sent to the server — three copies of
   // this list that could disagree is exactly how somebody gets double-booked
   // without it appearing on screen.
-  const busyNames = slot.busyNames ?? [];
   const busyMemberIds = slot.busyMemberIds ?? [];
   const overBusy = busyMemberIds.length > 0;
 
