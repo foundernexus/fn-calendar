@@ -57,6 +57,11 @@ const bodySchema = z
     // turning up late because their previous call ran right up to ours.
     // Optional so an older client that doesn't send it keeps working.
     leadMinutes: z.union([z.literal(0), z.literal(10), z.literal(15)]).optional(),
+    // Also return the times somebody is busy, so a session can be booked over a
+    // hold made somewhere else. Optional, and absent means the search behaves
+    // exactly as it always has — nothing extra is offered to a client that
+    // didn't ask.
+    allowBusy: z.boolean().optional(),
   })
   .refine((b) => b.endDate >= b.startDate, {
     message: "End date must be on or after start date.",
@@ -234,6 +239,7 @@ export async function POST(request: Request) {
         workingHoursEnd: body.workingHoursEnd,
         excludeWeekends: body.excludeWeekends,
         leadMinutes: body.leadMinutes,
+        includeBusy: body.allowBusy === true,
         // One group per PERSON, carrying every address they hold — someone with
         // a work and a personal calendar is one constraint, not two.
         blockerGroups: allSelectedIds
@@ -267,6 +273,11 @@ export async function POST(request: Request) {
   }
 
   const { slots, unreadable, droppedByLead, blockers } = collective;
+  // `?? []` rather than a plain destructure: this field is newer than some of
+  // the callers and all of the test doubles that stand in for this lib, and a
+  // missing one must read as "no busy times were asked for", never blow up a
+  // search that had nothing to do with the feature.
+  const busySlots = collective.busySlots ?? [];
 
   // The session lead is the exception: their calendar is the one the session is
   // created ON, and every slot offered is a claim about their time. Offering
@@ -290,9 +301,13 @@ export async function POST(request: Request) {
   // couldn't confirm. Silently dropping them is the one thing that must not
   // happen — see the note on CollectiveAvailability.
   const memberNameByEmail = new Map<string, string>();
+  // The same map keyed to ids, because the booking route speaks in member ids
+  // and has to be able to match what it was sent against who it finds busy.
+  const memberIdByEmail = new Map<string, number>();
   for (const id of allSelectedIds) {
     for (const c of connectionsByMemberId.get(id) ?? []) {
       memberNameByEmail.set(c.grant_email, membersById.get(id)?.fullName ?? c.grant_email);
+      memberIdByEmail.set(c.grant_email, id);
     }
   }
   // Named per CALENDAR, not per person, and deduped by address rather than by
@@ -364,6 +379,15 @@ export async function POST(request: Request) {
     allSelectedIds.every((id) => clearsStatedHours(slot, id))
   );
 
+  // Busy times get filtered by stated hours too, and those are NOT overridable.
+  // The override is over calendars — a fact we read about somebody — never over
+  // what they wrote down about themselves; the booking route refuses these again
+  // for the same reason. If the two ever disagreed, the grid would hand out a
+  // cell that can only fail, which is worse than not offering it.
+  const offerableBusySlots = busySlots.filter((slot) =>
+    allSelectedIds.every((id) => clearsStatedHours(slot, id))
+  );
+
   // Who is the constraint, when there is nothing to offer.
   //
   // Two different causes need two different answers. If the calendars never
@@ -420,6 +444,28 @@ export async function POST(request: Request) {
     // Who to drop, or talk to, when nothing fits. Null when no single person
     // unlocks anything — then the range is the problem, not a person.
     constraint,
+    // Times somebody is busy, offered anyway because the search asked for them.
+    // Never merged into `slots`: everything above counts free time, and these
+    // are the opposite of free — they're the times you can decide to take.
+    busySlots: offerableBusySlots.map((slot) => ({
+      startUnix: slot.startTime,
+      endUnix: slot.endTime,
+      label: formatSlotRange(slot.startTime, slot.endTime, body.timezone),
+      // By member, not by address: someone holding a work and a personal
+      // calendar is one person to double-book, not two, and the confirm dialog
+      // says a name rather than an inbox. Ids travel alongside because they are
+      // what the booking route matches on — a name is for reading.
+      busyMemberIds: [
+        ...new Set(
+          slot.busyEmails
+            .map((email) => memberIdByEmail.get(email))
+            .filter((id): id is number => id !== undefined)
+        ),
+      ],
+      busyNames: [
+        ...new Set(slot.busyEmails.map((email) => memberNameByEmail.get(email) ?? email)),
+      ],
+    })),
     // Real sessions already booked through this tool involving anyone
     // selected — shown on the grid as a distinct "already booked" cell
     // instead of an unexplained gray one.

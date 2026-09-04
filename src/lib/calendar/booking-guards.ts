@@ -156,6 +156,108 @@ export async function slotStillFree(params: {
   }
 }
 
+/** Which of these people are busy on their real calendar at this time.
+ *
+ * The counterpart to slotStillFree, not a replacement. That one answers yes/no
+ * and is only ever asked when nobody wants to book over anybody. This one has to
+ * NAME people, because booking over somebody's calendar is only safe if the
+ * admin is overriding the people they were actually shown — see the route.
+ *
+ * `known` is the difference that matters, and it is the opposite of the
+ * asymmetry documented on slotStillFree. That guard turns "we couldn't tell"
+ * into "go ahead", and must, or a bad minute at Google becomes a second way a
+ * legitimate booking gets refused. But nobody has asked to double-book anyone
+ * there. Here they have, and an answer we could not verify must not be read as
+ * consent to double-book a named person — so `known: false`, and the caller
+ * refuses rather than guessing on somebody else's behalf.
+ *
+ * Buffers are applied, like everywhere else, so the names here agree with the
+ * names the grid showed. Run-up (`leadMinutes`) is NOT — see the note on
+ * getCollectiveAvailability's `includeBusy` for why erring that way is safe. */
+export async function busyParticipants(params: {
+  memberIds: number[];
+  startUnix: number;
+  endUnix: number;
+  durationMinutes: number;
+  timezone: string;
+  context: string;
+}): Promise<{ known: boolean; memberIds: number[] }> {
+  const localStart = zonedDateTimeParts(params.startUnix, params.timezone);
+  const localEnd = zonedDateTimeParts(params.endUnix, params.timezone);
+  // A slot crossing midnight cannot be described by one day's working hours, so
+  // there is no question to ask — and "no answer" is not "nobody is busy".
+  if (localStart.date !== localEnd.date) return { known: false, memberIds: [] };
+
+  try {
+    const ids = [...new Set(params.memberIds)];
+    const [connections, members] = await Promise.all([
+      getActiveConnections(ids),
+      getMembersByIds(ids),
+    ]);
+    const buffersByMember = new Map(
+      members.map((m) => [m.id, { before: m.bufferBeforeMinutes, after: m.bufferAfterMinutes }])
+    );
+    // Both directions of the same map: the availability lib speaks in grant
+    // addresses, the route speaks in member ids, and the whole point of this
+    // function is handing the route names it can match against what it was sent.
+    const memberIdByEmail = new Map<string, number>();
+    const participants = [
+      ...new Map(
+        connections.map((c) => {
+          memberIdByEmail.set(c.grant_email, c.member_id);
+          return [
+            c.grant_email,
+            {
+              ...connectionCredentials(c),
+              bufferBeforeMinutes: buffersByMember.get(c.member_id)?.before ?? 0,
+              bufferAfterMinutes: buffersByMember.get(c.member_id)?.after ?? 0,
+            },
+          ] as const;
+        })
+      ).values(),
+    ];
+    // Nobody connected is a genuine, knowable answer: there is no calendar to be
+    // busy on. Distinct from the unreadable case below, which is ignorance.
+    if (participants.length === 0) return { known: true, memberIds: [] };
+
+    const { busySlots, unreadable } = await getCollectiveAvailability({
+      connections: participants,
+      startTime: params.startUnix,
+      endTime: params.endUnix,
+      durationMinutes: params.durationMinutes,
+      intervalMinutes: AVAILABILITY_INTERVAL_MINUTES,
+      timezone: params.timezone,
+      workingHoursStart: localStart.time,
+      workingHoursEnd: localEnd.time,
+      excludeWeekends: false,
+      includeBusy: true,
+    });
+
+    // Nothing readable means nothing known, and the caller must not double-book
+    // anybody on the strength of that — the same guard as in slotStillFree, and
+    // for the same reason, though it lands on the opposite answer here.
+    //
+    // Deliberately `>= participants.length`, not `> 0`. A search already offers
+    // free slots without accounting for the calendars it couldn't read, saying
+    // so loudly rather than refusing (see CollectiveAvailability). Treating that
+    // same partial ignorance as fatal only on this path would make an override
+    // permanently impossible for any group containing one broken connection,
+    // while booking the very next cell along stayed fine.
+    if (unreadable.length >= participants.length) return { known: false, memberIds: [] };
+
+    const slot = (busySlots ?? []).find((s) => s.startTime === params.startUnix);
+    const busy = new Set<number>();
+    for (const email of slot?.busyEmails ?? []) {
+      const memberId = memberIdByEmail.get(email);
+      if (memberId !== undefined) busy.add(memberId);
+    }
+    return { known: true, memberIds: [...busy] };
+  } catch (err) {
+    console.warn(`[${params.context}] Couldn't work out who's busy`, err);
+    return { known: false, memberIds: [] };
+  }
+}
+
 /** How much slack before two identical-looking busy blocks count as different.
  * Providers round and re-encode times; a minute of drift is not a clash. */
 const CLASH_TOLERANCE_SECONDS = 60;

@@ -363,6 +363,33 @@ Not built today, and it is not a small change:
   the booking route's re-validation both need to know it, or an admin can book a session for someone the search
   already knew was busy.
 
+**This last point is now answered**, for busy slots at least — see *Booking over busy time* below. Whoever
+builds majority availability should follow the same shape rather than inventing a second one.
+
+### Booking over busy time
+
+A session is sometimes arranged outside this tool — a hold made on somebody's Calendly, a placeholder put in by
+hand — and the block sitting on the calendar *is* the session being booked. Being busy is not always a reason
+not to book, so a partially-available slot **is** bookable, under four rules:
+
+1. **Opt in per search.** `allowBusy` on `POST /api/admin/availability`. Without it the response and the grid
+   are exactly what they always were: grey still means no, which matters because the grid has already been
+   read backwards once.
+2. **A separate field, never merged into `slots`.** `computeBusySlots` (`src/lib/calendar/slots.ts`) is the
+   exact complement of `computeCollectiveSlots` over the same candidates, so the two partition the grid. This
+   is not tidiness: `droppedByLead`, `blockers`, `constraint` and `filteredByPreferences` all count *free*
+   slots, and widening `slots` would make every one of them answer a different question at once.
+3. **The booking route is told who, not whether.** `overrideBusyMemberIds` is a list of member ids, so the
+   override only covers the people the admin was actually shown. Anybody else found busy refuses the booking
+   with their name in it — a boolean would have handed a stale grid the power to double-book somebody nobody
+   ever saw. The guard behind it, `busyParticipants`, fails **closed** where `slotStillFree` fails open: an
+   answer we could not verify is not consent to double-book a named person.
+4. **One-off bookings only, and never over stated hours.** A series is refused (400 when booking, 409 when
+   moving): the fourth date is four months out, nobody has seen it, and `detectSeriesConflicts` would raise
+   every future date of it on Karin's list every morning for the life of the series. Stated weekly availability
+   is filtered out of the busy slots at search *and* refused at both write routes — the override is over
+   something we *read* about somebody, never over what they told us themselves.
+
 ---
 
 ## 8. Booking and idempotency

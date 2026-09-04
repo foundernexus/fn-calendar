@@ -31,6 +31,32 @@ vi.mock("@/lib/nylas", () => ({
   rescheduleNylasEvent: (a: GrantArgs & { startTime: number }) => nylas.rescheduleNylasEvent(a),
 }));
 
+type AvailArgs = { startTime: number; endTime: number };
+type AvailResult = {
+  slots: { startTime: number; endTime: number }[];
+  unreadable: string[];
+  busySlots: { startTime: number; endTime: number; busyEmails: string[] }[];
+};
+
+/** Everybody is free, whenever they're asked about.
+ *
+ * These tests used to run against the real lib, which threw on undecryptable
+ * tokens and so failed open into the same answer — so this preserves the
+ * behaviour they were written under while making the busy case reachable at
+ * all. It echoes the requested window rather than a fixed slot, or every
+ * reschedule to a new time would look like a time that had been taken. */
+const availability = vi.fn(
+  async (a: AvailArgs): Promise<AvailResult> => ({
+    slots: [{ startTime: a.startTime, endTime: a.endTime }],
+    unreadable: [],
+    busySlots: [],
+  })
+);
+
+vi.mock("@/lib/calendar/availability", () => ({
+  getCollectiveAvailability: (a: AvailArgs) => availability(a),
+}));
+
 const SLOT = Math.floor(new Date("2026-09-02T17:00:00Z").getTime() / 1000);
 
 beforeAll(async () => {
@@ -44,6 +70,11 @@ beforeEach(async () => {
   vi.clearAllMocks();
   nylas.cancelNylasEvent.mockResolvedValue({});
   nylas.rescheduleNylasEvent.mockResolvedValue({});
+  availability.mockImplementation(async (a: AvailArgs) => ({
+    slots: [{ startTime: a.startTime, endTime: a.endTime }],
+    unreadable: [],
+    busySlots: [],
+  }));
   vi.resetModules();
   mockCookies(await adminCookie());
   await reinstallTestDb();
@@ -78,12 +109,12 @@ async function cancel(id: number) {
   });
 }
 
-async function reschedule(id: number, startsAtUnix: number) {
+async function reschedule(id: number, startsAtUnix: number, over: Record<string, unknown> = {}) {
   const { PATCH } = await import("./route");
   return PATCH(
     jsonRequest(
       `http://localhost/api/admin/events/${id}`,
-      { startsAtUnix, durationMinutes: 60, timezone: "America/Los_Angeles" },
+      { startsAtUnix, durationMinutes: 60, timezone: "America/Los_Angeles", ...over },
       { cookie: await adminCookie(), method: "PATCH" }
     ),
     { params: Promise.resolve({ id: String(id) }) }
@@ -213,6 +244,81 @@ describe("rescheduling", () => {
     expect(res.status).toBe(502);
     const [row] = await harness.db.select().from(events).where(eq(events.id, event.id));
     expect(Math.floor(row.startsAt.getTime() / 1000)).toBe(SLOT);
+  });
+
+  /** Moving gets the same override as booking, deliberately. The two guards it
+   * runs are the booking route's guards, and an override that worked for one and
+   * not the other is the exact drift that left rescheduling with no guards at
+   * all the first time round. */
+  describe("onto busy time", () => {
+    const NEW_SLOT = SLOT + 86_400;
+
+    /** The founder is in something at the new time. */
+    async function founderIsBusy(founder: { id: number; email: string }) {
+      await seedConnection({
+        memberId: founder.id,
+        grantEmail: founder.email,
+        grantId: "g-founder",
+      });
+      availability.mockImplementation(async (a: AvailArgs) => ({
+        slots: [],
+        unreadable: [],
+        busySlots: [{ startTime: a.startTime, endTime: a.endTime, busyEmails: [founder.email] }],
+      }));
+    }
+
+    it("refuses to move onto a busy time by default", async () => {
+      const { event, founder } = await seedBooked();
+      await founderIsBusy(founder);
+
+      const res = await reschedule(event.id, NEW_SLOT);
+
+      expect(res.status).toBe(409);
+      expect(nylas.rescheduleNylasEvent).not.toHaveBeenCalled();
+    });
+
+    it("moves onto a calendar it was told about", async () => {
+      const { event, founder } = await seedBooked();
+      await founderIsBusy(founder);
+
+      const res = await reschedule(event.id, NEW_SLOT, {
+        overrideBusyMemberIds: [founder.id],
+      });
+
+      expect(res.status).toBe(200);
+      const [row] = await harness.db.select().from(events).where(eq(events.id, event.id));
+      expect(Math.floor(row.startsAt.getTime() / 1000)).toBe(NEW_SLOT);
+    });
+
+    it("refuses to move onto somebody who wasn't confirmed", async () => {
+      const { event, founder, lead } = await seedBooked();
+      await founderIsBusy(founder);
+
+      const res = await reschedule(event.id, NEW_SLOT, { overrideBusyMemberIds: [lead.id] });
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toContain(founder.fullName);
+      expect(nylas.rescheduleNylasEvent).not.toHaveBeenCalled();
+    });
+
+    it("refuses to move a repeating session onto anybody's calendar", async () => {
+      // Once moved it is still an occurrence of a repeating event, so it lands
+      // back inside detectSeriesConflicts and gets raised every morning. Same
+      // rule and same reasons as refusing to book a series over somebody.
+      const { event, founder } = await seedBooked();
+      await founderIsBusy(founder);
+      await harness.db
+        .update(events)
+        .set({ recurrenceRule: "FREQ=WEEKLY;INTERVAL=2" })
+        .where(eq(events.id, event.id));
+
+      const res = await reschedule(event.id, NEW_SLOT, {
+        overrideBusyMemberIds: [founder.id],
+      });
+
+      expect(res.status).toBe(409);
+      expect(nylas.rescheduleNylasEvent).not.toHaveBeenCalled();
+    });
   });
 });
 

@@ -15,6 +15,7 @@ import { createSessionEvent, cancelSessionEvent } from "@/lib/calendar/events";
 import {
   participantsOutsideStatedHours,
   slotStillFree,
+  busyParticipants,
   occurrenceTimes,
   unbookableOccurrences,
 } from "@/lib/calendar/booking-guards";
@@ -61,6 +62,15 @@ const bodySchema = z.object({
    * explicitly rather than inferred from a missing count, so a client that
    * drops a field books nothing instead of booking forever. */
   repeatForever: z.boolean().optional(),
+  /** Whose calendar this booking is knowingly going over, by member id.
+   *
+   * A list of people, never a boolean, for the same reason repeatForever is a
+   * flag rather than an absent count — but the list buys something extra. A
+   * boolean would mean "skip the check", which hands a stale grid the power to
+   * double-book somebody nobody ever saw. Naming people means the override only
+   * covers the ones the admin was actually shown: anybody else found busy stops
+   * the booking. Absent, as always, must mean double-book nobody. */
+  overrideBusyMemberIds: z.array(z.number().int()).max(50).optional(),
 });
 
 /** How far ahead a series with no end gets checked before it is booked.
@@ -253,6 +263,11 @@ export async function POST(request: Request) {
   // the request returned 200.
   //
   // See booking-guards.ts for why this one refuses and the next one doesn't.
+  //
+  // An override never reaches this check, and that is the line the whole feature
+  // is drawn on: booking over a calendar overrides something we READ about
+  // somebody. Stated hours are what they told us themselves, and no tick box
+  // anywhere gets to overrule a person's own answer about their own week.
   let outsideTheirHours: string[];
   try {
     outsideTheirHours = await participantsOutsideStatedHours({
@@ -278,25 +293,80 @@ export async function POST(request: Request) {
     );
   }
 
-  // Then: is it still clear on their actual calendars? Fails open — see
-  // booking-guards.ts for why this one may not refuse and the one above must.
-  if (
-    !(await slotStillFree({
+  // Only people actually on this session can be overridden. A stale or hand-made
+  // request naming somebody else is not an error worth a message — it simply
+  // buys nothing, because the busy check below only ever asks about participants.
+  const override = new Set(
+    (body.overrideBusyMemberIds ?? []).filter((id) => participantIds.includes(id))
+  );
+
+  if (override.size === 0) {
+    // Then: is it still clear on their actual calendars? Fails open — see
+    // booking-guards.ts for why this one may not refuse and the one above must.
+    if (
+      !(await slotStillFree({
+        memberIds: participantIds,
+        startUnix: body.startsAtUnix,
+        endUnix: endsAtUnix,
+        durationMinutes: body.durationMinutes,
+        timezone: body.timezone,
+        context: "admin/events",
+      }))
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "That time isn't free any more — someone's calendar changed since you searched. Search again to see what's left.",
+        },
+        { status: 409 }
+      );
+    }
+  } else {
+    // Somebody is being double-booked on purpose. The question is no longer "is
+    // this free" but "is it free apart from the people who were named", which
+    // needs a guard that answers with names and refuses when it cannot — see
+    // busyParticipants for why it fails closed where slotStillFree fails open.
+    const busy = await busyParticipants({
       memberIds: participantIds,
       startUnix: body.startsAtUnix,
       endUnix: endsAtUnix,
       durationMinutes: body.durationMinutes,
       timezone: body.timezone,
       context: "admin/events",
-    }))
-  ) {
-    return NextResponse.json(
-      {
-        error:
-          "That time isn't free any more — someone's calendar changed since you searched. Search again to see what's left.",
-      },
-      { status: 409 }
-    );
+    });
+    if (!busy.known) {
+      return NextResponse.json(
+        {
+          error:
+            "Couldn't check who's free at that time, so nothing was booked over anyone. Please try again.",
+        },
+        { status: 409 }
+      );
+    }
+    const unacknowledged = busy.memberIds.filter((id) => !override.has(id));
+    if (unacknowledged.length > 0) {
+      // Named, because "someone else is busy" sends an admin back to a grid
+      // without telling them what changed on it.
+      const names = (await getMembersByIds(unacknowledged)).map((m) => m.fullName);
+      return NextResponse.json(
+        {
+          error: `${names.join(", ")} ${
+            names.length === 1 ? "is" : "are"
+          } busy then too, and that wasn't part of what you confirmed. Search again to see who.`,
+        },
+        { status: 409 }
+      );
+    }
+    // Deliberate double-bookings should be visible afterwards without having to
+    // ask anybody what they clicked. Note that an override naming somebody who
+    // has since freed up is simply ignored above, not refused — the admin asked
+    // for something that turned out to be unnecessary.
+    console.info("[admin/events] Booking over a busy calendar, as confirmed", {
+      idempotencyKey,
+      overrodeMemberIds: [...override],
+      foundBusyMemberIds: busy.memberIds,
+      startsAtUnix: body.startsAtUnix,
+    });
   }
 
   // A repeating session is checked all the way to its last date before anything
@@ -335,6 +405,29 @@ export async function POST(request: Request) {
 
   const endless = shape !== null && body.repeatForever === true;
   const repeatCount = endless ? undefined : body.repeatCount;
+
+  // Booking over somebody's calendar is a decision about one afternoon that a
+  // person could see. The fourth date is four months out and nobody has seen it,
+  // so there is nothing to have confirmed — and the override's whole safety is
+  // that you may only override the people you were shown, at the time you were
+  // shown them.
+  //
+  // It would also quietly break the morning conflict list. detectSeriesConflicts
+  // walks repeating events only (src/lib/conflicts.ts) and asks occurrenceClashes
+  // whether anyone's busy time reaches beyond the session's own window — which a
+  // hold booked over usually does. Every future date of the series would be
+  // raised as a clash, every day, for the life of the series. A list that is
+  // wrong every morning is a list nobody reads, which costs more than this
+  // refusal does.
+  if (override.size > 0 && shape) {
+    return NextResponse.json(
+      {
+        error:
+          "A repeating session can't be booked over someone's calendar. Book this one date over it, or pick a time that's clear for the whole series.",
+      },
+      { status: 400 }
+    );
+  }
 
   if (shape && (endless || repeatCount)) {
     // How many dates get checked when there is no last one to check. A year

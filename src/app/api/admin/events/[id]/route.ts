@@ -9,9 +9,18 @@ import {
   eventOccurrences,
   sessionConflicts,
 } from "@/db/schema";
-import { getActiveConnections, groupConnectionsByMember, pickInviteConnection } from "@/db/queries";
+import {
+  getActiveConnections,
+  groupConnectionsByMember,
+  pickInviteConnection,
+  getMembersByIds,
+} from "@/db/queries";
 import { requireAdminSession } from "@/lib/auth/admin";
-import { participantsOutsideStatedHours, slotStillFree } from "@/lib/calendar/booking-guards";
+import {
+  participantsOutsideStatedHours,
+  slotStillFree,
+  busyParticipants,
+} from "@/lib/calendar/booking-guards";
 // Nylas stays imported purely as the bridge for sessions booked before the
 // switch — see resolveEventTarget. It goes when the last of them has passed.
 import { cancelNylasEvent, rescheduleNylasEvent } from "@/lib/nylas";
@@ -41,6 +50,12 @@ const rescheduleSchema = z.object({
    * been moved is keyed by where it started life, both here and at the
    * provider. */
   occurrenceStartUnix: z.number().int().positive().optional(),
+  /** Whose calendar this move is knowingly going onto, by member id. Same field,
+   * same meaning and same reasoning as on the booking route — moving a session
+   * runs the identical two guards, and an override that worked for one but not
+   * the other is exactly the drift that left rescheduling with no guards at all
+   * the first time round (see booking-guards.ts). */
+  overrideBusyMemberIds: z.array(z.number().int()).max(50).optional(),
 });
 
 /** drizzle-orm wraps driver errors in `DrizzleQueryError`, which has no `code`
@@ -550,24 +565,83 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     );
   }
 
-  // Fails open, exactly as it does when booking — see booking-guards.ts.
-  if (
-    !(await slotStillFree({
+  const override = new Set(
+    (body.overrideBusyMemberIds ?? []).filter((id) => participantIds.includes(id))
+  );
+
+  // A repeating session can't be moved onto somebody's calendar, whether it is
+  // one date or all of them — the rule and the reasons are the booking route's,
+  // spelled out there. A single date matters just as much as the series here:
+  // once moved it is still an occurrence of a repeating event, so it lands right
+  // back inside detectSeriesConflicts and gets raised every morning.
+  if (override.size > 0 && event.recurrenceRule) {
+    return NextResponse.json(
+      {
+        error:
+          "A repeating session can't be moved onto a time someone's already busy. Pick a time that's clear, or cancel this date and book a one-off over it.",
+      },
+      { status: 409 }
+    );
+  }
+
+  if (override.size === 0) {
+    // Fails open, exactly as it does when booking — see booking-guards.ts.
+    if (
+      !(await slotStillFree({
+        memberIds: participantIds,
+        startUnix: body.startsAtUnix,
+        endUnix: endsAtUnix,
+        durationMinutes: body.durationMinutes,
+        timezone: event.timezone,
+        context: "admin/events/:id",
+      }))
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "That time isn't free any more — someone's calendar changed since you searched. Search again to see what's left.",
+        },
+        { status: 409 }
+      );
+    }
+  } else {
+    // Fails closed, and only clears the people who were named — see the same
+    // branch on the booking route.
+    const busy = await busyParticipants({
       memberIds: participantIds,
       startUnix: body.startsAtUnix,
       endUnix: endsAtUnix,
       durationMinutes: body.durationMinutes,
       timezone: event.timezone,
       context: "admin/events/:id",
-    }))
-  ) {
-    return NextResponse.json(
-      {
-        error:
-          "That time isn't free any more — someone's calendar changed since you searched. Search again to see what's left.",
-      },
-      { status: 409 }
-    );
+    });
+    if (!busy.known) {
+      return NextResponse.json(
+        {
+          error:
+            "Couldn't check who's free at that time, so the session hasn't moved. Please try again.",
+        },
+        { status: 409 }
+      );
+    }
+    const unacknowledged = busy.memberIds.filter((id) => !override.has(id));
+    if (unacknowledged.length > 0) {
+      const names = (await getMembersByIds(unacknowledged)).map((m) => m.fullName);
+      return NextResponse.json(
+        {
+          error: `${names.join(", ")} ${
+            names.length === 1 ? "is" : "are"
+          } busy then too, and that wasn't part of what you confirmed. Search again to see who.`,
+        },
+        { status: 409 }
+      );
+    }
+    console.info("[admin/events/:id] Moving onto a busy calendar, as confirmed", {
+      eventId,
+      overrodeMemberIds: [...override],
+      foundBusyMemberIds: busy.memberIds,
+      startsAtUnix: body.startsAtUnix,
+    });
   }
 
   // One date of a series. Everything above — the stated hours, the calendars,

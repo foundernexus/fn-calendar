@@ -15,13 +15,22 @@ import {
 
 let harness: TestDb;
 
-type AvailArgs = { connections: { grantEmail: string }[] };
+type AvailArgs = { connections: { grantEmail: string }[]; includeBusy?: boolean };
+type Slot = { emails: string[]; startTime: number; endTime: number };
+
+/** Everything past `unreadable` is optional here on purpose: the route has to go
+ * on working against a response from a deploy that predates each of these
+ * fields, and these doubles are the only thing that keeps checking it does. */
+type AvailResult = {
+  slots: Slot[];
+  unreadable: string[];
+  droppedByLead?: number;
+  blockers?: { label: string; slotsWithout: number }[];
+  busySlots?: (Slot & { busyEmails: string[] })[];
+};
 
 const getCollectiveAvailability = vi.fn(
-  async (_a: AvailArgs) => ({
-    slots: [] as { emails: string[]; startTime: number; endTime: number }[],
-    unreadable: [] as string[],
-  })
+  async (_a: AvailArgs): Promise<AvailResult> => ({ slots: [], unreadable: [] })
 );
 
 vi.mock("@/lib/calendar/availability", () => ({
@@ -47,6 +56,9 @@ beforeEach(async () => {
       { emails: [], startTime: TEN, endTime: TEN + 3600 },
     ],
     unreadable: [],
+    droppedByLead: 0,
+    blockers: [],
+    busySlots: undefined,
   });
   vi.resetModules();
   mockCookies(await adminCookie());
@@ -282,6 +294,124 @@ describe("stated availability", () => {
     // UI must not say "no overlapping free time".
     expect(body.slots).toHaveLength(0);
     expect(body.filteredByPreferences).toBe(true);
+  });
+});
+
+describe("booking over busy time", () => {
+  it("doesn't ask for busy times unless the search asked for them", async () => {
+    const { lead, founder } = await seedCast();
+    await search({ organizerMemberId: lead.id, guestMemberIds: [founder.id] });
+    expect(getCollectiveAvailability.mock.calls[0]![0].includeBusy).toBe(false);
+  });
+
+  it("survives a lib that doesn't return busy times at all", async () => {
+    // The default double above returns the older shape. A search that has
+    // nothing to do with this feature must not break on a missing field.
+    const { lead, founder } = await seedCast();
+    const { res, body } = await search({
+      organizerMemberId: lead.id,
+      guestMemberIds: [founder.id],
+      allowBusy: true,
+    });
+    expect(res.status).toBe(200);
+    expect(body.busySlots).toEqual([]);
+  });
+
+  it("returns busy times by the person's name, not the address they connected", async () => {
+    const { lead, founder } = await seedCast();
+    getCollectiveAvailability.mockResolvedValue({
+      slots: [],
+      unreadable: [],
+      droppedByLead: 0,
+      blockers: [],
+      busySlots: [
+        { emails: [], startTime: NINE, endTime: NINE + 3600, busyEmails: [founder.email] },
+      ],
+    });
+
+    const { body } = await search({
+      organizerMemberId: lead.id,
+      guestMemberIds: [founder.id],
+      allowBusy: true,
+    });
+
+    expect(getCollectiveAvailability.mock.calls[0]![0].includeBusy).toBe(true);
+    // A name to read and an id to send back: the dialog says one, the booking
+    // route matches on the other.
+    expect(body.busySlots).toHaveLength(1);
+    expect(body.busySlots[0].busyNames).toEqual([founder.fullName]);
+    expect(body.busySlots[0].busyMemberIds).toEqual([founder.id]);
+  });
+
+  it("counts one person once when they hold two busy calendars", async () => {
+    const { lead, founder } = await seedCast();
+    await seedConnection({
+      memberId: founder.id,
+      grantEmail: "founder.private@gmail.com",
+      grantId: "g-private",
+    });
+    getCollectiveAvailability.mockResolvedValue({
+      slots: [],
+      unreadable: [],
+      droppedByLead: 0,
+      blockers: [],
+      busySlots: [
+        {
+          emails: [],
+          startTime: NINE,
+          endTime: NINE + 3600,
+          busyEmails: [founder.email, "founder.private@gmail.com"],
+        },
+      ],
+    });
+
+    const { body } = await search({
+      organizerMemberId: lead.id,
+      guestMemberIds: [founder.id],
+      allowBusy: true,
+    });
+
+    // Two calendars, one person to double-book — and the dialog must not name
+    // them twice.
+    expect(body.busySlots[0].busyMemberIds).toEqual([founder.id]);
+    expect(body.busySlots[0].busyNames).toEqual([founder.fullName]);
+  });
+
+  it("still drops a busy time that falls outside somebody's stated hours", async () => {
+    // The rule the whole feature is drawn on. Booking refuses stated hours
+    // outright, so offering one of these would be a cell that can only fail.
+    const { lead } = await seedCast();
+    const founder = await seedMember({
+      email: "narrow@example.com",
+      timezone: "America/Los_Angeles",
+    });
+    await seedConnection({ memberId: founder.id, grantEmail: founder.email, grantId: "g-n" });
+    const { memberAvailability } = await import("@/db/schema");
+    await harness.db.insert(memberAvailability).values({
+      memberId: founder.id,
+      dayOfWeek: 3,
+      startTime: "10:00",
+      endTime: "12:00",
+    });
+    getCollectiveAvailability.mockResolvedValue({
+      slots: [],
+      unreadable: [],
+      droppedByLead: 0,
+      blockers: [],
+      busySlots: [
+        // 09:00 is outside their stated hours; 10:00 is inside them.
+        { emails: [], startTime: NINE, endTime: NINE + 3600, busyEmails: [founder.email] },
+        { emails: [], startTime: TEN, endTime: TEN + 3600, busyEmails: [founder.email] },
+      ],
+    });
+
+    const { body } = await search({
+      organizerMemberId: lead.id,
+      guestMemberIds: [founder.id],
+      allowBusy: true,
+    });
+
+    expect(body.busySlots.map((s: { startUnix: number }) => s.startUnix)).toEqual([TEN]);
   });
 });
 

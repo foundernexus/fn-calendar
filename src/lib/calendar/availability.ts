@@ -2,7 +2,9 @@ import { getAccessToken } from "@/lib/calendar/tokens";
 import { fetchBusy, asCalendarProvider } from "@/lib/calendar";
 import {
   computeCollectiveSlots,
+  computeBusySlots,
   type AvailabilitySlot,
+  type BusyAvailabilitySlot,
   type ParticipantBusy,
 } from "@/lib/calendar/slots";
 
@@ -64,6 +66,16 @@ export type CollectiveAvailability = {
    * group's calendars were left out. Empty unless the search found nothing and
    * groups were supplied — see the note on the parameter. */
   blockers: { label: string; slotsWithout: number }[];
+  /** Candidate times somebody IS busy for, naming whose calendar it is — the
+   * times an admin may deliberately book over. Empty unless `includeBusy` was
+   * asked for.
+   *
+   * Deliberately a field of its own rather than extra entries in `slots`.
+   * `droppedByLead`, `blockers`, and everything the callers build on top of them
+   * (`constraint`, `filteredByPreferences`) all count FREE slots; a `slots`
+   * array that quietly grew would make every one of those numbers answer a
+   * different question, at once and without a word of warning. */
+  busySlots: BusyAvailabilitySlot[];
 };
 
 /** Every slot in the window where all of these calendars are free.
@@ -109,6 +121,22 @@ export async function getCollectiveAvailability(params: {
    * on a question nobody is asking. Costs no extra calls either way: it reruns
    * the arithmetic over busy data already fetched. */
   blockerGroups?: { label: string; emails: string[] }[];
+  /** Also work out the times somebody IS busy, and who — see `busySlots`.
+   *
+   * Off by default: it is a different question from "when is everyone free", and
+   * a search nobody asked it of shouldn't pay for the answer. Costs one more
+   * pass over busy data already fetched, never a second round trip, exactly like
+   * `droppedByLead`.
+   *
+   * Computed from the SAME padded busy data the free slots come from, so the two
+   * lists together cover every candidate and the grid has no cell that is
+   * neither offered nor explained. One consequence worth stating, because it
+   * looks like a bug and isn't: with a run-up asked for, somebody whose meeting
+   * merely *ends* at 10:00 is reported busy at 10:00. That errs in the only safe
+   * direction — the booking guard knows nothing about run-ups, so it finds fewer
+   * busy people than this did, and an override naming somebody who turns out to
+   * be free is ignored rather than refused. */
+  includeBusy?: boolean;
 }): Promise<CollectiveAvailability> {
   const lead = Math.max(0, params.leadMinutes ?? 0) * 60;
 
@@ -208,5 +236,8 @@ export async function getCollectiveAvailability(params: {
     blockers.sort((a, b) => b.slotsWithout - a.slotsWithout);
   }
 
-  return { slots, unreadable, droppedByLead, blockers };
+  // The complement of `slots` over the same candidates, only when asked for.
+  const busySlots = params.includeBusy ? computeBusySlots({ participants, ...shape }) : [];
+
+  return { slots, unreadable, droppedByLead, blockers, busySlots };
 }

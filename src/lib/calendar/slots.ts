@@ -26,6 +26,31 @@ export type AvailabilitySlot = {
   endTime: number;
 };
 
+/** A candidate time at least one participant is busy for, and whose calendar it
+ * is.
+ *
+ * Never returned by computeCollectiveSlots. That function means "everybody is
+ * free" and goes on meaning only that, so nothing downstream starts answering a
+ * different question by accident — see the note on CollectiveAvailability.
+ *
+ * `busyEmails` is grant addresses, the same currency as ParticipantBusy.email,
+ * because only the caller knows which member holds which address. */
+export type BusyAvailabilitySlot = AvailabilitySlot & { busyEmails: string[] };
+
+/** The window a search asks about — everything except who is in it. */
+type SlotWindow = {
+  /** Window to search, unix seconds. */
+  startTime: number;
+  endTime: number;
+  durationMinutes: number;
+  intervalMinutes?: number;
+  timezone: string;
+  /** "HH:mm" wall-clock bounds in `timezone`. */
+  workingHoursStart: string;
+  workingHoursEnd: string;
+  excludeWeekends: boolean;
+};
+
 /** Sorts and coalesces overlapping or touching intervals.
  *
  * Providers happily return overlapping blocks — two calendars in one account,
@@ -73,35 +98,64 @@ function overlapsBusy(start: number, end: number, busy: BusyInterval[]) {
  * applied afterwards by slotMatchesMemberAvailability() in src/lib/time.ts,
  * exactly as it was when Nylas produced these slots. This function answers the
  * coarser question — "is everyone's calendar clear?" */
-export function computeCollectiveSlots(params: {
-  participants: ParticipantBusy[];
-  /** Window to search, unix seconds. */
-  startTime: number;
-  endTime: number;
-  durationMinutes: number;
-  intervalMinutes?: number;
-  timezone: string;
-  /** "HH:mm" wall-clock bounds in `timezone`. */
-  workingHoursStart: string;
-  workingHoursEnd: string;
-  excludeWeekends: boolean;
-}): AvailabilitySlot[] {
-  const interval = params.intervalMinutes ?? AVAILABILITY_INTERVAL_MINUTES;
-  const durationSeconds = params.durationMinutes * 60;
-  const emails = params.participants.map((p) => p.email);
-
+export function computeCollectiveSlots(
+  params: SlotWindow & { participants: ParticipantBusy[] }
+): AvailabilitySlot[] {
   // Nobody selected means nothing to offer. Returning "every slot is free"
   // would be technically true and operationally a trap.
   if (params.participants.length === 0) return [];
 
+  const emails = params.participants.map((p) => p.email);
   const busyByEmail = params.participants.map((p) => mergeIntervals(p.busy));
+
+  return candidateSlots(params)
+    .filter(({ startTime, endTime }) =>
+      busyByEmail.every((busy) => !overlapsBusy(startTime, endTime, busy))
+    )
+    .map(({ startTime, endTime }) => ({ emails, startTime, endTime }));
+}
+
+/** Every candidate slot at least one participant is busy for, naming who.
+ *
+ * The exact complement of computeCollectiveSlots over the same window: the two
+ * partition the candidate set, so a grid drawn from both together has no cell
+ * that is neither offered nor explained. That only holds because both walk the
+ * same `candidateSlots` — which is why that walk is one function and not two.
+ *
+ * Exists so an admin can deliberately book over a hold made somewhere else (a
+ * Calendly invite, a placeholder). The names are what makes that safe rather
+ * than reckless: a cell saying "someone's busy" that takes a click is a trap,
+ * one that says whose is a decision. */
+export function computeBusySlots(
+  params: SlotWindow & { participants: ParticipantBusy[] }
+): BusyAvailabilitySlot[] {
+  if (params.participants.length === 0) return [];
+
+  const emails = params.participants.map((p) => p.email);
+  const busyByEmail = params.participants.map((p) => mergeIntervals(p.busy));
+
+  return candidateSlots(params).flatMap(({ startTime, endTime }) => {
+    const busyEmails = emails.filter((_, i) => overlapsBusy(startTime, endTime, busyByEmail[i]));
+    return busyEmails.length === 0 ? [] : [{ emails, startTime, endTime, busyEmails }];
+  });
+}
+
+/** Every slot the grid could draw in this window, free or not, in order.
+ *
+ * Split out so the two questions asked of a window — "when is everyone free"
+ * and "when is somebody busy, and who" — cannot generate different candidates.
+ * All of the reasoning above about landing on the rows the grid actually draws
+ * holds only while there is exactly one place that decides where a slot starts. */
+function candidateSlots(params: SlotWindow): { startTime: number; endTime: number }[] {
+  const interval = params.intervalMinutes ?? AVAILABILITY_INTERVAL_MINUTES;
+  const durationSeconds = params.durationMinutes * 60;
 
   const [startH, startM] = params.workingHoursStart.split(":").map(Number);
   const [endH, endM] = params.workingHoursEnd.split(":").map(Number);
   const openStartMinutes = startH * 60 + startM;
   const openEndMinutes = endH * 60 + endM;
 
-  const slots: AvailabilitySlot[] = [];
+  const slots: { startTime: number; endTime: number }[] = [];
 
   // Walk calendar days in the target timezone. Starting one day early and
   // ending one day late costs two wasted iterations and removes a whole class
@@ -126,9 +180,7 @@ export function computeCollectiveSlots(params: {
       // run past its end.
       if (slotStart < params.startTime || slotEnd > params.endTime) continue;
 
-      if (busyByEmail.every((busy) => !overlapsBusy(slotStart, slotEnd, busy))) {
-        slots.push({ emails, startTime: slotStart, endTime: slotEnd });
-      }
+      slots.push({ startTime: slotStart, endTime: slotEnd });
     }
 
     date = addDaysToDateString(date, 1);

@@ -104,6 +104,12 @@ export function FindATimeForm({
       ? facilitators.find((m) => m.email.toLowerCase() === signedInEmail.toLowerCase())
       : undefined) ?? facilitators[0];
 
+  // Looked up across ALL members, not just facilitators: an admin who can't lead
+  // sessions is still looking at their own calendar in the grid below.
+  const viewerMemberId = signedInEmail
+    ? (members.find((m) => m.email.toLowerCase() === signedInEmail.toLowerCase())?.id ?? null)
+    : null;
+
   const [organizerMemberIdState, setOrganizerMemberId] = useState<number | null>(
     defaultOrganizer?.id ?? null
   );
@@ -121,6 +127,12 @@ export function FindATimeForm({
   // returns fewer times than it could is the wrong thing to hand someone
   // before they have asked for it.
   const [requireLead, setRequireLead] = useState(false);
+  // Also off by default, and for a sharper version of the same reason. With this
+  // off the grid is exactly what it has always been, and grey still means no —
+  // which matters, because the first person outside the team to open this grid
+  // read it backwards (see the legend note in results-list.tsx). Making every
+  // grey cell clickable by default would turn that misreading into a booking.
+  const [allowBusy, setAllowBusy] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AvailabilityResult | null>(null);
@@ -262,6 +274,7 @@ export function FindATimeForm({
       timezone,
       excludeWeekends,
       leadMinutes: requireLead ? 15 : 0,
+      allowBusy,
     };
 
     setLoading(true);
@@ -293,6 +306,7 @@ export function FindATimeForm({
         workingHoursEnd,
         excludeWeekends,
         timezone,
+        allowBusy,
       });
     } catch {
       toast.error("Something went wrong. Please try again.");
@@ -643,6 +657,25 @@ export function FindATimeForm({
           </span>
         </label>
 
+        {/* For a session arranged somewhere else — a hold made on someone's
+            Calendly, a placeholder put in by hand — where the block on the
+            calendar IS the session being booked. Being busy is not always a
+            reason not to book. */}
+        <label className="flex items-start gap-2 text-sm text-foreground">
+          <Checkbox
+            className="mt-0.5"
+            checked={allowBusy}
+            onCheckedChange={(checked) => setAllowBusy(!!checked)}
+          />
+          <span>
+            Allow booking over busy time
+            <span className="block text-xs text-muted-foreground">
+              Also offers times someone&apos;s already busy, marked separately. You&apos;ll be told
+              whose calendar before anything goes out.
+            </span>
+          </span>
+        </label>
+
         <Button type="submit" disabled={loading}>
           {loading ? "Searching…" : "Find a time"}
         </Button>
@@ -653,6 +686,7 @@ export function FindATimeForm({
         <ResultsList
           result={result}
           searchedParams={searchedParams}
+          viewerMemberId={viewerMemberId}
           onSelectSlot={setDialogSlot}
           onSelectBooked={setCancelTarget}
           onShiftRange={shiftRange}

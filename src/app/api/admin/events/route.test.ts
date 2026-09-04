@@ -26,10 +26,20 @@ type CreateArgs = { participants: { email: string; name?: string }[] };
 const nylas = {
   createNylasEvent: vi.fn(async (_args: CreateArgs) => ({ eventId: "provider-event-1" })),
   cancelSessionEvent: vi.fn(async (_args: unknown) => ({ ok: true })),
-  getCollectiveAvailability: vi.fn(async () => ({
-    slots: [] as { startTime: number; endTime: number }[],
-    unreadable: [] as string[],
-  })),
+  // Stands in for both guards that read calendars: slotStillFree asks it for
+  // `slots`, busyParticipants for `busySlots`. One double, because they are one
+  // function underneath — and a test that set only one of the two would be
+  // describing a response the real lib never produces.
+  // `busySlots` optional, and absent by default: the guards have to go on
+  // working against a response from before busy times existed, and this double
+  // is what keeps checking they do.
+  getCollectiveAvailability: vi.fn(
+    async (): Promise<{
+      slots: { startTime: number; endTime: number }[];
+      unreadable: string[];
+      busySlots?: { startTime: number; endTime: number; busyEmails: string[] }[];
+    }> => ({ slots: [], unreadable: [] })
+  ),
 };
 
 vi.mock("@/lib/calendar/events", () => ({
@@ -59,6 +69,7 @@ beforeEach(async () => {
   nylas.getCollectiveAvailability.mockResolvedValue({
     slots: [{ startTime: SLOT, endTime: SLOT + 3600 }],
     unreadable: [],
+    busySlots: [],
   });
   nylas.createNylasEvent.mockResolvedValue({ eventId: "provider-event-1" });
   vi.resetModules();
@@ -243,9 +254,122 @@ describe("guards", () => {
     nylas.getCollectiveAvailability.mockRejectedValue(new Error("Nylas down"));
 
     // Fails open on purpose: a broken guard must not become a second thing
-    // that can stop real bookings.
+    // that can stop real bookings. Note the opposite ruling three tests below,
+    // where the same broken guard REFUSES — the difference is that there,
+    // somebody has asked to double-book a named person, and a check that didn't
+    // run is not that person's consent.
     const res = await post(body(cast));
     expect(res.status).toBe(200);
+  });
+
+  /** Booking over a hold made somewhere else — the block on the calendar IS the
+   * session being booked. Everything here turns on one rule: you may only book
+   * over the people you were shown. */
+  describe("booking over busy time", () => {
+    /** The slot is taken, and it's the founder who's in something. */
+    function founderIsBusy(cast: Awaited<ReturnType<typeof seedCast>>) {
+      nylas.getCollectiveAvailability.mockResolvedValue({
+        slots: [],
+        unreadable: [],
+        busySlots: [
+          { startTime: SLOT, endTime: SLOT + 3600, busyEmails: [cast.founder.email] },
+        ],
+      });
+    }
+
+    it("books over the calendar it was told about", async () => {
+      const cast = await seedCast();
+      founderIsBusy(cast);
+
+      const res = await post(body(cast, { overrideBusyMemberIds: [cast.founder.id] }));
+
+      expect(res.status).toBe(200);
+      expect(nylas.createNylasEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses to book over somebody who wasn't confirmed", async () => {
+      // The reason this is a list of people and not a boolean. The admin saw a
+      // cell naming the lead; by the time they clicked, the founder was busy
+      // too. A boolean "skip the check" would have double-booked him silently.
+      const cast = await seedCast();
+      founderIsBusy(cast);
+
+      const res = await post(body(cast, { overrideBusyMemberIds: [cast.lead.id] }));
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toContain(cast.founder.fullName);
+      expect(nylas.createNylasEvent).not.toHaveBeenCalled();
+      expect(await harness.db.select().from(events)).toHaveLength(0);
+    });
+
+    it("refuses an override it couldn't verify", async () => {
+      // Deliberately the opposite ruling to "books anyway when the re-check
+      // itself errors" above, on the same broken guard. There, nobody was being
+      // booked over and refusing would only block a legitimate booking. Here, an
+      // answer we never got would be standing in for a named person's calendar.
+      const cast = await seedCast();
+      nylas.getCollectiveAvailability.mockRejectedValue(new Error("Google down"));
+
+      const res = await post(body(cast, { overrideBusyMemberIds: [cast.founder.id] }));
+
+      expect(res.status).toBe(409);
+      expect(nylas.createNylasEvent).not.toHaveBeenCalled();
+    });
+
+    it("ignores an override for somebody who turned out to be free", async () => {
+      // They freed up between the search and the click. The admin asked for
+      // something that proved unnecessary, which is no reason to stop them.
+      const cast = await seedCast();
+
+      const res = await post(body(cast, { overrideBusyMemberIds: [cast.founder.id] }));
+
+      expect(res.status).toBe(200);
+    });
+
+    it("still refuses when somebody stated they're unavailable", async () => {
+      // The line the whole feature is drawn on. An override is over something we
+      // READ about somebody; their own stated hours are what they told us, and
+      // no tick box overrules that.
+      const cast = await seedCast();
+      founderIsBusy(cast);
+      const { memberAvailability, members } = await import("@/db/schema");
+      await harness.db
+        .update(members)
+        .set({ timezone: "America/Los_Angeles" })
+        .where(eq(members.id, cast.founder.id));
+      // Wednesdays, but only in the afternoon — the slot is 10:00.
+      await harness.db.insert(memberAvailability).values({
+        memberId: cast.founder.id,
+        dayOfWeek: 3,
+        startTime: "14:00",
+        endTime: "17:00",
+      });
+
+      const res = await post(body(cast, { overrideBusyMemberIds: [cast.founder.id] }));
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toMatch(/not available then/i);
+      expect(nylas.createNylasEvent).not.toHaveBeenCalled();
+    });
+
+    it("refuses to repeat a session booked over somebody's calendar", async () => {
+      // One afternoon somebody could see, not a rhythm nobody has looked at —
+      // and a repeating double-booking would land on the morning conflict list
+      // every day for the life of the series.
+      const cast = await seedCast();
+      founderIsBusy(cast);
+
+      const res = await post(
+        body(cast, {
+          overrideBusyMemberIds: [cast.founder.id],
+          repeatEveryWeeks: 2,
+          repeatCount: 6,
+        })
+      );
+
+      expect(res.status).toBe(400);
+      expect(nylas.createNylasEvent).not.toHaveBeenCalled();
+    });
   });
 
   it("refuses when the lead is not a facilitator", async () => {

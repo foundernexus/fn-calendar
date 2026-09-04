@@ -1,6 +1,25 @@
 import { AvailabilityGrid } from "@/components/availability-grid";
 
-export type Slot = { startUnix: number; endUnix: number; label: string };
+export type Slot = {
+  startUnix: number;
+  endUnix: number;
+  label: string;
+  /** Present only on a slot somebody is busy for — see BusySlot. Optional here
+   * rather than a second type threaded through the grid and both dialogs: they
+   * all do the same thing with a slot, and a parallel type would mean a parallel
+   * click handler that could drift from this one. */
+  busyMemberIds?: number[];
+  busyNames?: string[];
+};
+
+/** A time somebody is busy for, offered anyway.
+ *
+ * Only ever present when the search was run with "allow booking over busy time".
+ * The names are what make it offerable at all: a cell that says "someone's busy"
+ * and takes a click is a trap, one that says whose is a decision. The ids are
+ * what the booking route matches on — it refuses anybody found busy who wasn't
+ * on this list. */
+export type BusySlot = Slot & { busyMemberIds: number[]; busyNames: string[] };
 export type BookedAttendee = {
   memberId: number;
   fullName: string;
@@ -70,6 +89,10 @@ export type AvailabilityResult = {
    * and involving anyone selected — rendered on the grid as a distinct cell
    * instead of an unexplained gray "not available" one. */
   bookedSlots?: BookedSlot[];
+  /** Times somebody is busy, offered anyway because the search asked for them.
+   * Optional so a response from an older deploy still renders, like ownEvents
+   * and bookedSlots above. */
+  busySlots?: BusySlot[];
 };
 
 /** The search parameters the grid needs — snapshotted by the caller at
@@ -92,17 +115,25 @@ export type SearchedParams = {
   workingHoursEnd: string;
   excludeWeekends: boolean;
   timezone: string;
+  /** Whether this search asked for busy times as well. Snapshotted like every
+   * other field here, so the legend and the empty state describe the search on
+   * screen rather than whatever the checkbox says now. */
+  allowBusy: boolean;
 };
 
 export function ResultsList({
   result,
   searchedParams,
+  viewerMemberId = null,
   onSelectSlot,
   onSelectBooked,
   onShiftRange,
 }: {
   result: AvailabilityResult;
   searchedParams: SearchedParams;
+  /** Whoever is looking at the page — passed straight through to the grid, which
+   * uses it to tell "only I'm busy here" apart from "somebody else is too". */
+  viewerMemberId?: number | null;
   onSelectSlot: (slot: Slot) => void;
   onSelectBooked: (booked: BookedSlot) => void;
   /** Pages the searched range a week either way — see AvailabilityGrid. */
@@ -162,13 +193,27 @@ export function ResultsList({
         </p>
       )}
 
-      {result.slots.length === 0 && (result.bookedSlots?.length ?? 0) === 0 ? (
+      {result.slots.length === 0 &&
+      (result.bookedSlots?.length ?? 0) === 0 &&
+      (result.busySlots?.length ?? 0) === 0 ? (
         <div className="mt-4 space-y-2 text-sm text-foreground">
           <p>
             {result.filteredByPreferences
               ? "Everyone's calendar overlaps at some point in this range, but it all falls outside someone's stated availability."
               : "No overlapping free time found in this range."}
           </p>
+          {/* The hint belongs at the dead end, not in the chrome above. Somebody
+              who has just been told there is nothing here is exactly who needs
+              to know there is a way to book anyway — and nobody reads a
+              checkbox they had no reason to look for. Not shown when the box
+              was already ticked, since then this really is all there is. */}
+          {!searchedParams.allowBusy && !result.filteredByPreferences && (
+            <p className="text-muted-foreground">
+              Need one of these times anyway? Tick{" "}
+              <span className="font-medium">Allow booking over busy time</span> above and search
+              again.
+            </p>
+          )}
           {/* "No overlapping free time" is true and useless: it doesn't say
               whether five people are wide open and one is impossible, which is
               the difference between widening the range and dropping somebody.
@@ -204,6 +249,17 @@ export function ResultsList({
               <span className="inline-block size-3 shrink-0 rounded-xs border border-border bg-secondary" />
               Someone&apos;s busy
             </span>
+            {/* Only when the search actually asked for these, so the legend never
+                describes a cell state that isn't on the grid. Its swatch is
+                dashed rather than another shade of grey — the note above is
+                about a reader who got two states the wrong way round, and a
+                third one has to be told apart at a glance, not squinted at. */}
+            {searchedParams.allowBusy && (
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block size-3 shrink-0 rounded-xs border border-dashed border-foreground/40 bg-secondary" />
+                Someone&apos;s busy — click to book over it
+              </span>
+            )}
             <span className="flex items-center gap-1.5">
               <span className="inline-block size-3 shrink-0 rounded-xs border border-border bg-card ring-1 ring-inset ring-foreground/15" />
               Already booked here
@@ -215,6 +271,7 @@ export function ResultsList({
           <AvailabilityGrid
             slots={result.slots}
             bookedSlots={result.bookedSlots ?? []}
+            busySlots={result.busySlots ?? []}
             startDate={searchedParams.startDate}
             endDate={searchedParams.endDate}
             workingHoursStart={searchedParams.workingHoursStart}
@@ -222,6 +279,7 @@ export function ResultsList({
             excludeWeekends={searchedParams.excludeWeekends}
             timezone={searchedParams.timezone}
             ownEvents={result.ownEvents ?? []}
+            viewerMemberId={viewerMemberId}
             onSelectSlot={onSelectSlot}
             onSelectBooked={onSelectBooked}
             onShiftRange={onShiftRange}

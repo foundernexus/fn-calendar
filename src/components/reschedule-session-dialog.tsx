@@ -48,6 +48,12 @@ export function RescheduleSessionDialog({
   const [submitting, setSubmitting] = useState(false);
   const durationMinutes = Math.round((slot.endUnix - slot.startUnix) / 60);
 
+  // Who this move would double-book, if anyone — read off the slot for the same
+  // reason as in CreateEventDialog.
+  const busyNames = slot.busyNames ?? [];
+  const busyMemberIds = slot.busyMemberIds ?? [];
+  const overBusy = busyMemberIds.length > 0;
+
   // This date alone unless asked otherwise — the same default as cancelling,
   // and for the same reason: moving a whole rhythm because somebody meant to
   // shift one afternoon is the expensive way round to get this wrong.
@@ -65,6 +71,9 @@ export function RescheduleSessionDialog({
           startsAtUnix: slot.startUnix,
           durationMinutes,
           timezone,
+          // Absent unless somebody is knowingly being moved onto — see the same
+          // field on CreateEventDialog.
+          ...(overBusy ? { overrideBusyMemberIds: busyMemberIds } : {}),
           ...(wholeSeries || booked.occurrenceStartUnix === undefined
             ? {}
             : { occurrenceStartUnix: booked.occurrenceStartUnix }),
@@ -150,12 +159,46 @@ export function RescheduleSessionDialog({
           </p>
         )}
 
+        {/* A repeating session can't be moved onto busy time at all — the server
+            refuses it, so say so here rather than letting someone fill the
+            dialog in and be turned away by a toast. See the booking route for
+            why a series is different. */}
+        {overBusy && (
+          <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+            {isSeries ? (
+              <>
+                {busyNames.join(", ")} {busyNames.length === 1 ? "is" : "are"} busy at this time,
+                and a repeating session can&apos;t be moved onto it. Pick a time that&apos;s clear,
+                or cancel this date and book a one-off over it.
+              </>
+            ) : (
+              <>
+                {busyNames.join(", ")} {busyNames.length === 1 ? "is" : "are"} already busy at this
+                time. Moving it here puts the session alongside whatever is already in their
+                calendar, and they aren&apos;t asked first.
+              </>
+            )}
+          </div>
+        )}
+
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
             Keep the old time
           </Button>
-          <Button type="button" onClick={handleSubmit} disabled={submitting}>
-            {submitting ? "Moving…" : wholeSeries ? "Move session" : "Move this date"}
+          <Button
+            type="button"
+            onClick={handleSubmit}
+            // The server refuses this combination outright, so the button that
+            // would send it doesn't exist.
+            disabled={submitting || (overBusy && isSeries)}
+          >
+            {submitting
+              ? "Moving…"
+              : overBusy
+                ? "Move over it anyway"
+                : wholeSeries
+                  ? "Move session"
+                  : "Move this date"}
           </Button>
         </DialogFooter>
       </DialogContent>

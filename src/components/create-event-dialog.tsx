@@ -136,6 +136,15 @@ export function CreateEventDialog({
   // never drift from what was actually searched for this slot.
   const durationMinutes = Math.round((slot.endUnix - slot.startUnix) / 60);
 
+  // Who this booking would double-book, if anyone. Read off the slot rather than
+  // passed in beside it, so the names shown here are necessarily the ones the
+  // grid cell was drawn from and the ones sent to the server — three copies of
+  // this list that could disagree is exactly how somebody gets double-booked
+  // without it appearing on screen.
+  const busyNames = slot.busyNames ?? [];
+  const busyMemberIds = slot.busyMemberIds ?? [];
+  const overBusy = busyMemberIds.length > 0;
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [meetingUrl, setMeetingUrl] = useState(defaultMeetingUrl);
@@ -168,6 +177,11 @@ export function CreateEventDialog({
           startsAtUnix: slot.startUnix,
           durationMinutes,
           timezone,
+          // Omitted entirely when nobody is being booked over. The server treats
+          // an absent field as "double-book nobody", so sending an empty array
+          // would say the same thing more loudly — and a field that is only ever
+          // present when it means something is harder to send by accident.
+          ...(overBusy ? { overrideBusyMemberIds: busyMemberIds } : {}),
           // "Forever" is sent as its own flag rather than as a missing count.
           // A dropped field must read as "no repeat", never as "book this into
           // someone's calendar indefinitely".
@@ -251,6 +265,15 @@ export function CreateEventDialog({
               Leave this empty and Google Meet makes a fresh link for this session.
             </p>
           </div>
+          {/* Not offered at all when booking over somebody, rather than offered
+              and then refused by the server. Booking over a calendar is a
+              decision about one afternoon that a person could see; the fourth
+              date is four months out and nobody has seen it. */}
+          {overBusy ? (
+            <p className="rounded-lg border border-border p-3 text-xs text-muted-foreground">
+              A session booked over someone&apos;s calendar can&apos;t repeat — this one date only.
+            </p>
+          ) : (
           <div className="space-y-2 rounded-lg border border-border p-3">
             <label className="flex items-center gap-2 text-sm text-foreground">
               <Checkbox checked={repeats} onCheckedChange={(v) => setRepeats(v === true)} />
@@ -308,6 +331,7 @@ export function CreateEventDialog({
               </>
             )}
           </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4 rounded-lg border border-border bg-secondary/40 p-3 text-sm">
             <div>
@@ -339,9 +363,24 @@ export function CreateEventDialog({
               </p>
             )}
           </div>
+          {/* Loud, and directly above the button that does it. This is the last
+              screen before a second entry lands in somebody's calendar without
+              anybody asking them, and naming them is what makes that a decision
+              rather than an accident. */}
+          {overBusy && (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+              {busyNames.join(", ")} {busyNames.length === 1 ? "is" : "are"} already busy at this
+              time. Booking this puts a second thing in their calendar — whatever is already there
+              stays exactly as it is, and they aren&apos;t asked first.
+            </div>
+          )}
           <DialogFooter>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Creating…" : "Create event"}
+              {/* States what actually happens rather than "Create event". One
+                  deliberate act with an honest label beats a second tick box —
+                  the checkbox on the search form and the click on a dashed cell
+                  are already two. */}
+              {submitting ? "Creating…" : overBusy ? "Book over it anyway" : "Create event"}
             </Button>
           </DialogFooter>
         </form>

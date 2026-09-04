@@ -11,7 +11,7 @@ import {
   zonedDateTimeParts,
   AVAILABILITY_INTERVAL_MINUTES,
 } from "@/lib/time";
-import type { Slot, BookedSlot, OwnEventSummary } from "@/components/results-list";
+import type { Slot, BookedSlot, BusySlot, OwnEventSummary } from "@/components/results-list";
 
 function getDaysInRange(startDate: string, endDate: string) {
   const days: string[] = [];
@@ -31,6 +31,7 @@ function timeToMinutes(time: string) {
 export function AvailabilityGrid({
   slots,
   bookedSlots,
+  busySlots = [],
   startDate,
   endDate,
   workingHoursStart,
@@ -38,16 +39,25 @@ export function AvailabilityGrid({
   excludeWeekends,
   timezone,
   ownEvents = [],
+  viewerMemberId = null,
   onSelectSlot,
   onSelectBooked,
   onShiftRange,
 }: {
   slots: Slot[];
   bookedSlots: BookedSlot[];
+  /** Times somebody is busy that the admin asked to see anyway, so a session can
+   * be booked over a hold made somewhere else. Empty unless the search asked for
+   * them — an ordinary search draws exactly the grid it always did. */
+  busySlots?: BusySlot[];
   /** The viewer's OWN calendar, titles included — never anyone else's. Answers
    * the question the grid couldn't: not "am I free at 3" but "what is it that
    * I'm not free for". */
   ownEvents?: OwnEventSummary[];
+  /** Whoever is looking at this grid, if they're a member at all. Only used to
+   * decide whether a busy cell is busy with just them — see the cell itself.
+   * Null is safe: it simply falls back to naming whoever is busy. */
+  viewerMemberId?: number | null;
   startDate: string;
   endDate: string;
   workingHoursStart: string;
@@ -153,6 +163,16 @@ export function AvailabilityGrid({
         if (!ownByCell.has(key)) ownByCell.set(key, own.title);
       }
     }
+  }
+
+  // Same keying and the same first-wins guard as slotsByCell above, for the same
+  // DST reason. These can never collide with slotsByCell: the two lists are
+  // complements of one another over the same candidates (see computeBusySlots).
+  const busyByCell = new Map<string, BusySlot>();
+  for (const slot of busySlots) {
+    const { date, time } = zonedDateTimeParts(slot.startUnix, timezone);
+    const key = `${date}_${time}`;
+    if (!busyByCell.has(key)) busyByCell.set(key, slot);
   }
 
   const bookedByCell = new Map<string, BookedSlot>();
@@ -268,10 +288,60 @@ export function AvailabilityGrid({
                     );
                   }
                   const slot = slotsByCell.get(`${day}_${time}`);
-                  // Only ever shown on a cell that ISN'T offered — the point is
-                  // to explain a gap, and a title over a bookable slot would
-                  // just be in the way of clicking it.
+                  // Only ever shown on a cell that ISN'T offered as free — the
+                  // point is to explain a gap, and a title over a bookable slot
+                  // would just be in the way of clicking it. A busy-but-bookable
+                  // cell still wants it: there the title IS the explanation of
+                  // what you are about to book over, which is the whole case
+                  // this was built for.
                   const mine = slot ? undefined : ownByCell.get(`${day}_${time}`);
+                  const busy = slot ? undefined : busyByCell.get(`${day}_${time}`);
+                  if (busy) {
+                    const who = busy.busyNames.join(", ");
+                    // Whether the ONLY person busy here is the one reading the
+                    // screen. That is the case this whole feature was built for
+                    // — a hold you made elsewhere, sitting on your own calendar
+                    // — and it is the one case where your own event title is the
+                    // more useful thing to show, because it says what you'd be
+                    // booking over.
+                    //
+                    // The moment anybody else is busy too, the names win. The
+                    // question at one of these cells is "can I still get the
+                    // others here", and a cell reading "Edan Shahar" answers a
+                    // question nobody asked while hiding the one they did.
+                    //
+                    // Compared by id, not by name: the viewer isn't necessarily
+                    // a participant in the search, and matching on the title
+                    // alone would put their own event over somebody else's busy
+                    // time.
+                    const onlyTheViewer =
+                      viewerMemberId !== null &&
+                      busy.busyMemberIds.length === 1 &&
+                      busy.busyMemberIds[0] === viewerMemberId;
+                    return (
+                      <button
+                        key={`${day}_${time}`}
+                        type="button"
+                        onClick={() => onSelectSlot(busy)}
+                        title={`${who} ${busy.busyNames.length === 1 ? "is" : "are"} busy — click to book over it`}
+                        // Spelled out, because the visual difference between
+                        // this cell and the two beside it is the entire safety
+                        // mechanism and a screen reader gets none of it.
+                        aria-label={`${formatDateLabel(day)} ${formatTimeLabel(time)} — ${who} ${
+                          busy.busyNames.length === 1 ? "is" : "are"
+                        } busy. Click to book over it.`}
+                        // Deliberately not bg-accent and not hover:bg-primary:
+                        // those two are the whole visual vocabulary of "everyone
+                        // free", and this cell must never be mistaken for one.
+                        // It stays the grey of a blocked cell and earns a dashed
+                        // outline instead — a third thing, told apart at a
+                        // glance rather than by shade.
+                        className="min-w-0 truncate border-b border-l border-border bg-secondary px-1.5 py-1.5 text-left text-[11px] leading-tight text-muted-foreground outline-1 -outline-offset-2 outline-dashed outline-foreground/40 transition-colors hover:bg-secondary/60 hover:text-foreground"
+                      >
+                        {onlyTheViewer && mine ? mine : who}
+                      </button>
+                    );
+                  }
                   return (
                     <button
                       key={`${day}_${time}`}

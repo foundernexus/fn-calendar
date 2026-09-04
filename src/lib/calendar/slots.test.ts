@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeIntervals, computeCollectiveSlots } from "@/lib/calendar/slots";
+import { mergeIntervals, computeCollectiveSlots, computeBusySlots } from "@/lib/calendar/slots";
 
 /** These replace what Nylas's collective availability query used to decide for
  * us. Getting them wrong doesn't throw — it silently offers a time when someone
@@ -27,6 +27,34 @@ function slots(over: Partial<Parameters<typeof computeCollectiveSlots>[0]> = {})
     ...over,
   });
 }
+
+/** The same window, asked the other question. Kept alongside `slots` above so
+ * every test below can compare the two answers over identical inputs — which is
+ * the only way the "they partition the grid" property can actually be checked. */
+function busySlots(over: Partial<Parameters<typeof computeBusySlots>[0]> = {}) {
+  return computeBusySlots({
+    participants: [{ email: "a@example.com", busy: [] }],
+    startTime: DAY_START,
+    endTime: DAY_END,
+    durationMinutes: 60,
+    timezone: TZ,
+    workingHoursStart: "09:00",
+    workingHoursEnd: "17:00",
+    excludeWeekends: true,
+    ...over,
+  });
+}
+
+/** One participant with a 10:00–11:00 PT meeting, and one with nothing. */
+const ONE_BUSY = {
+  participants: [
+    { email: "free@example.com", busy: [] },
+    {
+      email: "busy@example.com",
+      busy: [{ start: at("2026-08-19T17:00:00Z"), end: at("2026-08-19T18:00:00Z") }],
+    },
+  ],
+};
 
 describe("mergeIntervals", () => {
   it("coalesces overlapping blocks", () => {
@@ -120,6 +148,61 @@ describe("busy time", () => {
       ],
     });
     expect(result[0].emails).toEqual(["a@example.com", "b@example.com"]);
+  });
+});
+
+/** Booking over a hold made somewhere else. The danger here is the mirror image
+ * of the danger above: these slots are offered on purpose, so getting them wrong
+ * doesn't hide a time, it hands somebody a cell that double-books a person the
+ * screen never named. */
+describe("busy slots", () => {
+  it("offers a slot somebody is busy for, naming whose calendar it is", () => {
+    const result = busySlots(ONE_BUSY);
+    const tenAm = result.find((s) => s.startTime === at("2026-08-19T17:00:00Z"));
+    expect(tenAm).toBeDefined();
+    expect(tenAm!.busyEmails).toEqual(["busy@example.com"]);
+  });
+
+  it("names every busy participant, not just the first", () => {
+    const meeting = { start: at("2026-08-19T17:00:00Z"), end: at("2026-08-19T18:00:00Z") };
+    const result = busySlots({
+      participants: [
+        { email: "a@example.com", busy: [meeting] },
+        { email: "b@example.com", busy: [meeting] },
+        { email: "c@example.com", busy: [] },
+      ],
+    });
+    const tenAm = result.find((s) => s.startTime === at("2026-08-19T17:00:00Z"));
+    // c is free then, and must not appear — the confirm dialog reads this list
+    // out as the people about to be double-booked.
+    expect(tenAm!.busyEmails).toEqual(["a@example.com", "b@example.com"]);
+  });
+
+  it("says nothing about a time everybody is free for", () => {
+    // Those are `slots`' business. The two lists never both claim a time.
+    expect(busySlots()).toEqual([]);
+  });
+
+  it("never returns a time that is also offered as free", () => {
+    const free = new Set(slots(ONE_BUSY).map((s) => s.startTime));
+    const busy = busySlots(ONE_BUSY).map((s) => s.startTime);
+    expect(busy.filter((t) => free.has(t))).toEqual([]);
+  });
+
+  it("together with the free slots, covers every row the grid draws", () => {
+    // The property the grid depends on. If these two lists don't partition the
+    // candidates, a cell exists that is neither offered nor explained — it just
+    // sits there grey, on a search that was supposed to show everything.
+    const free = slots(ONE_BUSY).map((s) => s.startTime);
+    const busy = busySlots(ONE_BUSY).map((s) => s.startTime);
+    const everything = slots({ participants: [{ email: "nobody@example.com", busy: [] }] });
+    expect(new Set([...free, ...busy])).toEqual(new Set(everything.map((s) => s.startTime)));
+  });
+
+  it("returns nothing when nobody is selected", () => {
+    // Same trap as computeCollectiveSlots: "everyone is busy" would be as wrong
+    // an answer here as "everyone is free" is there.
+    expect(busySlots({ participants: [] })).toEqual([]);
   });
 });
 

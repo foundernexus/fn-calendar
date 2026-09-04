@@ -42,11 +42,12 @@ function connection(
   };
 }
 
-async function search(connections = [connection()], leadMinutes?: number) {
+async function search(connections = [connection()], leadMinutes?: number, includeBusy?: boolean) {
   const { getCollectiveAvailability } = await import("@/lib/calendar/availability");
   return getCollectiveAvailability({
     connections,
     leadMinutes,
+    includeBusy,
     startTime: at("2026-08-19T07:00:00Z"),
     endTime: at("2026-08-20T06:59:00Z"),
     durationMinutes: 60,
@@ -56,6 +57,59 @@ async function search(connections = [connection()], leadMinutes?: number) {
     excludeWeekends: true,
   });
 }
+
+/** 10:00–11:00 PT on the searched day. */
+const MEETING = [{ start: at("2026-08-19T17:00:00Z"), end: at("2026-08-19T18:00:00Z") }];
+
+describe("booking over busy time", () => {
+  it("says nothing about who's busy unless asked", async () => {
+    // The default answer has to stay the answer it always was. A search that
+    // starts volunteering busy times changes what every existing caller renders.
+    fetchBusy.mockResolvedValue(MEETING);
+    expect((await search()).busySlots).toEqual([]);
+  });
+
+  it("names whose calendar is busy when asked", async () => {
+    fetchBusy.mockResolvedValue(MEETING);
+
+    const result = await search([connection({ grantEmail: "held@example.com" })], undefined, true);
+
+    const tenAm = result.busySlots.find((s) => s.startTime === at("2026-08-19T17:00:00Z"));
+    expect(tenAm?.busyEmails).toEqual(["held@example.com"]);
+    // And the free list is untouched by any of it — the two never overlap.
+    expect(result.slots.map((s) => s.startTime)).not.toContain(at("2026-08-19T17:00:00Z"));
+  });
+
+  it("reports somebody busy under the buffer they set for themselves", async () => {
+    // A buffer widens busy time before any of this runs, so the 11:00 slot that
+    // touches a 10:00–11:00 meeting is busy-with-a-name rather than silently
+    // absent. Consistent in both directions: it is the same padding the free
+    // list is computed from.
+    fetchBusy.mockResolvedValue(MEETING);
+
+    const result = await search(
+      [connection({ grantEmail: "padded@example.com", bufferAfterMinutes: 30 })],
+      undefined,
+      true
+    );
+
+    expect(result.busySlots.map((s) => s.startTime)).toContain(at("2026-08-19T18:00:00Z"));
+  });
+
+  it("keeps counting droppedByLead over free slots only", async () => {
+    // The reason busySlots is a field of its own. droppedByLead, blockers and
+    // everything the route builds on them count FREE time; if asking for busy
+    // slots moved that number, every diagnostic on the page would quietly start
+    // answering a different question.
+    fetchBusy.mockResolvedValue(MEETING);
+
+    const without = await search([connection()], 15);
+    const with_ = await search([connection()], 15, true);
+
+    expect(with_.droppedByLead).toBe(without.droppedByLead);
+    expect(with_.slots.map((s) => s.startTime)).toEqual(without.slots.map((s) => s.startTime));
+  });
+});
 
 describe("collective availability", () => {
   it("returns slots when every calendar is clear", async () => {
