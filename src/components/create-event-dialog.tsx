@@ -368,19 +368,20 @@ export function CreateEventDialog({
               anybody asking them, and naming them is what makes that a decision
               rather than an accident. */}
           {overBusy && (
-            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
-              {busyNames.join(", ")} {busyNames.length === 1 ? "is" : "are"} already busy at this
-              time. Booking this puts a second thing in their calendar — whatever is already there
-              stays exactly as it is, and they aren&apos;t asked first.
+            // Reassurance, not a warning. Reaching this dialog at all means the
+            // only calendar in the way was the lead's own — the grid never
+            // opens it otherwise — so the thing worth saying is that everybody
+            // being invited IS free, and that the existing hold survives.
+            <div className="rounded-lg border border-border bg-secondary/40 p-3 text-sm text-muted-foreground">
+              You&apos;re already busy at this time
+              {guestNames.length > 0 && <>, but {guestNames.join(", ")} {guestNames.length === 1 ? "is" : "are"} free</>}.
+              This is booked alongside what&apos;s already in your calendar — that entry isn&apos;t
+              touched, moved or cancelled.
             </div>
           )}
           <DialogFooter>
             <Button type="submit" disabled={submitting}>
-              {/* States what actually happens rather than "Create event". One
-                  deliberate act with an honest label beats a second tick box —
-                  the checkbox on the search form and the click on a dashed cell
-                  are already two. */}
-              {submitting ? "Creating…" : overBusy ? "Book over it anyway" : "Create event"}
+              {submitting ? "Creating…" : "Create event"}
             </Button>
           </DialogFooter>
         </form>

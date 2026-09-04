@@ -39,7 +39,7 @@ export function AvailabilityGrid({
   excludeWeekends,
   timezone,
   ownEvents = [],
-  viewerMemberId = null,
+  leadMemberId = null,
   onSelectSlot,
   onSelectBooked,
   onShiftRange,
@@ -54,10 +54,10 @@ export function AvailabilityGrid({
    * the question the grid couldn't: not "am I free at 3" but "what is it that
    * I'm not free for". */
   ownEvents?: OwnEventSummary[];
-  /** Whoever is looking at this grid, if they're a member at all. Only used to
-   * decide whether a busy cell is busy with just them — see the cell itself.
-   * Null is safe: it simply falls back to naming whoever is busy. */
-  viewerMemberId?: number | null;
+  /** The session lead for the search that produced these slots. A busy cell is
+   * only offerable when THEY are the only person busy in it — see the cell.
+   * Null is safe: every busy cell then stays shut, naming who is busy. */
+  leadMemberId?: number | null;
   startDate: string;
   endDate: string;
   workingHoursStart: string;
@@ -298,6 +298,39 @@ export function AvailabilityGrid({
                   const busy = slot ? undefined : busyByCell.get(`${day}_${time}`);
                   if (busy) {
                     const who = busy.busyNames.join(", ");
+                    // The only thing standing in the way is the session lead's
+                    // own calendar — a hold they made themselves, somewhere
+                    // else. That is the one case worth offering, and the whole
+                    // reason this exists: the block IS the session.
+                    //
+                    // The moment anybody ELSE is busy, the cell stays shut. Not
+                    // because it couldn't be booked, but because nobody wants
+                    // to: the question at these cells is "is this person free",
+                    // and "no" is a complete answer. Offering a button there
+                    // would invite exactly the double-booking nobody asked for.
+                    const onlyTheLead =
+                      leadMemberId !== null &&
+                      busy.busyMemberIds.length > 0 &&
+                      busy.busyMemberIds.every((id) => id === leadMemberId);
+
+                    if (!onlyTheLead) {
+                      // Shut, but not silent. Naming who is busy is the entire
+                      // point — it turns a dead grey square into the answer.
+                      return (
+                        <button
+                          key={`${day}_${time}`}
+                          type="button"
+                          disabled
+                          title={`${who} ${busy.busyNames.length === 1 ? "is" : "are"} busy`}
+                          aria-label={`${formatDateLabel(day)} ${formatTimeLabel(time)} — ${who} ${
+                            busy.busyNames.length === 1 ? "is" : "are"
+                          } busy`}
+                          className="min-w-0 truncate border-b border-l border-border bg-secondary px-1.5 py-1.5 text-left text-[11px] leading-tight text-muted-foreground"
+                        >
+                          {who}
+                        </button>
+                      );
+                    }
                     // Whether the ONLY person busy here is the one reading the
                     // screen. That is the case this whole feature was built for
                     // — a hold you made elsewhere, sitting on your own calendar
@@ -310,26 +343,18 @@ export function AvailabilityGrid({
                     // others here", and a cell reading "Edan Shahar" answers a
                     // question nobody asked while hiding the one they did.
                     //
-                    // Compared by id, not by name: the viewer isn't necessarily
-                    // a participant in the search, and matching on the title
-                    // alone would put their own event over somebody else's busy
-                    // time.
-                    const onlyTheViewer =
-                      viewerMemberId !== null &&
-                      busy.busyMemberIds.length === 1 &&
-                      busy.busyMemberIds[0] === viewerMemberId;
                     return (
                       <button
                         key={`${day}_${time}`}
                         type="button"
                         onClick={() => onSelectSlot(busy)}
-                        title={`${who} ${busy.busyNames.length === 1 ? "is" : "are"} busy — click to book over it`}
+                        title={`Only your own calendar is busy${mine ? ` (${mine})` : ""} — everyone else is free. Click to book.`}
                         // Spelled out, because the visual difference between
                         // this cell and the two beside it is the entire safety
                         // mechanism and a screen reader gets none of it.
-                        aria-label={`${formatDateLabel(day)} ${formatTimeLabel(time)} — ${who} ${
-                          busy.busyNames.length === 1 ? "is" : "are"
-                        } busy. Click to book over it.`}
+                        aria-label={`${formatDateLabel(day)} ${formatTimeLabel(time)} — only your own calendar is busy${
+                          mine ? `, with ${mine}` : ""
+                        }. Everyone else is free. Click to book.`}
                         // Deliberately not bg-accent and not hover:bg-primary:
                         // those two are the whole visual vocabulary of "everyone
                         // free", and this cell must never be mistaken for one.
@@ -338,7 +363,7 @@ export function AvailabilityGrid({
                         // glance rather than by shade.
                         className="min-w-0 truncate border-b border-l border-border bg-secondary px-1.5 py-1.5 text-left text-[11px] leading-tight text-muted-foreground outline-1 -outline-offset-2 outline-dashed outline-foreground/40 transition-colors hover:bg-secondary/60 hover:text-foreground"
                       >
-                        {onlyTheViewer && mine ? mine : who}
+                        {mine ?? who}
                       </button>
                     );
                   }

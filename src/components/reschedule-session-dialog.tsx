@@ -164,18 +164,18 @@ export function RescheduleSessionDialog({
             dialog in and be turned away by a toast. See the booking route for
             why a series is different. */}
         {overBusy && (
-          <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+          <div className={`rounded-lg border p-3 text-sm ${isSeries ? "border-destructive/20 bg-destructive/10 text-destructive" : "border-border bg-secondary/40 text-muted-foreground"}`}>
             {isSeries ? (
               <>
-                {busyNames.join(", ")} {busyNames.length === 1 ? "is" : "are"} busy at this time,
-                and a repeating session can&apos;t be moved onto it. Pick a time that&apos;s clear,
-                or cancel this date and book a one-off over it.
+                You&apos;re busy at this time, and a repeating session can&apos;t be moved onto
+                it. Pick a time that&apos;s clear, or cancel this date and book a one-off
+                alongside your hold.
               </>
             ) : (
               <>
-                {busyNames.join(", ")} {busyNames.length === 1 ? "is" : "are"} already busy at this
-                time. Moving it here puts the session alongside whatever is already in their
-                calendar, and they aren&apos;t asked first.
+                You&apos;re already busy at this time. The session is moved alongside what&apos;s
+                already in your calendar — that entry isn&apos;t touched. Everyone else on the
+                session is free then.
               </>
             )}
           </div>

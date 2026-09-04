@@ -104,12 +104,6 @@ export function FindATimeForm({
       ? facilitators.find((m) => m.email.toLowerCase() === signedInEmail.toLowerCase())
       : undefined) ?? facilitators[0];
 
-  // Looked up across ALL members, not just facilitators: an admin who can't lead
-  // sessions is still looking at their own calendar in the grid below.
-  const viewerMemberId = signedInEmail
-    ? (members.find((m) => m.email.toLowerCase() === signedInEmail.toLowerCase())?.id ?? null)
-    : null;
-
   const [organizerMemberIdState, setOrganizerMemberId] = useState<number | null>(
     defaultOrganizer?.id ?? null
   );
@@ -658,9 +652,9 @@ export function FindATimeForm({
         </label>
 
         {/* For a session arranged somewhere else — a hold made on someone's
-            Calendly, a placeholder put in by hand — where the block on the
-            calendar IS the session being booked. Being busy is not always a
-            reason not to book. */}
+            Calendly, a placeholder put in by hand — where the block on your own
+            calendar IS the session you're trying to fill. Your own busy time is
+            the only thing this ignores; everybody else's still counts. */}
         <label className="flex items-start gap-2 text-sm text-foreground">
           <Checkbox
             className="mt-0.5"
@@ -668,10 +662,10 @@ export function FindATimeForm({
             onCheckedChange={(checked) => setAllowBusy(!!checked)}
           />
           <span>
-            Allow booking over busy time
+            Ignore times I&apos;ve blocked myself
             <span className="block text-xs text-muted-foreground">
-              Also offers times someone&apos;s already busy, marked separately. You&apos;ll be told
-              whose calendar before anything goes out.
+              For a session you arranged elsewhere. Shows who else is free at those times, so you
+              can still invite them. Nobody else&apos;s calendar is overruled.
             </span>
           </span>
         </label>
@@ -686,7 +680,6 @@ export function FindATimeForm({
         <ResultsList
           result={result}
           searchedParams={searchedParams}
-          viewerMemberId={viewerMemberId}
           onSelectSlot={setDialogSlot}
           onSelectBooked={setCancelTarget}
           onShiftRange={shiftRange}

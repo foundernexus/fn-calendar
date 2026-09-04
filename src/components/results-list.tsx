@@ -124,16 +124,12 @@ export type SearchedParams = {
 export function ResultsList({
   result,
   searchedParams,
-  viewerMemberId = null,
   onSelectSlot,
   onSelectBooked,
   onShiftRange,
 }: {
   result: AvailabilityResult;
   searchedParams: SearchedParams;
-  /** Whoever is looking at the page — passed straight through to the grid, which
-   * uses it to tell "only I'm busy here" apart from "somebody else is too". */
-  viewerMemberId?: number | null;
   onSelectSlot: (slot: Slot) => void;
   onSelectBooked: (booked: BookedSlot) => void;
   /** Pages the searched range a week either way — see AvailabilityGrid. */
@@ -257,7 +253,7 @@ export function ResultsList({
             {searchedParams.allowBusy && (
               <span className="flex items-center gap-1.5">
                 <span className="inline-block size-3 shrink-0 rounded-xs border border-dashed border-foreground/40 bg-secondary" />
-                Someone&apos;s busy — click to book over it
+                Only your calendar is busy — everyone else is free
               </span>
             )}
             <span className="flex items-center gap-1.5">
@@ -279,7 +275,7 @@ export function ResultsList({
             excludeWeekends={searchedParams.excludeWeekends}
             timezone={searchedParams.timezone}
             ownEvents={result.ownEvents ?? []}
-            viewerMemberId={viewerMemberId}
+            leadMemberId={searchedParams.organizerMemberId}
             onSelectSlot={onSelectSlot}
             onSelectBooked={onSelectBooked}
             onShiftRange={onShiftRange}
